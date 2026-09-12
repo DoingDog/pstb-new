@@ -679,6 +679,151 @@ describe("content save and history ring", () => {
     });
   });
 
+  it("reconciles a near-expiry interrupted save with the physical expiration applied by that save", async () => {
+    const kv = new RecordingKV();
+    const initial = service(kv);
+    let paste = await initial.create({ content: "v1", customId: "reconcile-expiry", expiration: 3_600 }, {});
+    paste = (await initial.updateContent("reconcile-expiry", { content: "v2", version: paste.version })).paste;
+    const saving = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    kv.injectFailure(kv.operations.length + 7);
+
+    await expect(saving.updateContent("reconcile-expiry", { content: "v3", version: paste.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      details: { mutationMayHaveApplied: true },
+    });
+    kv.injectFailure();
+    const repairing = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+
+    await expect(repairing.loadContent("reconcile-expiry", undefined)).resolves.toMatchObject({
+      content: "v3",
+      summary: { version: expect.stringMatching(/\.3$/), contentRevision: 3 },
+    });
+
+    expect(kv.operations.slice(before).filter((operation) => operation.type === "put").map((operation) => operation.key)).toEqual([
+      metaKey("reconcile-expiry"),
+    ]);
+    expect(JSON.parse(kv.entries.get(metaKey("reconcile-expiry"))!.value)).toMatchObject({ physicalExpiration: 1_789_261_230 });
+    for (const key of [contentKey("reconcile-expiry"), revisionKey("reconcile-expiry", 1), revisionKey("reconcile-expiry", 0), metaKey("reconcile-expiry")]) {
+      expect(kv.entries.get(key)?.expiration).toBe(1_789_261_230);
+    }
+  });
+
+  it("refreshes all active values before repairing a near-expiry interrupted save that has become unacceptable", async () => {
+    const kv = new RecordingKV();
+    const initial = service(kv);
+    let paste = await initial.create({ content: "v1", customId: "repair-refresh", expiration: 3_600 }, {});
+    paste = (await initial.updateContent("repair-refresh", { content: "v2", version: paste.version })).paste;
+    const saving = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    kv.injectFailure(kv.operations.length + 7);
+
+    await expect(saving.updateContent("repair-refresh", { content: "v3", version: paste.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      details: { mutationMayHaveApplied: true },
+    });
+    kv.injectFailure();
+    const repairing = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:31.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+
+    await expect(repairing.loadContent("repair-refresh", undefined)).resolves.toMatchObject({ content: "v3" });
+
+    expect(kv.operations.slice(before).filter((operation) => operation.type === "put").map((operation) => operation.key)).toEqual([
+      contentKey("repair-refresh"),
+      revisionKey("repair-refresh", 1),
+      revisionKey("repair-refresh", 0),
+      metaKey("repair-refresh"),
+    ]);
+    expect(JSON.parse(kv.entries.get(metaKey("repair-refresh"))!.value)).toMatchObject({ physicalExpiration: 1_789_261_231 });
+    for (const key of [contentKey("repair-refresh"), revisionKey("repair-refresh", 1), revisionKey("repair-refresh", 0), metaKey("repair-refresh")]) {
+      expect(kv.entries.get(key)?.expiration).toBe(1_789_261_231);
+    }
+  });
+
+  type InterruptedContentSave = { kv: RecordingKV; pasteService: PasteService; id: string };
+
+  async function interruptedContentSave(): Promise<InterruptedContentSave> {
+    const kv = new RecordingKV();
+    const pasteService = service(kv);
+    const id = "reconcile-proof";
+    const created = await pasteService.create({ content: "v1", customId: id, expiration: "permanent" }, {});
+    kv.injectFailure(kv.operations.length + 5);
+    await expect(pasteService.updateContent(id, { content: "v2", version: created.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      details: { mutationMayHaveApplied: true },
+    });
+    kv.injectFailure();
+    return { kv, pasteService, id };
+  }
+
+  function mutateMainMarker(state: InterruptedContentSave, mutate: (marker: Record<string, unknown>) => Record<string, unknown>): void {
+    const entry = state.kv.entries.get(state.id)!;
+    entry.metadata = mutate(entry.metadata as Record<string, unknown>);
+  }
+
+  function mutateSiblingMetadata(state: InterruptedContentSave, mutate: (metadata: Record<string, unknown>) => void): void {
+    const entry = state.kv.entries.get(metaKey(state.id))!;
+    const metadata = JSON.parse(entry.value) as Record<string, unknown>;
+    mutate(metadata);
+    entry.value = JSON.stringify(metadata);
+  }
+
+  function mutateCommitPrevious(state: InterruptedContentSave, mutate: (previous: Record<string, unknown>) => Record<string, unknown>): void {
+    mutateMainMarker(state, (marker) => {
+      const commit = marker.commit as Record<string, unknown>;
+      return { ...marker, commit: { ...commit, previous: mutate(commit.previous as Record<string, unknown>) } };
+    });
+  }
+
+  function mutateRevisionMarker(state: InterruptedContentSave, mutate: (marker: Record<string, unknown>) => Record<string, unknown>): void {
+    const entry = state.kv.entries.get(revisionKey(state.id, 0))!;
+    entry.metadata = mutate(entry.metadata as Record<string, unknown>);
+  }
+
+  const reconciliationProofMutations: Array<[string, (state: InterruptedContentSave) => void]> = [
+    ["a revision gap", (state) => mutateMainMarker(state, (marker) => ({ ...marker, contentRevision: 3 }))],
+    ["a revision in the wrong direction", (state) => mutateSiblingMetadata(state, (metadata) => { metadata.contentRevision = 3; })],
+    ["a generation mismatch", (state) => mutateMainMarker(state, (marker) => ({ ...marker, generation: "00000000-0000-4000-8000-000000000002" }))],
+    ["a main byte mismatch", (state) => mutateMainMarker(state, (marker) => ({ ...marker, byteLength: 1 }))],
+    ["a missing commit", (state) => mutateMainMarker(state, (marker) => ({ ...marker, commit: null }))],
+    ["a commit previous revision mismatch", (state) => mutateCommitPrevious(state, (previous) => ({ ...previous, revision: 2 }))],
+    ["a commit previous slot mismatch", (state) => mutateCommitPrevious(state, (previous) => ({ ...previous, slot: 1 }))],
+    ["a commit previous savedAt mismatch", (state) => mutateCommitPrevious(state, (previous) => ({ ...previous, savedAt: "2026-09-12T00:00:00.000Z" }))],
+    ["a commit previous supersededAt mismatch", (state) => mutateCommitPrevious(state, (previous) => ({ ...previous, supersededAt: "2026-09-14T00:00:00.000Z" }))],
+    ["a commit previous byteLength mismatch", (state) => mutateCommitPrevious(state, (previous) => ({ ...previous, byteLength: 1 }))],
+    ["a missing predecessor slot", (state) => { state.kv.entries.delete(revisionKey(state.id, 0)); }],
+    ["a revision marker generation mismatch", (state) => mutateRevisionMarker(state, (marker) => ({ ...marker, generation: "00000000-0000-4000-8000-000000000002" }))],
+    ["a revision marker revision mismatch", (state) => mutateRevisionMarker(state, (marker) => ({ ...marker, revision: 2 }))],
+    ["a revision marker savedAt mismatch", (state) => mutateRevisionMarker(state, (marker) => ({ ...marker, savedAt: "2026-09-12T00:00:00.000Z" }))],
+    ["a revision marker supersededAt mismatch", (state) => mutateRevisionMarker(state, (marker) => ({ ...marker, supersededAt: "2026-09-14T00:00:00.000Z" }))],
+    ["a revision marker byteLength mismatch", (state) => mutateRevisionMarker(state, (marker) => ({ ...marker, byteLength: 1 }))],
+    ["a revision body byte mismatch", (state) => { state.kv.entries.get(revisionKey(state.id, 0))!.value = "x"; }],
+  ];
+
+  it.each(reconciliationProofMutations)("does not repair reconciliation with %s", async (_name, mutate) => {
+    const state = await interruptedContentSave();
+    mutate(state);
+    const before = state.kv.operations.length;
+
+    await expect(state.pasteService.loadContent(state.id, undefined)).rejects.toMatchObject({ code: "STORAGE_INCONSISTENT", status: 503 });
+    expect(state.kv.operations.slice(before).some((operation) => operation.type === "put" || operation.type === "delete")).toBe(false);
+  });
+
   it("fails closed for every non-provable one-revision marker mismatch", async () => {
     const kv = new RecordingKV();
     const pasteService = service(kv);
@@ -782,15 +927,96 @@ describe("settings, password, expiry, and delete mutations", () => {
     await expect(pasteService.updatePassword("history1", { newPassword: "x".repeat(129) })).rejects.toMatchObject({ code: "VALIDATION_FAILED", status: 422 });
   });
 
-  it("reports write failures and says whether the metadata-last mutation may have applied", async () => {
-    for (const failureOffset of [3, 5, 6]) {
-      const { kv, pasteService } = await withHistory(1);
-      kv.injectFailure(kv.operations.length + failureOffset);
-      await expect(pasteService.updateSettings("history1", { expiration: 60 })).rejects.toMatchObject({
-        code: "STORAGE_WRITE_FAILED",
-        details: { mutationMayHaveApplied: failureOffset === 6 },
-      });
+  it.each([0, 1, 2, 3])("refreshes current and %i active revision values before changing a near-expiry password", async (historyCount) => {
+    const { kv, paste } = await withHistory(historyCount);
+    const id = `history${historyCount}`;
+    const nearExpiry = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+
+    const result = await nearExpiry.updatePassword(id, { newPassword: "next", version: paste.version });
+
+    expect(result).toMatchObject({ changed: true, paste: { protected: true, contentRevision: historyCount + 1 } });
+    const revisionKeys = JSON.parse(kv.entries.get(metaKey(id))!.value).history.entries.map((entry: { slot: number }) => revisionKey(id, entry.slot));
+    expect(kv.operations.slice(before).filter((operation) => operation.type === "put").map((operation) => operation.key)).toEqual([
+      contentKey(id),
+      ...revisionKeys,
+      metaKey(id),
+    ]);
+    for (const key of [contentKey(id), ...revisionKeys, metaKey(id)]) {
+      expect(kv.entries.get(key)?.expiration).toBe(1_789_261_230);
     }
+    expect(JSON.parse(kv.entries.get(metaKey(id))!.value)).toMatchObject({ physicalExpiration: 1_789_261_230 });
+  });
+
+  const changedExpirySettingsFailures = [0, 1, 2, 3].flatMap((historyCount) => {
+    const metadataOffset = 4 + historyCount * 2;
+    return [3, ...Array.from({ length: historyCount }, (_, index) => 5 + index * 2), metadataOffset].map((failureOffset) => [
+      historyCount,
+      failureOffset,
+      failureOffset === metadataOffset,
+    ] as const);
+  });
+
+  it.each(changedExpirySettingsFailures)("reports changed-expiry settings failure for %i history revisions at operation %i", async (historyCount, failureOffset, mutationMayHaveApplied) => {
+    const { kv, pasteService } = await withHistory(historyCount);
+    const id = `history${historyCount}`;
+    const before = kv.operations.length;
+    const revisionKeys = JSON.parse(kv.entries.get(metaKey(id))!.value).history.entries.map((entry: { slot: number }) => revisionKey(id, entry.slot));
+    const expectedOperations = [
+      `getWithMetadata:${contentKey(id)}`,
+      `get:${metaKey(id)}`,
+      `put:${contentKey(id)}`,
+      ...revisionKeys.flatMap((key: string) => [`getWithMetadata:${key}`, `put:${key}`]),
+      `put:${metaKey(id)}`,
+    ];
+    kv.injectFailure(before + failureOffset);
+
+    await expect(pasteService.updateSettings(id, { expiration: 60 })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      status: 503,
+      details: { retryable: true, mutationMayHaveApplied },
+    });
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual(expectedOperations.slice(0, failureOffset));
+  });
+
+  const changedExpiryPasswordFailures = [0, 1, 2, 3].flatMap((historyCount) => {
+    const metadataOffset = 4 + historyCount * 2;
+    return [3, ...Array.from({ length: historyCount }, (_, index) => 5 + index * 2), metadataOffset].map((failureOffset) => [
+      historyCount,
+      failureOffset,
+      failureOffset === metadataOffset,
+    ] as const);
+  });
+
+  it.each(changedExpiryPasswordFailures)("reports changed-expiry password failure for %i history revisions at operation %i", async (historyCount, failureOffset, mutationMayHaveApplied) => {
+    const { kv, paste } = await withHistory(historyCount);
+    const id = `history${historyCount}`;
+    const nearExpiry = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+    const revisionKeys = JSON.parse(kv.entries.get(metaKey(id))!.value).history.entries.map((entry: { slot: number }) => revisionKey(id, entry.slot));
+    const expectedOperations = [
+      `getWithMetadata:${contentKey(id)}`,
+      `get:${metaKey(id)}`,
+      `put:${contentKey(id)}`,
+      ...revisionKeys.flatMap((key: string) => [`getWithMetadata:${key}`, `put:${key}`]),
+      `put:${metaKey(id)}`,
+    ];
+    kv.injectFailure(before + failureOffset);
+
+    await expect(nearExpiry.updatePassword(id, { newPassword: "next", version: paste.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      status: 503,
+      details: { retryable: true, mutationMayHaveApplied },
+    });
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual(expectedOperations.slice(0, failureOffset));
   });
 
   it("authorizes and version-checks delete before deleting main, three slots, and metadata", async () => {
@@ -907,6 +1133,8 @@ describe("history reads", () => {
 });
 
 describe("first-mutation legacy migration", () => {
+  const legacyCreatedAt = "2026-09-12T23:30:00.000Z";
+
   function legacy(kv = new RecordingKV(), id = "legacy-mutate", metadata: unknown = {}) {
     kv.seed(id, "old", metadata);
     return { kv, pasteService: service(kv), id };
@@ -916,7 +1144,7 @@ describe("first-mutation legacy migration", () => {
     const { kv, pasteService, id } = legacy(undefined, "legacy-content", {
       title: "Old title",
       country: "US",
-      createdAt: Date.parse("2026-09-13T00:00:00.000Z"),
+      createdAt: Date.parse(legacyCreatedAt),
       expiration: 3_600,
     });
     const before = kv.operations.length;
@@ -929,7 +1157,8 @@ describe("first-mutation legacy migration", () => {
         version: expect.stringMatching(/^00000000-0000-4000-8000-000000000001\.1$/),
         contentRevision: 2,
         title: "Old title",
-        expiresAt: "2026-09-13T01:00:00.000Z",
+        createdAt: legacyCreatedAt,
+        expiresAt: "2026-09-13T00:30:00.000Z",
         createdCountry: "US",
       },
     });
@@ -941,9 +1170,9 @@ describe("first-mutation legacy migration", () => {
     expect(JSON.parse(kv.entries.get(metaKey(id))!.value)).toMatchObject({
       versionCounter: 1,
       contentRevision: 2,
-      createdAt: now.toISOString(),
+      createdAt: legacyCreatedAt,
       currentSavedAt: now.toISOString(),
-      history: { nextSlot: 1, entries: [expect.objectContaining({ revision: 1, slot: 0 })] },
+      history: { nextSlot: 1, entries: [expect.objectContaining({ revision: 1, slot: 0, savedAt: legacyCreatedAt })] },
     });
     expect(kv.entries.get(revisionKey(id, 0))?.value).toBe("old");
     expect(kv.entries.get(contentKey(id))?.value).toBe("new");
@@ -967,19 +1196,64 @@ describe("first-mutation legacy migration", () => {
     expect(kv.entries.get(contentKey(id))?.expiration).toBeUndefined();
   });
 
-  it("combines a password mutation with migration as one version and starts without history", async () => {
-    const { kv, pasteService, id } = legacy(undefined, "legacy-password", { createdAt: Date.parse(now.toISOString()), expiration: 60 });
+  it("combines a password mutation with migration as one version and preserves a legacy timestamp", async () => {
+    const { kv, pasteService, id } = legacy(undefined, "legacy-password", { createdAt: Date.parse(legacyCreatedAt), expiration: 3_600 });
 
     const result = await pasteService.updatePassword(id, { newPassword: "new-password", version: "legacy" });
 
-    expect(result).toMatchObject({ changed: true, paste: { version: expect.stringMatching(/\.1$/), protected: true, contentRevision: 1 } });
+    expect(result).toMatchObject({ changed: true, paste: { version: expect.stringMatching(/\.1$/), protected: true, contentRevision: 1, createdAt: legacyCreatedAt, expiresAt: "2026-09-13T00:30:00.000Z" } });
     expect(JSON.parse(kv.entries.get(metaKey(id))!.value)).toMatchObject({
       password: "new-password",
+      createdAt: legacyCreatedAt,
+      updatedAt: now.toISOString(),
+      currentSavedAt: legacyCreatedAt,
       versionCounter: 1,
       contentRevision: 1,
       history: { nextSlot: 0, entries: [] },
     });
     expect(kv.entries.has(revisionKey(id, 0))).toBe(false);
+  });
+
+  const legacyMigrationFailures: Array<["content" | "settings" | "password", number, boolean]> = [
+    ["content", 3, false],
+    ["content", 4, true],
+    ["content", 5, true],
+    ["settings", 3, false],
+    ["settings", 4, true],
+    ["password", 3, false],
+    ["password", 4, true],
+  ];
+
+  it.each(legacyMigrationFailures)("reports legacy %s migration failure after write %i", async (kind, failureOffset, mutationMayHaveApplied) => {
+    const id = `legacy-${kind}-${failureOffset}`;
+    const { kv, pasteService } = legacy(undefined, id, { createdAt: Date.parse(legacyCreatedAt), expiration: 3_600 });
+    const expectedOperations = kind === "content"
+      ? [
+          `getWithMetadata:${id}`,
+          `get:${metaKey(id)}`,
+          `put:${metaKey(id)}`,
+          `put:${revisionKey(id, 0)}`,
+          `put:${contentKey(id)}`,
+        ]
+      : [
+          `getWithMetadata:${id}`,
+          `get:${metaKey(id)}`,
+          `put:${metaKey(id)}`,
+          `put:${contentKey(id)}`,
+        ];
+    const action = kind === "content"
+      ? () => pasteService.updateContent(id, { content: "new", version: "legacy" })
+      : kind === "settings"
+        ? () => pasteService.updateSettings(id, { title: "new", version: "legacy" })
+        : () => pasteService.updatePassword(id, { newPassword: "new", version: "legacy" });
+    kv.injectFailure(failureOffset);
+
+    await expect(action()).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      status: 503,
+      details: { retryable: true, mutationMayHaveApplied },
+    });
+    expect(kv.operations.map((operation) => `${operation.type}:${operation.key}`)).toEqual(expectedOperations.slice(0, failureOffset));
   });
 
   it("requires legacy or omitted version, leaves a legacy content no-op unwritten, and never migrates delete", async () => {
