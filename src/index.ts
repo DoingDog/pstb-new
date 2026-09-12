@@ -1,5 +1,8 @@
+import { createHttpApp } from "./http";
+import type { Env } from "./types";
+
 export default {
-  fetch() {
-    return new Response(null, { status: 404 });
+  fetch(request, env) {
+    return createHttpApp(env).fetch(request);
   },
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<Env>;
