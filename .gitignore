@@ -4,3 +4,4 @@ dist/
 .wrangler-dist/
 playwright-report/
 test-results/
+src/generated/assets.ts.*.tmp

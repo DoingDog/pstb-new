@@ -1,11 +1,12 @@
 import { build } from "esbuild";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const assetsDirectory = resolve(root, "dist/assets");
 const generatedAssetsPath = resolve(root, "src/generated/assets.ts");
+const immutableAssetHeaders = "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 function outputForEntry(metafile, entryPoint) {
   const outputPath = Object.entries(metafile.outputs).find(
@@ -56,6 +57,29 @@ function removeLineComments(source) {
   return output;
 }
 
+async function cleanupGeneratedAssetsTemporaryFiles() {
+  const generatedDirectory = dirname(generatedAssetsPath);
+  const temporaryFilePattern = /^assets\.ts\.\d+\.tmp$/;
+  const files = await readdir(generatedDirectory);
+
+  await Promise.all(
+    files
+      .filter((file) => temporaryFilePattern.test(file))
+      .map((file) => rm(resolve(generatedDirectory, file), { force: true })),
+  );
+}
+
+async function writeStaticAssetHeaders() {
+  const headersPath = resolve(assetsDirectory, "_headers");
+  const temporaryPath = `${headersPath}.${process.pid}.tmp`;
+
+  await writeFile(temporaryPath, immutableAssetHeaders);
+  await rename(temporaryPath, headersPath);
+  if ((await readFile(headersPath, "utf8")) !== immutableAssetHeaders) {
+    throw new Error("Static asset headers do not match the build contract");
+  }
+}
+
 async function writeGeneratedAssets(assetPaths) {
   const contents = `export const assetPaths = Object.freeze({\n  appJs: ${JSON.stringify(assetPaths.appJs)},\n  appCss: ${JSON.stringify(assetPaths.appCss)},\n  diffWorker: ${JSON.stringify(assetPaths.diffWorker)},\n});\n`;
   const temporaryPath = `${generatedAssetsPath}.${process.pid}.tmp`;
@@ -68,19 +92,41 @@ async function writeGeneratedAssets(assetPaths) {
 async function assertWranglerConfig() {
   const config = JSON.parse(removeLineComments(await readFile(resolve(root, "wrangler.jsonc"), "utf8")));
   const [namespace] = config.kv_namespaces ?? [];
+  const namespaceKeys = Object.keys(namespace ?? {}).sort();
 
   if (
     config.name !== "cf-pastebin" ||
     config.main !== "src/index.ts" ||
     config.assets?.directory !== "./dist/assets" ||
     config.kv_namespaces?.length !== 1 ||
+    namespaceKeys.length !== 2 ||
+    namespaceKeys[0] !== "binding" ||
+    namespaceKeys[1] !== "id" ||
     namespace?.binding !== "PASTE_DB" ||
-    namespace.id !== "11111111111111111111111111111111"
+    namespace?.id !== "11111111111111111111111111111111"
   ) {
     throw new Error("wrangler.jsonc does not match the build contract");
   }
 }
 
+async function assertTestToolchainConfig() {
+  const tsconfig = JSON.parse(await readFile(resolve(root, "tsconfig.json"), "utf8"));
+  const expectedTypes = ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest/globals"];
+  const vitestConfig = await readFile(resolve(root, "vitest.config.ts"), "utf8");
+
+  if (
+    JSON.stringify(tsconfig.compilerOptions?.types) !== JSON.stringify(expectedTypes) ||
+    !vitestConfig.includes('import { cloudflareTest } from "@cloudflare/vitest-plugin";') ||
+    !vitestConfig.includes('cloudflareTest({') ||
+    !vitestConfig.includes('configPath: "./wrangler.jsonc",') ||
+    !/test:\s*\{\s*include:\s*\["src\/\*\*\/\*.test\.ts"\],?\s*\}/s.test(vitestConfig)
+  ) {
+    throw new Error("Vitest and TypeScript do not match the build contract");
+  }
+}
+
+await mkdir(dirname(generatedAssetsPath), { recursive: true });
+await cleanupGeneratedAssetsTemporaryFiles();
 await rm(assetsDirectory, { force: true, recursive: true });
 
 const diffEntryPoint = resolve(root, "src/client/diff.ts");
@@ -116,9 +162,11 @@ if (!appCssOutput) {
   throw new Error("Missing CSS bundle for app entry");
 }
 
+await writeStaticAssetHeaders();
 await writeGeneratedAssets({
   appJs: publicAssetPath(appJsOutput),
   appCss: publicAssetPath(appCssOutput),
   diffWorker,
 });
 await assertWranglerConfig();
+await assertTestToolchainConfig();
