@@ -113,10 +113,52 @@ describe("application documents", () => {
       content: "## Heading\n\n<script>literal</script>",
     });
 
-    expect(text).toContain('<section role="tabpanel" data-panel="view"><pre class="paste-content">exact\r\n&lt;script&gt;literal&lt;/script&gt;\n  </pre></section>');
+    expect(text).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><pre class="paste-content">exact\r\n&lt;script&gt;literal&lt;/script&gt;\n  </pre></section>');
     expect(text).not.toContain("<script>literal</script>");
-    expect(markdown).toContain('<section role="tabpanel" data-panel="view"><article class="paste-content"><h2>Heading</h2>\n&lt;script&gt;literal&lt;/script&gt;</article></section>');
+    expect(markdown).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><article class="paste-content"><h2>Heading</h2>\n&lt;script&gt;literal&lt;/script&gt;</article></section>');
     expect(markdown).not.toContain("<script>literal</script>");
+  });
+
+  it("renders a workbench shell with an accessible tab workspace and empty deferred panels", () => {
+    const create = renderCreatePage("en");
+    const html = renderPastePage({ locale: "en", paste, content: "source" });
+
+    expect(create).toContain('<main class="workbench" data-workbench="create">');
+    expect(create).toContain('<aside class="lifecycle-rail" aria-labelledby="lifecycle-title">');
+    expect(create).toContain('class="form-section editor-surface"');
+    expect(html).toContain('<main class="workbench" data-workbench="paste" data-consumed="false">');
+    expect(html).toContain('<button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view">View</button>');
+    expect(html).toContain('<button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">History</button>');
+    expect(html).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">');
+    expect(html).toContain('<section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section>');
+    expect(html).toContain('<section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>');
+  });
+
+  it("derives every paste lifecycle rail entry from the paste summary", () => {
+    const html = renderPastePage({
+      locale: "en",
+      paste: { ...paste, protected: false, viewOnce: false, expiresAt: "2026-09-14T00:00:00.000Z", contentRevision: 4, contentBytes: 321 },
+      content: "source",
+    });
+
+    expect(html).toContain('<code>example</code>');
+    expect(html).toContain('Not protected');
+    expect(html).toContain('Standard');
+    expect(html).toContain('<time datetime="2026-09-14T00:00:00.000Z">2026-09-14T00:00:00.000Z</time>');
+    expect(html).toContain('<code>4</code>');
+    expect(html).toContain('321 bytes');
+  });
+
+  it("renders CSS hooks for the responsive workbench, history, and dialog primitives", () => {
+    const html = renderPastePage({ locale: "en", paste, content: "source" });
+
+    expect(html).toContain('class="workbench"');
+    expect(html).toContain('class="lifecycle-rail"');
+    expect(html).toContain('class="workbench-surface"');
+    expect(html).toContain('class="history-workbench"');
+    expect(html).toContain('class="history-list" data-history-list');
+    expect(html).toContain('class="history-detail" data-history-detail');
+    expect(html).toContain('<dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title">');
   });
 
   it("escapes user text and never puts a supplied password in bootstrap data", () => {
@@ -157,6 +199,17 @@ describe("application documents", () => {
     expect(consumed).not.toContain('href="/file/example"');
   });
 
+  it("keeps a view-once Markdown document local after its content is loaded", () => {
+    const html = renderMarkdownDocument({ locale: "en", paste: { ...paste, viewOnce: true }, content: "# source" });
+    const links = [...html.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
+
+    expect(links).toEqual(["/"]);
+    expect(html).toContain('data-consumed="true"');
+    expect(html).toContain('data-action="copy"');
+    expect(html).not.toContain('data-action="open-source"');
+    expect(html).not.toContain('"links"');
+  });
+
   it("keeps English and Chinese dictionary keys in parity", () => {
     expect(Object.keys(dictionaries.en).sort()).toEqual(Object.keys(dictionaries["zh-CN"]).sort());
   });
@@ -166,6 +219,7 @@ describe("application documents", () => {
     const pages = [
       renderCreatePage(locale),
       renderPastePage({ locale, paste: localizedPaste, content: "source" }),
+      renderPastePage({ locale, paste: { ...localizedPaste, protected: false }, content: "source" }),
       renderPastePage({ locale, paste: { ...localizedPaste, viewOnce: true }, content: "source", consumed: true }),
       renderPasswordPage({ locale, error: "Incorrect password" }),
       renderErrorPage({ locale, error: "Missing paste" }),
