@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const visual = vi.hoisted(() => {
+  interface FakeDoc {
+    markdown: string;
+    eq(other: FakeDoc): boolean;
+  }
+
   interface FakeEditorView {
-    state: { doc: object };
+    state: { doc: FakeDoc };
   }
 
   interface FakeDocumentPlugin {
@@ -11,11 +16,18 @@ const visual = vi.hoisted(() => {
     };
   }
 
+  const fakeDocument = (markdown: string): FakeDoc => ({
+    markdown,
+    eq(other) {
+      return markdown === other.markdown;
+    },
+  });
+
   const state = { instances: [] as FakeCrepe[] };
 
   class FakeCrepe {
     markdown = "";
-    private doc = {};
+    private doc = fakeDocument("");
     private documentPlugin: FakeDocumentPlugin | undefined;
     private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
     readonly editor = {
@@ -30,6 +42,7 @@ const visual = vi.hoisted(() => {
 
     constructor(options: { defaultValue?: string }) {
       this.markdown = options.defaultValue ?? "";
+      this.doc = fakeDocument(this.markdown);
       state.instances.push(this);
     }
 
@@ -44,7 +57,7 @@ const visual = vi.hoisted(() => {
     documentChanged(markdown: string): void {
       const previous = { doc: this.doc };
       this.markdown = markdown;
-      this.doc = {};
+      this.doc = fakeDocument(markdown);
       this.documentView?.update?.({ state: { doc: this.doc } }, previous);
     }
   }
@@ -567,7 +580,7 @@ describe("Markdown and history integration", () => {
     const modes = createAutosaveMarkdownModes({
       autosave: controller,
       source,
-      visualRoot: {} as Node,
+      visualRoot: { childNodes: [], removeChild: vi.fn() } as unknown as Node,
     });
 
     return modes.enterVisual().then(async () => {

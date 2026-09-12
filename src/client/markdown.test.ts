@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const crepe = vi.hoisted(() => {
+  interface FakeDoc {
+    markdown: string;
+    eq(other: FakeDoc): boolean;
+  }
+
   interface FakeEditorView {
-    state: { doc: object };
+    state: { doc: FakeDoc };
   }
 
   interface FakeDocumentPlugin {
@@ -10,6 +15,19 @@ const crepe = vi.hoisted(() => {
       view?(view: FakeEditorView): { update?(view: FakeEditorView, previous: FakeEditorView["state"]): void };
     };
   }
+
+  interface FakeVisualRoot {
+    childNodes: Node[];
+    appendChild(child: Node): Node;
+    removeChild(child: Node): Node;
+  }
+
+  const fakeDocument = (markdown: string): FakeDoc => ({
+    markdown,
+    eq(other) {
+      return markdown === other.markdown;
+    },
+  });
 
   const state = {
     failCreate: false,
@@ -23,7 +41,9 @@ const crepe = vi.hoisted(() => {
     markdown: string;
     getMarkdownCalls = 0;
     destroyed = false;
-    private doc = {};
+    private doc: FakeDoc;
+    private readonly root: FakeVisualRoot;
+    private readonly rootNode = {} as Node;
     private documentPlugin: FakeDocumentPlugin | undefined;
     private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
     private readonly markdownUpdated: Array<() => void> = [];
@@ -37,8 +57,11 @@ const crepe = vi.hoisted(() => {
       },
     };
 
-    constructor(options: { defaultValue?: string }) {
+    constructor(options: { root: Node; defaultValue?: string }) {
       this.markdown = options.defaultValue ?? "";
+      this.doc = fakeDocument(this.markdown);
+      this.root = options.root as unknown as FakeVisualRoot;
+      this.root.appendChild(this.rootNode);
       state.instances.push(this);
     }
 
@@ -57,6 +80,7 @@ const crepe = vi.hoisted(() => {
     async destroy(): Promise<void> {
       this.destroyed = true;
       if (state.destroyWait !== undefined) await state.destroyWait;
+      this.root.removeChild(this.rootNode);
     }
 
     getMarkdown(): string {
@@ -67,11 +91,17 @@ const crepe = vi.hoisted(() => {
     documentChanged(markdown: string): void {
       const previous = { doc: this.doc };
       this.markdown = markdown;
-      this.doc = {};
+      this.doc = fakeDocument(markdown);
       this.documentView?.update?.({ state: { doc: this.doc } }, previous);
       if (this.markdownUpdated.length > 0) {
         setTimeout(() => this.markdownUpdated.forEach((callback) => callback()), 1_000);
       }
+    }
+
+    documentStateReplaced(): void {
+      const previous = { doc: this.doc };
+      this.doc = fakeDocument(this.markdown);
+      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
     }
   }
 
@@ -90,21 +120,45 @@ vi.mock("micromark-extension-gfm", () => ({ gfm: preview.gfm, gfmHtml: preview.g
 
 import { createMarkdownModes } from "./markdown";
 
+type FakeVisualRoot = Node & {
+  childNodes: Node[];
+  appendChild(child: Node): Node;
+  removeChild(child: Node): Node;
+};
+
+function createVisualRoot(): FakeVisualRoot {
+  const childNodes: Node[] = [];
+  return {
+    childNodes,
+    appendChild(child: Node) {
+      childNodes.push(child);
+      return child;
+    },
+    removeChild(child: Node) {
+      const index = childNodes.indexOf(child);
+      if (index < 0) throw new Error("missing child");
+      childNodes.splice(index, 1);
+      return child;
+    },
+  } as FakeVisualRoot;
+}
+
 function fixture() {
   const source = { value: "# exact\n\nspace  \n" } as HTMLTextAreaElement;
+  const visualRoot = createVisualRoot();
   const onDocumentChange = vi.fn();
   const onPreview = vi.fn();
   const onVisualError = vi.fn();
   const onModeChange = vi.fn();
   const modes = createMarkdownModes({
     source,
-    visualRoot: {} as Node,
+    visualRoot,
     onDocumentChange,
     onPreview,
     onVisualError,
     onModeChange,
   });
-  return { source, onDocumentChange, onPreview, onVisualError, onModeChange, modes };
+  return { source, visualRoot, onDocumentChange, onPreview, onVisualError, onModeChange, modes };
 }
 
 beforeEach(() => {
@@ -136,7 +190,7 @@ describe("createMarkdownModes", () => {
     });
     const modes = createMarkdownModes({
       source,
-      visualRoot: {} as Node,
+      visualRoot: createVisualRoot(),
       onDocumentChange,
       onModeChange,
       onPreview,
@@ -208,6 +262,15 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores structurally equal ProseMirror document replacements", async () => {
+    const { onDocumentChange, modes } = fixture();
+
+    await modes.enterVisual();
+    crepe.state.instances[0]!.documentStateReplaced();
+
+    expect(onDocumentChange).not.toHaveBeenCalled();
+  });
+
   it("renders preview from the current draft without changing it", async () => {
     const { source, onPreview, modes } = fixture();
     source.value = "| a | b |\n| - | - |\n| 1 | 2 |";
@@ -245,9 +308,11 @@ describe("createMarkdownModes", () => {
     expect(onModeChange).toHaveBeenLastCalledWith("visual");
   });
 
-  it("settles a failed initialization without awaiting a hanging cleanup", async () => {
-    const { source, onModeChange, onVisualError, modes } = fixture();
+  it("settles a failed initialization without destroying an OnCreate editor", async () => {
+    const { source, visualRoot, onModeChange, onVisualError, modes } = fixture();
+    const preservedRootNode = {} as Node;
     const editedDuringInitialization = "# source edit during initialization\n";
+    visualRoot.appendChild(preservedRootNode);
     crepe.state.failCreate = true;
     crepe.state.destroyWait = new Promise<void>(() => {});
     crepe.state.onCreate = () => {
@@ -261,7 +326,8 @@ describe("createMarkdownModes", () => {
 
     expect(outcome).toBe("settled");
     expect(source.value).toBe(editedDuringInitialization);
-    expect(crepe.state.instances[0]!.destroyed).toBe(true);
+    expect(crepe.state.instances[0]!.destroyed).toBe(false);
+    expect(visualRoot.childNodes).toEqual([preservedRootNode]);
     expect(onModeChange).toHaveBeenLastCalledWith("source");
     expect(onVisualError).toHaveBeenCalledTimes(1);
 
@@ -274,8 +340,8 @@ describe("createMarkdownModes", () => {
     expect(onModeChange).toHaveBeenLastCalledWith("visual");
   });
 
-  it("keeps source edits when destroy cancels initialization", async () => {
-    const { source, onDocumentChange, onModeChange, modes } = fixture();
+  it("waits for a stale visual creation to finish teardown before destroy settles", async () => {
+    const { source, visualRoot, onDocumentChange, onModeChange, modes } = fixture();
     let releaseCreate!: () => void;
     let markCreateStarted!: () => void;
     const createStarted = new Promise<void>((resolve) => {
@@ -289,12 +355,71 @@ describe("createMarkdownModes", () => {
     const pendingVisual = modes.enterVisual();
     await createStarted;
     source.value = "# source edit before destroy\n";
-    await modes.destroy();
+    const destroying = modes.destroy();
+    const outcome = await Promise.race([
+      destroying.then(() => "settled" as const),
+      new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 0)),
+    ]);
+    expect(outcome).toBe("waiting");
+
     releaseCreate();
-    await pendingVisual;
+    await Promise.all([pendingVisual, destroying]);
 
     expect(source.value).toBe("# source edit before destroy\n");
+    expect(crepe.state.instances[0]!.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([]);
     expect(onDocumentChange).not.toHaveBeenCalled();
     expect(onModeChange).toHaveBeenLastCalledWith("source");
+  });
+
+  it("waits for visual teardown before rendering preview", async () => {
+    const { onPreview, modes } = fixture();
+    let releaseDestroy!: () => void;
+    crepe.state.destroyWait = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+
+    await modes.enterVisual();
+    const pendingPreview = modes.enterPreview();
+    const outcome = await Promise.race([
+      pendingPreview.then(() => "settled" as const),
+      new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 0)),
+    ]);
+    expect(outcome).toBe("waiting");
+
+    releaseDestroy();
+    await pendingPreview;
+
+    expect(onPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for visual teardown before mounting a replacement editor", async () => {
+    const { visualRoot, modes } = fixture();
+    let releaseDestroy!: () => void;
+    crepe.state.destroyWait = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+
+    await modes.enterVisual();
+    const pendingSource = modes.enterSource();
+    const pendingVisual = modes.enterVisual();
+    const sourceOutcome = await Promise.race([
+      pendingSource.then(() => "settled" as const),
+      new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 0)),
+    ]);
+    expect(sourceOutcome).toBe("waiting");
+    const visualOutcome = await Promise.race([
+      pendingVisual.then(() => "settled" as const),
+      new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), 0)),
+    ]);
+    expect(visualOutcome).toBe("waiting");
+    expect(crepe.state.instances).toHaveLength(1);
+    expect(visualRoot.childNodes).toHaveLength(1);
+
+    releaseDestroy();
+    await Promise.all([pendingSource, pendingVisual]);
+
+    expect(crepe.state.instances).toHaveLength(2);
+    expect(visualRoot.childNodes).toHaveLength(1);
   });
 });
