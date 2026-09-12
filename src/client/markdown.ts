@@ -9,6 +9,11 @@ export interface MarkdownPreview {
   html: string;
 }
 
+type MarkdownPreviewModules = [
+  Pick<typeof import("micromark"), "micromark">,
+  Pick<typeof import("micromark-extension-gfm"), "gfm" | "gfmHtml">,
+];
+
 export interface MarkdownModesOptions {
   source: Pick<HTMLTextAreaElement, "value">;
   visualRoot: Node;
@@ -16,6 +21,7 @@ export interface MarkdownModesOptions {
   onModeChange?(mode: MarkdownMode): void;
   onPreview?(preview: MarkdownPreview): void;
   onVisualError?(error: { message: string; retry(): Promise<void> }): void;
+  loadPreview?(): Promise<MarkdownPreviewModules>;
 }
 
 export interface MarkdownModes {
@@ -29,9 +35,9 @@ export interface MarkdownModes {
 export function createMarkdownModes(options: MarkdownModesOptions): MarkdownModes {
   let mode: MarkdownMode = "source";
   let visualEditor: Crepe | undefined;
-  let visualSourceSnapshot = "";
+  let visualSerialized = "";
   let visualDirty = false;
-  let attempt = 0;
+  let transition = 0;
   let entering = false;
 
   const setMode = (next: MarkdownMode): void => {
@@ -39,83 +45,111 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     options.onModeChange?.(next);
   };
 
-  const commitVisualDocument = (editor: Crepe): void => {
-    if (visualEditor !== editor) return;
-    visualDirty = true;
-    const markdown = editor.getMarkdown();
-    options.source.value = markdown;
-    options.onDocumentChange(markdown);
+  const destroyEditor = (editor: Crepe): void => {
+    try {
+      void editor.destroy().catch(() => undefined);
+    } catch {
+      // Crepe cleanup must not block a newer mode transition.
+    }
+  };
+
+  const leaveCurrentVisual = (): void => {
+    const editor = visualEditor;
+    const wasDirty = visualDirty;
+    const serialized = visualSerialized;
+    visualEditor = undefined;
+    entering = false;
+    visualDirty = false;
+    visualSerialized = "";
+
+    if (editor === undefined) return;
+
+    if (wasDirty && options.source.value === serialized) {
+      const markdown = editor.getMarkdown();
+      if (markdown !== options.source.value) {
+        options.source.value = markdown;
+        options.onDocumentChange(markdown);
+      }
+    }
+    destroyEditor(editor);
+  };
+
+  const transitionToSource = (): void => {
+    const currentTransition = ++transition;
+    leaveCurrentVisual();
+    if (currentTransition === transition) setMode("source");
+  };
+
+  const enterSource = async (): Promise<void> => {
+    transitionToSource();
   };
 
   const leaveVisual = async (): Promise<void> => {
-    const editor = visualEditor;
-    const sourceSnapshot = visualSourceSnapshot;
-    const wasDirty = visualDirty;
-    attempt += 1;
-    entering = false;
-    visualEditor = undefined;
-    visualDirty = false;
-
-    if (editor !== undefined) {
-      if (wasDirty) {
-        const markdown = editor.getMarkdown();
-        if (markdown !== options.source.value) {
-          options.source.value = markdown;
-          options.onDocumentChange(markdown);
-        }
-      } else {
-        options.source.value = sourceSnapshot;
-      }
-      await editor.destroy();
-    }
-
-    setMode("source");
+    transitionToSource();
   };
 
   const enterVisual = async (): Promise<void> => {
     if (mode === "visual" || entering) return;
 
-    const currentAttempt = ++attempt;
+    const currentTransition = ++transition;
+    const visualSourceSnapshot = options.source.value;
     entering = true;
-    visualSourceSnapshot = options.source.value;
     visualDirty = false;
+    visualSerialized = visualSourceSnapshot;
+    let editor: Crepe | undefined;
 
     try {
       const { Crepe } = await import("@milkdown/crepe");
-      if (currentAttempt !== attempt) return;
+      if (currentTransition !== transition) return;
+      if (options.source.value !== visualSourceSnapshot) {
+        entering = false;
+        visualSerialized = "";
+        setMode("source");
+        return;
+      }
 
-      const editor = new Crepe({ root: options.visualRoot, defaultValue: visualSourceSnapshot });
-      editor.editor.config((ctx) => {
+      const createdEditor = new Crepe({ root: options.visualRoot, defaultValue: visualSourceSnapshot });
+      editor = createdEditor;
+      createdEditor.editor.config((ctx) => {
         ctx.update(prosePluginsCtx, (plugins) =>
           plugins.concat(
             new Plugin({
               view: () => ({
                 update: (view, previous) => {
-                  if (view.state.doc !== previous.doc) commitVisualDocument(editor);
+                  if (view.state.doc === previous.doc || visualEditor !== createdEditor || entering) return;
+                  visualDirty = true;
+                  const markdown = createdEditor.getMarkdown();
+                  visualSerialized = markdown;
+                  options.source.value = markdown;
+                  options.onDocumentChange(markdown);
                 },
               }),
             }),
           ),
         );
       });
-      visualEditor = editor;
-      await editor.create();
+      visualEditor = createdEditor;
+      await createdEditor.create();
 
-      if (currentAttempt !== attempt || visualEditor !== editor) {
-        await editor.destroy();
+      if (currentTransition !== transition || visualEditor !== createdEditor) return;
+      if (options.source.value !== visualSourceSnapshot && !visualDirty) {
+        visualEditor = undefined;
+        entering = false;
+        visualSerialized = "";
+        destroyEditor(createdEditor);
+        setMode("source");
         return;
       }
 
       entering = false;
       setMode("visual");
     } catch (error) {
-      if (currentAttempt !== attempt) return;
-      const editor = visualEditor;
-      visualEditor = undefined;
+      if (currentTransition !== transition) return;
+      if (visualEditor === editor) visualEditor = undefined;
       entering = false;
       visualDirty = false;
-      options.source.value = visualSourceSnapshot;
-      if (editor !== undefined) await editor.destroy();
+      visualSerialized = "";
+      if (editor !== undefined) destroyEditor(editor);
       setMode("source");
       options.onVisualError?.({
         message: error instanceof Error ? error.message : "Unable to start visual editor",
@@ -124,33 +158,35 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     }
   };
 
-  const enterSource = async (): Promise<void> => {
-    if (visualEditor !== undefined || entering) {
-      await leaveVisual();
-      return;
-    }
-    setMode("source");
-  };
-
   const enterPreview = async (): Promise<void> => {
-    await enterSource();
-    const source = options.source.value;
-    const [{ micromark }, { gfm, gfmHtml }] = await Promise.all([
-      import("micromark"),
-      import("micromark-extension-gfm"),
-    ]);
-    const html = micromark(source, {
-      allowDangerousHtml: false,
-      allowDangerousProtocol: false,
-      extensions: [gfm()],
-      htmlExtensions: [gfmHtml()],
-    });
-    options.onPreview?.({ source, html });
-    setMode("preview");
+    const currentTransition = ++transition;
+    leaveCurrentVisual();
+    if (currentTransition !== transition) return;
+    setMode("source");
+    if (currentTransition !== transition) return;
+
+    try {
+      const [{ micromark }, { gfm, gfmHtml }] = await (options.loadPreview?.() ??
+        Promise.all([import("micromark"), import("micromark-extension-gfm")]));
+      if (currentTransition !== transition) return;
+
+      const source = options.source.value;
+      const html = micromark(source, {
+        allowDangerousHtml: false,
+        allowDangerousProtocol: false,
+        extensions: [gfm()],
+        htmlExtensions: [gfmHtml()],
+      });
+      if (currentTransition !== transition) return;
+      options.onPreview?.({ source, html });
+      if (currentTransition === transition) setMode("preview");
+    } catch (error) {
+      if (currentTransition === transition) throw error;
+    }
   };
 
   const destroy = async (): Promise<void> => {
-    await leaveVisual();
+    transitionToSource();
   };
 
   return { enterSource, enterVisual, enterPreview, leaveVisual, destroy };
