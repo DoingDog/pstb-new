@@ -679,7 +679,7 @@ describe("content save and history ring", () => {
     });
   });
 
-  it("reconciles a near-expiry interrupted save with the physical expiration applied by that save", async () => {
+  it("rewrites all active values before reconciling a near-expiry interrupted save", async () => {
     const kv = new RecordingKV();
     const initial = service(kv);
     let paste = await initial.create({ content: "v1", customId: "reconcile-expiry", expiration: 3_600 }, {});
@@ -709,11 +709,64 @@ describe("content save and history ring", () => {
     });
 
     expect(kv.operations.slice(before).filter((operation) => operation.type === "put").map((operation) => operation.key)).toEqual([
+      contentKey("reconcile-expiry"),
+      revisionKey("reconcile-expiry", 1),
+      revisionKey("reconcile-expiry", 0),
       metaKey("reconcile-expiry"),
     ]);
     expect(JSON.parse(kv.entries.get(metaKey("reconcile-expiry"))!.value)).toMatchObject({ physicalExpiration: 1_789_261_230 });
     for (const key of [contentKey("reconcile-expiry"), revisionKey("reconcile-expiry", 1), revisionKey("reconcile-expiry", 0), metaKey("reconcile-expiry")]) {
       expect(kv.entries.get(key)?.expiration).toBe(1_789_261_230);
+    }
+  });
+
+  it.each(["permanent", 7_200] as const)("reconciles against a concurrently changed %s sibling expiration", async (expiration) => {
+    const kv = new RecordingKV();
+    const initial = service(kv);
+    let paste = await initial.create({ content: "v1", customId: `reconcile-concurrent-${expiration}`, expiration: 3_600 }, {});
+    paste = (await initial.updateContent(`reconcile-concurrent-${expiration}`, { content: "v2", version: paste.version })).paste;
+    const saving = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    kv.injectFailure(kv.operations.length + 7);
+
+    await expect(saving.updateContent(`reconcile-concurrent-${expiration}`, { content: "v3", version: paste.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      details: { mutationMayHaveApplied: true },
+    });
+    kv.injectFailure();
+    const expectedPhysical = expiration === "permanent" ? undefined : 1_789_268_371;
+    const sibling = kv.entries.get(metaKey(`reconcile-concurrent-${expiration}`))!;
+    const metadata = JSON.parse(sibling.value);
+    metadata.expiresAt = expiration === "permanent" ? null : "2026-09-13T02:59:31.000Z";
+    metadata.expiration = expiration === "permanent" ? { kind: "permanent" } : { kind: "relative", seconds: expiration };
+    metadata.physicalExpiration = expectedPhysical ?? null;
+    metadata.updatedAt = "2026-09-13T00:59:31.000Z";
+    metadata.versionCounter = 3;
+    sibling.value = JSON.stringify(metadata);
+    sibling.expiration = expectedPhysical;
+    const repairing = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:31.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+
+    await expect(repairing.loadContent(`reconcile-concurrent-${expiration}`, undefined)).resolves.toMatchObject({
+      content: "v3",
+      summary: { version: expect.stringMatching(/\.3$/), contentRevision: 3, expiresAt: expiration === "permanent" ? null : "2026-09-13T02:59:31.000Z" },
+    });
+
+    expect(kv.operations.slice(before).filter((operation) => operation.type === "put").map((operation) => operation.key)).toEqual([
+      contentKey(`reconcile-concurrent-${expiration}`),
+      revisionKey(`reconcile-concurrent-${expiration}`, 1),
+      revisionKey(`reconcile-concurrent-${expiration}`, 0),
+      metaKey(`reconcile-concurrent-${expiration}`),
+    ]);
+    for (const key of [contentKey(`reconcile-concurrent-${expiration}`), revisionKey(`reconcile-concurrent-${expiration}`, 1), revisionKey(`reconcile-concurrent-${expiration}`, 0), metaKey(`reconcile-concurrent-${expiration}`)]) {
+      expect(kv.entries.get(key)?.expiration).toBe(expectedPhysical);
     }
   });
 
@@ -1017,6 +1070,50 @@ describe("settings, password, expiry, and delete mutations", () => {
       details: { retryable: true, mutationMayHaveApplied },
     });
     expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual(expectedOperations.slice(0, failureOffset));
+  });
+
+  const nearExpiryContentFailures: Array<[number, string, number, boolean]> = [0, 1, 2, 3].flatMap((historyCount) => {
+    const activeRevisionCount = historyCount - (historyCount === 3 ? 1 : 0);
+    const mainOffset = 4 + activeRevisionCount * 2;
+    return [
+      [historyCount, "target revision", 3, false],
+      ...Array.from({ length: activeRevisionCount }, (_, index): [number, string, number, boolean] => [historyCount, `active revision ${index + 1}`, 5 + index * 2, false]),
+      [historyCount, "main", mainOffset, false],
+      [historyCount, "metadata", mainOffset + 1, true],
+    ];
+  });
+
+  it.each(nearExpiryContentFailures)("reports near-expiry content failure with %i history revisions at %s write %i", async (historyCount, target, failureOffset, mutationMayHaveApplied) => {
+    const { kv, paste } = await withHistory(historyCount);
+    const id = `history${historyCount}`;
+    const nearExpiry = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:59:30.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+    const metadata = JSON.parse(kv.entries.get(metaKey(id))!.value) as { history: { nextSlot: number; entries: Array<{ slot: number }> } };
+    const targetKey = revisionKey(id, metadata.history.nextSlot);
+    const activeRevisionKeys = metadata.history.entries
+      .filter((entry) => entry.slot !== metadata.history.nextSlot)
+      .map((entry) => revisionKey(id, entry.slot));
+    const expectedOperations = [
+      `getWithMetadata:${contentKey(id)}`,
+      `get:${metaKey(id)}`,
+      `put:${targetKey}`,
+      ...activeRevisionKeys.flatMap((key) => [`getWithMetadata:${key}`, `put:${key}`]),
+      `put:${contentKey(id)}`,
+      `put:${metaKey(id)}`,
+    ];
+    kv.injectFailure(before + failureOffset);
+
+    await expect(nearExpiry.updateContent(id, { content: `v${historyCount + 2}`, version: paste.version })).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      status: 503,
+      details: { retryable: true, mutationMayHaveApplied },
+    });
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual(expectedOperations.slice(0, failureOffset));
+    expect(kv.operations.slice(before + failureOffset)).toEqual([]);
   });
 
   it("authorizes and version-checks delete before deleting main, three slots, and metadata", async () => {

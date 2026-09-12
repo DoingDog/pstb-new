@@ -1240,10 +1240,8 @@ export class PasteService {
     const entries = [previous, ...metadata.history.entries.filter((entry) => entry.slot !== previous.slot)]
       .sort((left, right) => right.revision - left.revision)
       .slice(0, 3);
-    const actualPhysical = physicalExpiration(metadata.expiresAt, new Date(marker.savedAt));
-    const requiredPhysical = actualPhysical === null ? null : physicalExpiration(metadata.expiresAt, this.mutationNow());
-    const rewritesKeys = actualPhysical !== null && requiredPhysical !== null && actualPhysical < requiredPhysical;
-    const physical = rewritesKeys ? requiredPhysical : actualPhysical;
+    const repairNow = this.mutationNow();
+    const physical = physicalExpiration(metadata.expiresAt, repairNow);
     const reconciled: PasteMetadataV2 = {
       ...metadata,
       updatedAt: marker.savedAt,
@@ -1255,14 +1253,12 @@ export class PasteService {
       history: { nextSlot: (previous.slot + 1) % 3, entries },
     };
     const options = physical === null ? {} : { expiration: physical };
-    if (rewritesKeys) {
-      try {
-        await this.db.put(contentKey(id), content, { ...options, metadata: marker });
-      } catch {
-        throw storageError("STORAGE_WRITE_FAILED");
-      }
-      await this.rewriteActiveRevisions(id, reconciled, undefined, options);
+    try {
+      await this.db.put(contentKey(id), content, { ...options, metadata: marker });
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED");
     }
+    await this.rewriteActiveRevisions(id, reconciled, undefined, options);
     try {
       await this.db.put(metaKey(id), JSON.stringify(reconciled), options);
     } catch {
