@@ -1,6 +1,13 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createHttpApp } from "./http";
+import { renderCreatePage } from "./render";
 import type { Env, MutationResult, PasteSummary } from "./types";
+
+vi.mock("./render", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./render")>();
+  return { ...actual, renderCreatePage: vi.fn(actual.renderCreatePage) };
+});
 
 declare global {
   namespace Cloudflare {
@@ -45,14 +52,22 @@ describe("HTTP slice 1", () => {
     expect(options.headers.get("cache-control")).toBe("no-store");
     expect(await options.text()).toBe("");
 
-    const method = await request("/", { method: "POST" });
+    const method = await request("/", { method: "POST", headers: { "accept-language": "zh-CN" } });
     expect(method.status).toBe(405);
     expect(method.headers.get("allow")).toBe("GET,HEAD,OPTIONS");
-    expect(method.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(method.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(method.headers.get("cache-control")).toBe("no-store");
-    await expect(method.json()).resolves.toEqual({
-      error: { code: "BAD_REQUEST", message: "The request is malformed." },
-    });
+    expect(method.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await method.text()).toContain("请求方法不被允许");
+  });
+
+  it("does not render the create page for HEAD", async () => {
+    vi.mocked(renderCreatePage).mockClear();
+
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/", { method: "HEAD" }));
+
+    expect(response.status).toBe(200);
+    expect(renderCreatePage).not.toHaveBeenCalled();
   });
 
   it("creates a JSON paste in the test KV with clean response headers", async () => {
@@ -461,5 +476,222 @@ describe("HTTP slice 1", () => {
     await expect(method.json()).resolves.toEqual({
       error: { code: "BAD_REQUEST", message: "The request is malformed." },
     });
+  });
+
+  it("requires multipart viewOnce exactly once", async () => {
+    const missing = new FormData();
+    missing.set("content", "source");
+    const missingResponse = await request("/api/pastes", { method: "POST", body: missing });
+    expect(missingResponse.status).toBe(422);
+    await expect(missingResponse.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "viewOnce" }] } },
+    });
+
+    const duplicate = new FormData();
+    duplicate.set("content", "source");
+    duplicate.append("viewOnce", "true");
+    duplicate.append("viewOnce", "false");
+    const duplicateResponse = await request("/api/pastes", { method: "POST", body: duplicate });
+    expect(duplicateResponse.status).toBe(422);
+    await expect(duplicateResponse.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "viewOnce" }] } },
+    });
+  });
+
+  it("accepts a quoted multipart boundary containing a semicolon and rejects invalid parameters", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const boundary = "paste;boundary";
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="content"',
+      "",
+      "multipart source",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="viewOnce"',
+      "",
+      "false",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="customId"',
+      "",
+      id,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+
+    const created = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": `multipart/form-data; boundary="${boundary}"` },
+      body,
+    });
+    expect(created.status).toBe(201);
+    await deletePaste(id);
+
+    for (const contentType of [
+      "multipart/form-data; boundary",
+      "multipart/form-data; boundary=first; boundary=second",
+    ]) {
+      const response = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": contentType },
+        body,
+      });
+      expect(response.status).toBe(415);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "UNSUPPORTED_MEDIA_TYPE", details: { accepted: ["application/json", "multipart/form-data"] } },
+      });
+    }
+  });
+
+  it("requires text/plain; charset=utf-8 for PUT and accepts case-insensitive whitespace", async () => {
+    const unsupported = await request("/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: "new source",
+    });
+    expect(unsupported.status).toBe(415);
+    await expect(unsupported.json()).resolves.toMatchObject({
+      error: { code: "UNSUPPORTED_MEDIA_TYPE", details: { accepted: ["text/plain; charset=utf-8"] } },
+    });
+
+    const id = `http-${crypto.randomUUID()}`;
+    const create = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", customId: id, expiration: "permanent" }),
+    });
+    expect(create.status).toBe(201);
+
+    try {
+      const response = await request(`/api/pastes/${id}`, {
+        method: "PUT",
+        headers: { "content-type": "TEXT/PLAIN ; CHARSET = UTF-8" },
+        body: "new source",
+      });
+      expect(response.status).toBe(200);
+      await expect((env as unknown as Env).PASTE_DB.get(id)).resolves.toBe("new source");
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("rejects wildcard, weak, list, space, and control If-Match values", async () => {
+    for (const ifMatch of ["*", 'W/"version"', '"one", "two"', '"has space"', '"has\tcontrol"']) {
+      const response = await request("/api/pastes/missing", {
+        method: "PUT",
+        headers: { "content-type": "text/plain; charset=utf-8", "if-match": ifMatch },
+        body: "new source",
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "AMBIGUOUS_VERSION", message: "The version is ambiguous." },
+      });
+    }
+  });
+
+  it("rejects malformed encoded IDs and treats encoded slashes as route misses", async () => {
+    const requests: RequestInit[] = [
+      { method: "PUT", headers: { "content-type": "text/plain; charset=utf-8" }, body: "new source" },
+      { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "new source" }) },
+      { method: "DELETE" },
+      { method: "OPTIONS" },
+      { method: "GET" },
+    ];
+
+    for (const init of requests) {
+      const response = await request("/api/pastes/%ZZ", init);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "BAD_REQUEST", message: "The request is malformed." },
+      });
+    }
+
+    for (const init of requests) {
+      const response = await request("/api/pastes/a%2Fb", init);
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({
+        error: { code: "PASTE_NOT_FOUND", message: "The paste was not found." },
+      });
+    }
+  });
+
+  it("treats a zero-byte DELETE stream without Content-Length as an omitted body", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const created = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "delete me", customId: id, expiration: "permanent" }),
+    });
+    expect(created.status).toBe(201);
+
+    try {
+      const response = await request(`/api/pastes/${id}`, {
+        method: "DELETE",
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+      });
+      expect(response.status).toBe(204);
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("rejects an oversized multipart body from Content-Length before parsing it", async () => {
+    const boundary = "paste-boundary";
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="content"',
+      "",
+      "source",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="viewOnce"',
+      "",
+      "false",
+      `--${boundary}--`,
+      "",
+    ].join("\r\n");
+    const response = await request("/api/pastes", {
+      method: "POST",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        "content-length": "67108865",
+      },
+      body,
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+    });
+  });
+
+  it("cancels an oversized multipart stream without Content-Length", async () => {
+    let chunks = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (chunks < 64) {
+          chunks += 1;
+          controller.enqueue(new Uint8Array(1_048_576));
+        } else if (chunks === 64) {
+          chunks += 1;
+          controller.enqueue(new Uint8Array(1));
+        } else {
+          controller.close();
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=paste-boundary" },
+      body,
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+    });
+    expect(cancelled).toBe(true);
   });
 });

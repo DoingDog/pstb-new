@@ -5,6 +5,8 @@ import { applicationHeaders, renderCreatePage, type Locale } from "./render";
 import { isPasteError, PasteError, type Env } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
+const wireBodyLimit = 67_108_864;
+const textPlainUtf8 = "text/plain; charset=utf-8";
 
 function createInput(value: Record<string, unknown>): CreateInput {
   const input: CreateInput = { content: value.content as string };
@@ -22,20 +24,20 @@ function validationError(field: string, message: string): PasteError {
 }
 
 function createMediaType(request: Request): "json" | "multipart" {
-  const parts = request.headers.get("content-type")?.split(";").map((part) => part.trim()) ?? [];
+  const contentType = request.headers.get("content-type")?.trim();
+  const parts = contentType?.split(";").map((part) => part.trim()) ?? [];
   if (parts[0]?.toLowerCase() === "application/json" && (parts.length === 1 || (parts.length === 2 && /^charset=utf-8$/i.test(parts[1]!)))) {
     return "json";
   }
-  if (parts[0]?.toLowerCase() === "multipart/form-data" && parts.length === 2 && /^boundary=.+$/i.test(parts[1]!)) {
+  if (/^multipart\/form-data\s*;\s*boundary\s*=\s*(?:[!#$%&'*+\-.^_`|~0-9a-z]+|"(?:[^"\\\r\n]|\\[^\r\n])+")\s*$/i.test(contentType ?? "")) {
     return "multipart";
   }
   throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json", "multipart/form-data"] });
 }
 
 function textMediaType(request: Request): void {
-  const parts = request.headers.get("content-type")?.split(";").map((part) => part.trim()) ?? [];
-  if (parts[0]?.toLowerCase() !== "text/plain" || (parts.length !== 1 && (parts.length !== 2 || !/^charset=utf-8$/i.test(parts[1]!)))) {
-    throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["text/plain"] });
+  if (!/^text\/plain\s*;\s*charset\s*=\s*utf-8\s*$/i.test(request.headers.get("content-type")?.trim() ?? "")) {
+    throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: [textPlainUtf8] });
   }
 }
 
@@ -48,14 +50,55 @@ function queryOrHeaderPassword(request: Request): string | undefined {
 function ifMatchVersion(request: Request): string | undefined {
   const value = request.headers.get("if-match");
   if (value === null) return undefined;
-  const match = /^"([^"]*)"$/.exec(value);
+  const match = /^"([\x21\x23-\x7e\x80-\xff]*)"$/.exec(value);
   if (match === null) throw new PasteError("AMBIGUOUS_VERSION", 400);
   return match[1]!;
 }
 
 async function parseTextContent(request: Request): Promise<string> {
   textMediaType(request);
-  return decodeUtf8(await readLimitedBytes(request, 67_108_864));
+  return decodeUtf8(await readLimitedBytes(request, wireBodyLimit));
+}
+
+function requestTooLarge(): PasteError {
+  return new PasteError("REQUEST_TOO_LARGE", 413, undefined, { maxBytes: wireBodyLimit });
+}
+
+async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuffer>> {
+  const body = request.body;
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && /^\d+$/.test(contentLength) && BigInt(contentLength) > BigInt(wireBodyLimit)) {
+    await body?.cancel();
+    throw requestTooLarge();
+  }
+  if (body === null) return new Uint8Array();
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      if (value.byteLength > wireBodyLimit - length) {
+        await reader.cancel();
+        throw requestTooLarge();
+      }
+      chunks.push(value);
+      length += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 type MutationCredentials = { password?: string; version?: string };
@@ -88,8 +131,23 @@ async function parseContentPatch(request: Request): Promise<ContentPatch> {
   return { content: value.content, ...parseMutationCredentials(value) };
 }
 
+async function deleteBodyIsOmitted(request: Request): Promise<boolean> {
+  if (request.body === null || request.headers.get("content-length") === "0") return true;
+
+  const reader = request.clone().body?.getReader();
+  if (reader === undefined) return true;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return true;
+    if (value !== undefined && value.byteLength > 0) {
+      await reader.cancel();
+      return false;
+    }
+  }
+}
+
 async function parseDeleteBody(request: Request): Promise<MutationCredentials> {
-  if (request.body === null || request.headers.get("content-length") === "0") return {};
+  if (await deleteBodyIsOmitted(request)) return {};
   jsonMediaType(request);
   return parseMutationCredentials(await parseStrictJsonObject(request, new Set(["password", "version"])));
 }
@@ -115,9 +173,10 @@ function contentUpdateInput(content: string, password: string | undefined, versi
 }
 
 async function parseMultipartCreate(request: Request): Promise<CreateInput> {
+  const bytes = await readMultipartBytes(request);
   let form: FormData;
   try {
-    form = await request.formData();
+    form = await new Response(bytes, { headers: { "Content-Type": request.headers.get("content-type")! } }).formData();
   } catch {
     throw new PasteError("BAD_REQUEST", 400);
   }
@@ -129,17 +188,16 @@ async function parseMultipartCreate(request: Request): Promise<CreateInput> {
     if (typeof value !== "string") throw validationError(name, "Must be a string.");
     values[name] = value;
   }
+  if (!Object.hasOwn(values, "viewOnce")) throw validationError("viewOnce", "Required.");
 
   const input: Record<string, unknown> = { ...values };
   if (Object.hasOwn(values, "expiration")) {
     const value = values.expiration!;
     input.expiration = value === "" ? "permanent" : /^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : value;
   }
-  if (Object.hasOwn(values, "viewOnce")) {
-    const value = values.viewOnce!;
-    if (value !== "true" && value !== "false") throw validationError("viewOnce", "Must be true or false.");
-    input.viewOnce = value === "true";
-  }
+  const viewOnce = values.viewOnce!;
+  if (viewOnce !== "true" && viewOnce !== "false") throw validationError("viewOnce", "Must be true or false.");
+  input.viewOnce = viewOnce === "true";
   return createInput(input);
 }
 
@@ -190,10 +248,31 @@ function locale(request: Request): Locale {
     : "en";
 }
 
+function rootMethodNotAllowed(request: Request): Response {
+  const isChinese = locale(request) === "zh-CN";
+  const message = isChinese ? "请求方法不被允许" : "Method not allowed";
+  const headers = new Headers(applicationHeaders());
+  headers.set("Allow", "GET,HEAD,OPTIONS");
+  return new Response(`<!doctype html><html lang="${isChinese ? "zh-CN" : "en"}"><head><meta charset="utf-8"><title>${message}</title></head><body><main><h1>${message}</h1></main></body></html>`, { status: 405, headers });
+}
+
+function pastePathError(request: Request): PasteError | undefined {
+  const match = /^\/api\/pastes\/([^/]+)$/.exec(new URL(request.url).pathname);
+  if (match === null) return undefined;
+  try {
+    if (decodeURIComponent(match[1]!).includes("/")) return new PasteError("PASTE_NOT_FOUND", 404);
+  } catch {
+    return new PasteError("BAD_REQUEST", 400);
+  }
+  return undefined;
+}
+
 export function createHttpApp(env: Env): Hono {
   const app = new Hono();
 
   app.use("*", async (context, next) => {
+    const error = pastePathError(context.req.raw);
+    if (error !== undefined) return errorResponse(error);
     await next();
     context.res.headers.set("Cache-Control", "no-store");
   });
@@ -201,10 +280,11 @@ export function createHttpApp(env: Env): Hono {
   app.onError((error) => errorResponse(isPasteError(error) ? error : new PasteError("INTERNAL_ERROR", 500)));
   app.notFound(() => errorResponse(new PasteError("PASTE_NOT_FOUND", 404)));
 
-  app.get("/", (context) => new Response(renderCreatePage(locale(context.req.raw)), { headers: applicationHeaders() }));
-  app.on(["HEAD"], "/", () => new Response(null, { headers: applicationHeaders() }));
+  app.on(["GET", "HEAD"], "/", (context) => context.req.raw.method === "HEAD"
+    ? new Response(null, { headers: applicationHeaders() })
+    : new Response(renderCreatePage(locale(context.req.raw)), { headers: applicationHeaders() }));
   app.options("/", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,OPTIONS" } }));
-  app.all("/", () => methodNotAllowed("GET,HEAD,OPTIONS"));
+  app.all("/", (context) => rootMethodNotAllowed(context.req.raw));
 
   app.post("/api/pastes", async (context) => {
     const country = context.req.raw.cf?.country;
