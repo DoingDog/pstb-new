@@ -3,9 +3,12 @@ import type {
   Expiration,
   ExpirationInput,
   HistoryDescriptor,
+  HistoryList,
   LoadedPaste,
   PasteMetadataV2,
   PasteSummary,
+  RevisionMarkerV2,
+  RevisionResource,
 } from "./types";
 import { PasteError } from "./types";
 import { parseStrictJsonObject } from "./json";
@@ -44,6 +47,38 @@ export type CreateInput = {
 };
 
 export type RequestMeta = { country?: string | null };
+
+export type UpdateContentInput = {
+  content: string;
+  password?: string | null;
+  version?: string;
+};
+
+export type UpdateSettingsInput = {
+  password?: string | null;
+  version?: string;
+  title?: string;
+  format?: "text" | "markdown";
+  expiration?: ExpirationInput;
+  viewOnce?: boolean;
+};
+
+export type UpdatePasswordInput = {
+  password?: string | null;
+  version?: string;
+  newPassword: string;
+};
+
+type LegacyMigrationInput = {
+  content: string;
+  contentChanged: boolean;
+  title: string;
+  format: "text" | "markdown";
+  password: string | null;
+  viewOnce: boolean;
+  expiresAt: string | null;
+  expiration: Expiration;
+};
 
 function validationError(field: string, message: string): PasteError {
   return new PasteError("VALIDATION_FAILED", 422, undefined, { fields: [{ field, message }] });
@@ -93,6 +128,10 @@ function canonicalDate(value: string): boolean {
 function physicalExpiration(expiresAt: string | null, now: Date): number | null {
   if (expiresAt === null) return null;
   return Math.ceil(Math.max(new Date(expiresAt).getTime(), now.getTime() + 60_000) / 1000);
+}
+
+function sameExpiration(left: Expiration, right: Expiration): boolean {
+  return left.kind === right.kind && (left.kind !== "relative" || (right.kind === "relative" && left.seconds === right.seconds));
 }
 
 export function contentKey(id: string): string {
@@ -273,6 +312,7 @@ const METADATA_KEYS = new Set([
 const HISTORY_KEYS = new Set(["nextSlot", "entries"]);
 const DESCRIPTOR_KEYS = new Set(["revision", "slot", "savedAt", "supersededAt", "byteLength"]);
 const COMMIT_KEYS = new Set(["versionCounter", "previous"]);
+const REVISION_MARKER_KEYS = new Set(["kind", "schemaVersion", "generation", "revision", "savedAt", "supersededAt", "byteLength"]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -376,6 +416,39 @@ function parseContentMarker(value: unknown): ContentMarkerV2 {
     savedAt: marker.savedAt,
     byteLength: marker.byteLength,
     commit,
+  };
+}
+
+function parseRevisionMarker(value: unknown): RevisionMarkerV2 {
+  let size: number;
+  try {
+    size = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    throw inconsistent();
+  }
+  if (size > 1024) throw inconsistent();
+  const marker = exactObject(value, REVISION_MARKER_KEYS);
+  if (
+    marker.kind !== "cfpb/revision" ||
+    marker.schemaVersion !== 2 ||
+    !isV4Uuid(marker.generation) ||
+    !isPositiveSafeInteger(marker.revision) ||
+    !isCanonicalTimestamp(marker.savedAt) ||
+    !isCanonicalTimestamp(marker.supersededAt) ||
+    !isPositiveSafeInteger(marker.byteLength) ||
+    marker.byteLength > MAX_CONTENT_BYTES ||
+    new Date(marker.supersededAt).getTime() < new Date(marker.savedAt).getTime()
+  ) {
+    throw inconsistent();
+  }
+  return {
+    kind: "cfpb/revision",
+    schemaVersion: 2,
+    generation: marker.generation,
+    revision: marker.revision,
+    savedAt: marker.savedAt,
+    supersededAt: marker.supersededAt,
+    byteLength: marker.byteLength,
   };
 }
 
@@ -648,7 +721,7 @@ export class PasteService {
     if (hasMarkerField(main.metadata)) {
       const marker = parseContentMarker(main.metadata);
       if (sibling === null) throw inconsistent();
-      const metadata = await parseMetadata(sibling, id);
+      let metadata = await parseMetadata(sibling, id);
       const bytes = new TextEncoder().encode(main.value).byteLength;
       if (
         marker.generation !== metadata.generation ||
@@ -657,7 +730,7 @@ export class PasteService {
         marker.byteLength !== bytes ||
         metadata.contentBytes !== bytes
       ) {
-        throw inconsistent();
+        metadata = await this.reconcileMetadataLast(id, marker, metadata, bytes);
       }
       await this.throwIfExpired(id, metadata.expiresAt);
       this.authorize(metadata.password, password);
@@ -674,8 +747,499 @@ export class PasteService {
     return (await this.loadContent(id, password)).summary;
   }
 
+  async updateContent(id: string, input: UpdateContentInput) {
+    const content = validateContent(input.content);
+    const loaded = await this.loadContent(id, input.password);
+    if (loaded.legacy) {
+      this.assertLegacyVersion(loaded.summary, input.version);
+      if (content === loaded.content) return { changed: false, paste: loaded.summary };
+      return {
+        changed: true,
+        paste: await this.migrateLegacy(id, loaded, {
+          content,
+          contentChanged: true,
+          title: loaded.summary.title,
+          format: "text",
+          password: null,
+          viewOnce: false,
+          expiresAt: loaded.summary.expiresAt,
+          expiration: loaded.summary.expiration,
+        }),
+      };
+    }
+    this.assertVersion(loaded.metadata, input.version);
+    if (content === loaded.content) return { changed: false, paste: loaded.summary };
+
+    const now = this.mutationNow();
+    const savedAt = now.toISOString();
+    const physical = physicalExpiration(loaded.metadata.expiresAt, now);
+    const options = physical === null ? {} : { expiration: physical };
+    const previous: HistoryDescriptor = {
+      revision: loaded.metadata.contentRevision,
+      slot: loaded.metadata.history.nextSlot,
+      savedAt: loaded.metadata.currentSavedAt,
+      supersededAt: savedAt,
+      byteLength: loaded.metadata.contentBytes,
+    };
+    const revisionMarker: RevisionMarkerV2 = {
+      kind: "cfpb/revision",
+      schemaVersion: 2,
+      generation: loaded.metadata.generation,
+      revision: previous.revision,
+      savedAt: previous.savedAt,
+      supersededAt: previous.supersededAt,
+      byteLength: previous.byteLength,
+    };
+
+    try {
+      await this.db.put(revisionKey(id, previous.slot), loaded.content, { ...options, metadata: revisionMarker });
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED");
+    }
+    if (physical !== loaded.metadata.physicalExpiration) {
+      await this.rewriteActiveRevisions(id, loaded.metadata, previous.slot, options);
+    }
+
+    const contentRevision = loaded.metadata.contentRevision + 1;
+    const versionCounter = loaded.metadata.versionCounter + 1;
+    const contentBytes = new TextEncoder().encode(content).byteLength;
+    const marker: ContentMarkerV2 = {
+      kind: "cfpb/content",
+      schemaVersion: 2,
+      generation: loaded.metadata.generation,
+      contentRevision,
+      savedAt,
+      byteLength: contentBytes,
+      commit: { versionCounter, previous },
+    };
+    try {
+      await this.db.put(contentKey(id), content, { ...options, metadata: marker });
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED");
+    }
+
+    const entries = [previous, ...loaded.metadata.history.entries.filter((entry) => entry.slot !== previous.slot)]
+      .sort((left, right) => right.revision - left.revision)
+      .slice(0, 3);
+    const metadata: PasteMetadataV2 = {
+      ...loaded.metadata,
+      updatedAt: savedAt,
+      currentSavedAt: savedAt,
+      physicalExpiration: physical,
+      versionCounter,
+      contentRevision,
+      contentBytes,
+      history: { nextSlot: (previous.slot + 1) % 3, entries },
+    };
+    try {
+      await this.db.put(metaKey(id), JSON.stringify(metadata), options);
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED", true);
+    }
+    return { changed: true, paste: summary(metadata) };
+  }
+
+  async updateSettings(id: string, input: UpdateSettingsInput) {
+    const hasTitle = input.title !== undefined;
+    const hasFormat = input.format !== undefined;
+    const hasExpiration = input.expiration !== undefined;
+    const hasViewOnce = input.viewOnce !== undefined;
+    if (!hasTitle && !hasFormat && !hasExpiration && !hasViewOnce) {
+      throw validationError("settings", "Must include at least one setting.");
+    }
+
+    const loaded = await this.loadContent(id, input.password);
+    const now = this.mutationNow();
+    if (loaded.legacy) {
+      this.assertLegacyVersion(loaded.summary, input.version);
+      const title = hasTitle ? validateTitle(input.title!) : loaded.summary.title;
+      let format: "text" | "markdown" = "text";
+      if (hasFormat) {
+        if (input.format !== "text" && input.format !== "markdown") throw validationError("format", "Must be text or markdown.");
+        format = input.format;
+      }
+      let viewOnce = false;
+      if (hasViewOnce) {
+        if (typeof input.viewOnce !== "boolean") throw validationError("viewOnce", "Must be a boolean.");
+        viewOnce = input.viewOnce;
+      }
+      const normalized = hasExpiration ? normalizeExpiration(input.expiration!, now) : undefined;
+      const expirationChanged = normalized !== undefined && (
+        normalized.expiration.kind === "relative" ||
+        normalized.expiresAt !== loaded.summary.expiresAt ||
+        !sameExpiration(normalized.expiration, loaded.summary.expiration)
+      );
+      const changed = title !== loaded.summary.title || format !== "text" || viewOnce || expirationChanged;
+      if (!changed) return { changed: false, paste: loaded.summary };
+      return {
+        changed: true,
+        paste: await this.migrateLegacy(id, loaded, {
+          content: loaded.content,
+          contentChanged: false,
+          title,
+          format,
+          password: null,
+          viewOnce,
+          expiresAt: hasExpiration ? normalized!.expiresAt : loaded.summary.expiresAt,
+          expiration: hasExpiration ? normalized!.expiration : loaded.summary.expiration,
+        }),
+      };
+    }
+    this.assertVersion(loaded.metadata, input.version);
+    const title = hasTitle ? validateTitle(input.title!) : loaded.metadata.title;
+    let format = loaded.metadata.format;
+    if (hasFormat) {
+      if (input.format !== "text" && input.format !== "markdown") throw validationError("format", "Must be text or markdown.");
+      format = input.format;
+    }
+    let viewOnce = loaded.metadata.viewOnce;
+    if (hasViewOnce) {
+      if (typeof input.viewOnce !== "boolean") throw validationError("viewOnce", "Must be a boolean.");
+      viewOnce = input.viewOnce;
+    }
+    const normalized = hasExpiration ? normalizeExpiration(input.expiration!, now) : undefined;
+    const expirationChanged = normalized !== undefined && (
+      normalized.expiration.kind === "relative" ||
+      normalized.expiresAt !== loaded.metadata.expiresAt ||
+      !sameExpiration(normalized.expiration, loaded.metadata.expiration)
+    );
+    const changed = title !== loaded.metadata.title || format !== loaded.metadata.format || viewOnce !== loaded.metadata.viewOnce || expirationChanged;
+    if (!changed) return { changed: false, paste: loaded.summary };
+
+    const expiresAt = hasExpiration ? normalized!.expiresAt : loaded.metadata.expiresAt;
+    const expiration = hasExpiration ? normalized!.expiration : loaded.metadata.expiration;
+    const physical = physicalExpiration(expiresAt, now);
+    const rewritesKeys = expirationChanged || physical !== loaded.metadata.physicalExpiration;
+    const options = physical === null ? {} : { expiration: physical };
+    if (rewritesKeys) {
+      try {
+        await this.db.put(contentKey(id), loaded.content, { ...options, metadata: loaded.marker });
+      } catch {
+        throw storageError("STORAGE_WRITE_FAILED");
+      }
+      await this.rewriteActiveRevisions(id, loaded.metadata, undefined, options);
+    }
+
+    const metadata: PasteMetadataV2 = {
+      ...loaded.metadata,
+      title,
+      format,
+      viewOnce,
+      updatedAt: now.toISOString(),
+      expiresAt,
+      expiration,
+      physicalExpiration: physical,
+      versionCounter: loaded.metadata.versionCounter + 1,
+    };
+    try {
+      await this.db.put(metaKey(id), JSON.stringify(metadata), options);
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED", rewritesKeys);
+    }
+    return { changed: true, paste: summary(metadata) };
+  }
+
+  async updatePassword(id: string, input: UpdatePasswordInput) {
+    const password = validatePassword(input.newPassword);
+    const loaded = await this.loadContent(id, input.password);
+    const nextPassword = password === "" ? null : password;
+    if (loaded.legacy) {
+      this.assertLegacyVersion(loaded.summary, input.version);
+      if (nextPassword === null) return { changed: false, paste: loaded.summary };
+      return {
+        changed: true,
+        paste: await this.migrateLegacy(id, loaded, {
+          content: loaded.content,
+          contentChanged: false,
+          title: loaded.summary.title,
+          format: "text",
+          password: nextPassword,
+          viewOnce: false,
+          expiresAt: loaded.summary.expiresAt,
+          expiration: loaded.summary.expiration,
+        }),
+      };
+    }
+    this.assertVersion(loaded.metadata, input.version);
+    if (nextPassword === loaded.metadata.password) return { changed: false, paste: loaded.summary };
+
+    const metadata: PasteMetadataV2 = {
+      ...loaded.metadata,
+      password: nextPassword,
+      updatedAt: this.mutationNow().toISOString(),
+      versionCounter: loaded.metadata.versionCounter + 1,
+    };
+    const options = metadata.physicalExpiration === null ? {} : { expiration: metadata.physicalExpiration };
+    try {
+      await this.db.put(metaKey(id), JSON.stringify(metadata), options);
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED");
+    }
+    return { changed: true, paste: summary(metadata) };
+  }
+
+  async delete(id: string, password?: string | null, version?: string): Promise<void> {
+    const loaded = await this.loadContent(id, password);
+    if (!loaded.legacy) this.assertVersion(loaded.metadata, version);
+    else if (version !== undefined && version !== "legacy") {
+      throw new PasteError("VERSION_CONFLICT", 409, undefined, { currentVersion: "legacy", updatedAt: loaded.summary.updatedAt });
+    }
+    await this.deleteFive(id, "delete");
+  }
+
+  async listHistory(id: string, password?: string | null): Promise<HistoryList> {
+    const loaded = await this.loadContent(id, password);
+    if (loaded.summary.viewOnce) throw new PasteError("VIEW_ONCE_HISTORY_FORBIDDEN", 409);
+    if (loaded.legacy) {
+      return { id, currentRevision: 1, currentVersion: "legacy", revisions: [] };
+    }
+    return {
+      id,
+      currentRevision: loaded.metadata.contentRevision,
+      currentVersion: `${loaded.metadata.generation}.${loaded.metadata.versionCounter}`,
+      revisions: loaded.metadata.history.entries.map(({ slot: _slot, ...descriptor }) => descriptor),
+    };
+  }
+
+  async getHistory(id: string, revision: string, password?: string | null): Promise<RevisionResource> {
+    const revisionNumber = this.parseRevision(revision);
+    const loaded = await this.loadContent(id, password);
+    if (loaded.summary.viewOnce) throw new PasteError("VIEW_ONCE_HISTORY_FORBIDDEN", 409);
+    if (loaded.legacy) throw new PasteError("REVISION_NOT_FOUND", 404);
+    const descriptor = loaded.metadata.history.entries.find((entry) => entry.revision === revisionNumber);
+    if (descriptor === undefined) throw new PasteError("REVISION_NOT_FOUND", 404);
+
+    let stored: { value: string | null; metadata: unknown };
+    try {
+      stored = await this.db.getWithMetadata<unknown>(revisionKey(id, descriptor.slot), "text");
+    } catch {
+      throw storageError("STORAGE_READ_FAILED");
+    }
+    if (stored.value === null) throw inconsistent();
+    try {
+      assertScalarSequence(stored.value, "content");
+    } catch {
+      throw inconsistent();
+    }
+    const marker = parseRevisionMarker(stored.metadata);
+    if (!this.revisionMatches(marker, descriptor, loaded.metadata.generation, stored.value)) throw inconsistent();
+    return {
+      id,
+      revision: descriptor.revision,
+      savedAt: descriptor.savedAt,
+      supersededAt: descriptor.supersededAt,
+      byteLength: descriptor.byteLength,
+      content: stored.value,
+    };
+  }
+
   async consume(loaded: LoadedPaste): Promise<void> {
     await this.deleteFive(loaded.summary.id, "consume");
+  }
+
+  private assertLegacyVersion(summary: PasteSummary, version: string | undefined): void {
+    if (version !== undefined && version !== "legacy") {
+      throw new PasteError("VERSION_CONFLICT", 409, undefined, { currentVersion: "legacy", updatedAt: summary.updatedAt });
+    }
+  }
+
+  private async migrateLegacy(
+    id: string,
+    loaded: Extract<LoadedPaste, { legacy: true }>,
+    input: LegacyMigrationInput,
+  ): Promise<PasteSummary> {
+    const now = this.mutationNow();
+    const mutationAt = now.toISOString();
+    const createdAt = loaded.summary.createdAt ?? mutationAt;
+    const currentSavedAt = input.contentChanged ? mutationAt : createdAt;
+    const physical = physicalExpiration(input.expiresAt, now);
+    const options = physical === null ? {} : { expiration: physical };
+    const generation = this.uuid();
+    const oldBytes = new TextEncoder().encode(loaded.content).byteLength;
+    const contentBytes = new TextEncoder().encode(input.content).byteLength;
+    const previous = input.contentChanged
+      ? {
+          revision: 1,
+          slot: 0,
+          savedAt: createdAt,
+          supersededAt: mutationAt,
+          byteLength: oldBytes,
+        }
+      : undefined;
+    const metadata: PasteMetadataV2 = {
+      schemaVersion: 2,
+      generation,
+      id,
+      title: input.title,
+      format: input.format,
+      password: input.password,
+      viewOnce: input.viewOnce,
+      createdAt,
+      updatedAt: mutationAt,
+      currentSavedAt,
+      expiresAt: input.expiresAt,
+      expiration: input.expiration,
+      physicalExpiration: physical,
+      versionCounter: 1,
+      contentRevision: input.contentChanged ? 2 : 1,
+      contentBytes,
+      createdCountry: loaded.summary.createdCountry,
+      history: previous === undefined ? { nextSlot: 0, entries: [] } : { nextSlot: 1, entries: [previous] },
+    };
+    try {
+      await this.db.put(metaKey(id), JSON.stringify(metadata), options);
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED");
+    }
+    if (previous !== undefined) {
+      const revisionMarker: RevisionMarkerV2 = {
+        kind: "cfpb/revision",
+        schemaVersion: 2,
+        generation,
+        revision: previous.revision,
+        savedAt: previous.savedAt,
+        supersededAt: previous.supersededAt,
+        byteLength: previous.byteLength,
+      };
+      try {
+        await this.db.put(revisionKey(id, 0), loaded.content, { ...options, metadata: revisionMarker });
+      } catch {
+        throw storageError("STORAGE_WRITE_FAILED", true);
+      }
+    }
+    const marker: ContentMarkerV2 = {
+      kind: "cfpb/content",
+      schemaVersion: 2,
+      generation,
+      contentRevision: metadata.contentRevision,
+      savedAt: currentSavedAt,
+      byteLength: contentBytes,
+      commit: null,
+    };
+    try {
+      await this.db.put(contentKey(id), input.content, { ...options, metadata: marker });
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED", true);
+    }
+    return summary(metadata);
+  }
+
+  private parseRevision(value: string): number {
+    if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) throw new PasteError("BAD_REQUEST", 400);
+    const revision = Number(value);
+    if (!Number.isSafeInteger(revision)) throw new PasteError("BAD_REQUEST", 400);
+    return revision;
+  }
+
+  private mutationNow(): Date {
+    const now = this.clock();
+    if (!Number.isFinite(now.getTime())) throw validationError("expiration", "Cannot normalize against an invalid clock.");
+    return now;
+  }
+
+  private assertVersion(metadata: PasteMetadataV2, version: string | undefined): void {
+    const currentVersion = `${metadata.generation}.${metadata.versionCounter}`;
+    if (version !== undefined && version !== currentVersion) {
+      throw new PasteError("VERSION_CONFLICT", 409, undefined, { currentVersion, updatedAt: metadata.updatedAt });
+    }
+  }
+
+  private revisionMatches(marker: RevisionMarkerV2, descriptor: HistoryDescriptor, generation: string, value: string): boolean {
+    return (
+      marker.generation === generation &&
+      marker.revision === descriptor.revision &&
+      marker.savedAt === descriptor.savedAt &&
+      marker.supersededAt === descriptor.supersededAt &&
+      marker.byteLength === descriptor.byteLength &&
+      new TextEncoder().encode(value).byteLength === descriptor.byteLength
+    );
+  }
+
+  private async rewriteActiveRevisions(
+    id: string,
+    metadata: PasteMetadataV2,
+    excludedSlot: number | undefined,
+    options: { expiration?: number },
+  ): Promise<void> {
+    for (const descriptor of metadata.history.entries) {
+      if (descriptor.slot === excludedSlot) continue;
+      let revision: { value: string | null; metadata: unknown };
+      try {
+        revision = await this.db.getWithMetadata<unknown>(revisionKey(id, descriptor.slot), "text");
+      } catch {
+        throw storageError("STORAGE_READ_FAILED");
+      }
+      if (revision.value === null) throw inconsistent();
+      try {
+        assertScalarSequence(revision.value, "content");
+      } catch {
+        throw inconsistent();
+      }
+      const marker = parseRevisionMarker(revision.metadata);
+      if (!this.revisionMatches(marker, descriptor, metadata.generation, revision.value)) throw inconsistent();
+      try {
+        await this.db.put(revisionKey(id, descriptor.slot), revision.value, { ...options, metadata: marker });
+      } catch {
+        throw storageError("STORAGE_WRITE_FAILED");
+      }
+    }
+  }
+
+  private async reconcileMetadataLast(
+    id: string,
+    marker: ContentMarkerV2,
+    metadata: PasteMetadataV2,
+    bytes: number,
+  ): Promise<PasteMetadataV2> {
+    const previous = marker.commit?.previous;
+    if (
+      previous === undefined ||
+      marker.generation !== metadata.generation ||
+      marker.contentRevision !== metadata.contentRevision + 1 ||
+      marker.byteLength !== bytes ||
+      previous.revision !== metadata.contentRevision ||
+      previous.slot !== metadata.history.nextSlot ||
+      previous.savedAt !== metadata.currentSavedAt ||
+      previous.byteLength !== metadata.contentBytes ||
+      previous.supersededAt !== marker.savedAt
+    ) {
+      throw inconsistent();
+    }
+
+    let revision: { value: string | null; metadata: unknown };
+    try {
+      revision = await this.db.getWithMetadata<unknown>(revisionKey(id, previous.slot), "text");
+    } catch {
+      throw storageError("STORAGE_READ_FAILED");
+    }
+    if (revision.value === null) throw inconsistent();
+    try {
+      assertScalarSequence(revision.value, "content");
+    } catch {
+      throw inconsistent();
+    }
+    const revisionMarker = parseRevisionMarker(revision.metadata);
+    if (!this.revisionMatches(revisionMarker, previous, marker.generation, revision.value)) throw inconsistent();
+
+    const entries = [previous, ...metadata.history.entries.filter((entry) => entry.slot !== previous.slot)]
+      .sort((left, right) => right.revision - left.revision)
+      .slice(0, 3);
+    const reconciled: PasteMetadataV2 = {
+      ...metadata,
+      updatedAt: marker.savedAt,
+      currentSavedAt: marker.savedAt,
+      versionCounter: Math.max(metadata.versionCounter, marker.commit!.versionCounter),
+      contentRevision: marker.contentRevision,
+      contentBytes: marker.byteLength,
+      history: { nextSlot: (previous.slot + 1) % 3, entries },
+    };
+    const options = reconciled.physicalExpiration === null ? {} : { expiration: reconciled.physicalExpiration };
+    try {
+      await this.db.put(metaKey(id), JSON.stringify(reconciled), options);
+    } catch {
+      throw storageError("STORAGE_WRITE_FAILED", true);
+    }
+    return reconciled;
   }
 
   private authorize(expected: string | null, supplied: string | null | undefined): void {
@@ -689,7 +1253,7 @@ export class PasteService {
     }
   }
 
-  private async deleteFive(id: string, reason: "consume" | "expiry"): Promise<void> {
+  private async deleteFive(id: string, reason: "consume" | "delete" | "expiry"): Promise<void> {
     const outcomes: PromiseSettledResult<void>[] = [];
     outcomes.push(await Promise.resolve().then(() => this.db.delete(contentKey(id))).then(
       () => ({ status: "fulfilled", value: undefined }) as const,
