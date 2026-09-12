@@ -16,6 +16,7 @@
 - 正文以 `<id> -> exact plaintext content` 保存；business metadata 和三个 revision slot 使用同一 namespace 的固定 sibling keys。
 - custom ID 匹配 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`，case-sensitive，拒绝冻结的 route names 和 internal prefix。
 - content 是有效 Unicode scalar sequence，UTF-8 大小为 `1..10_485_760` bytes，不 trim、不 normalize、不改换行。
+- relative expiration 是至少 60 秒的 safe integer，且 `now + seconds` 不晚于 `9999-12-31T23:59:59.999Z`；超出 RFC3339 可表示范围返回 422。
 - password 为空时表示未保护或 clear，非空时只能是 `1..128` 个 U+0020..U+007E 字符，并按冻结 contract plaintext 传输和存储。
 - view-once 使用 KV read-then-delete，先完成授权与 representation 渲染，再 awaited 删除五个 keys，最后返回正文；不声称跨地域 exactly-once。
 - `/html/:id` 返回 exact source，顶层同源可执行，不加 wrapper、sanitizer、sandbox 或 CSP。

@@ -113,7 +113,7 @@ api raw html md file delete mcp ip-trace assets favicon favicon.ico robots robot
 
 `ExpirationInput` 是以下四种之一：
 
-1. integer seconds，必须 `Number.isSafeInteger` 且不小于 60；
+1. integer seconds，必须 `Number.isSafeInteger` 且不小于 60，并且以 mutation `now` 计算后的 UTC instant 不晚于 `9999-12-31T23:59:59.999Z`；超过该可表示 RFC3339 上界时返回 422；
 2. JSON `null`；
 3. exact lowercase string `"permanent"`；
 4. 含 `Z` 或显式 numeric offset 的 RFC3339 timestamp。
