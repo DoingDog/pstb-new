@@ -151,7 +151,7 @@ Use `npm install` once to generate the lockfile. Do not use Vitest 5 because `@c
 }
 ```
 
-`tsconfig.json` uses `strict:true`, `noUncheckedIndexedAccess:true`, `exactOptionalPropertyTypes:true`, `module:"ESNext"`, `moduleResolution:"Bundler"`, `target:"ES2023"`, `lib:["ES2023","DOM","DOM.Iterable","WebWorker"]`, and types for `@cloudflare/workers-types` and `vitest/globals`. `vitest.config.ts` uses `defineWorkersConfig` and `poolOptions.workers.wrangler.configPath:"./wrangler.jsonc"`.
+`tsconfig.json` uses `strict:true`, `noUncheckedIndexedAccess:true`, `exactOptionalPropertyTypes:true`, `module:"ESNext"`, `moduleResolution:"Bundler"`, `target:"ES2023"`, `lib:["ES2023","DOM","DOM.Iterable","WebWorker"]`, and types for `@cloudflare/workers-types`, `@cloudflare/vitest-plugin/types`, and `vitest/globals`. `vitest.config.ts` uses the pinned plugin's actual `cloudflareTest({wrangler:{configPath:"./wrangler.jsonc"}})` API and restricts discovery to `src/**/*.test.ts` so Vitest never collects Playwright specs.
 
 - [ ] **Step 4: Implement deterministic two-pass client build**
 
@@ -166,7 +166,7 @@ export const assetPaths = Object.freeze({
 });
 ```
 
-The generated file must contain resolved names, not literal angle-bracket text. Dynamic imports from `src/client/markdown.ts` remain split chunks under `/assets/`.
+The generated file must contain resolved names, not literal angle-bracket text. Dynamic imports from `src/client/markdown.ts` remain split chunks under `/assets/`. The same build atomically generates `dist/assets/_headers` with `/assets/*` and `Cache-Control: public, max-age=31536000, immutable`, because Worker code cannot modify matched static-asset responses.
 
 - [ ] **Step 5: Add the smallest buildable entries**
 
