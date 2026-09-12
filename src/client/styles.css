@@ -5,6 +5,7 @@
   --ink: #18212B;
   --muted: #526171;
   --rule: #C8D2DC;
+  --control-border: #7C8C9D;
   --signal: #2855A6;
   --positive: #176B4D;
   --danger: #A9213D;
@@ -21,6 +22,7 @@
     --ink: #EDF2F7;
     --muted: #A8B4C2;
     --rule: #394858;
+    --control-border: #8295A8;
     --signal: #8EAEFF;
     --positive: #72D2AA;
     --danger: #FF8CA3;
@@ -34,6 +36,7 @@
   --ink: #18212B;
   --muted: #526171;
   --rule: #C8D2DC;
+  --control-border: #7C8C9D;
   --signal: #2855A6;
   --positive: #176B4D;
   --danger: #A9213D;
@@ -46,6 +49,7 @@
   --ink: #EDF2F7;
   --muted: #A8B4C2;
   --rule: #394858;
+  --control-border: #8295A8;
   --signal: #8EAEFF;
   --positive: #72D2AA;
   --danger: #FF8CA3;
@@ -93,7 +97,7 @@ button,
 input:not([type="checkbox"]),
 select,
 textarea {
-  border: 1px solid var(--rule);
+  border: 1px solid var(--control-border);
   border-radius: 4px;
   background: var(--surface);
 }
@@ -209,7 +213,7 @@ textarea,
 
 .utility-actions > a,
 .representations a {
-  border: 1px solid var(--rule);
+  border: 1px solid var(--control-border);
   border-radius: 4px;
   text-decoration: none;
 }
@@ -256,10 +260,13 @@ textarea,
   min-inline-size: 0;
   margin: 0.15rem 0 0;
   overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  line-height: 1.45;
 }
 
-.lifecycle-list code {
-  font-size: 0.9375rem;
+.lifecycle-list dd code {
+  font-size: 15px;
+  line-height: 1.62;
 }
 
 [data-save-status="saved"] {
@@ -277,6 +284,7 @@ textarea,
 h1 {
   max-inline-size: 72ch;
   margin: 0 0 1.5rem;
+  overflow-wrap: anywhere;
   font-size: clamp(1.45rem, 3vw, 2.15rem);
   font-weight: 650;
   line-height: 1.15;
@@ -297,7 +305,7 @@ h2 {
   align-items: center;
   min-block-size: 44px;
   padding-inline: 0.75rem;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--control-border);
   border-radius: 4px;
   text-decoration: none;
 }
@@ -306,6 +314,55 @@ h2 {
   display: grid;
   gap: 0.4rem;
   margin-block: 1rem;
+}
+
+[data-workbench="create"] .workbench-form {
+  display: grid;
+  grid-template-areas:
+    "title format expiration"
+    "content content content"
+    "password custom-id view-once"
+    "actions actions actions";
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  max-inline-size: none;
+}
+
+[data-workbench="create"] .form-section {
+  margin-block: 0;
+}
+
+[data-create-field="title"] {
+  grid-area: title;
+}
+
+[data-create-field="format"] {
+  grid-area: format;
+}
+
+[data-create-field="expiration"] {
+  grid-area: expiration;
+}
+
+[data-create-field="content"] {
+  grid-area: content;
+}
+
+[data-create-field="password"] {
+  grid-area: password;
+}
+
+[data-create-field="custom-id"] {
+  grid-area: custom-id;
+}
+
+[data-create-field="view-once"] {
+  grid-area: view-once;
+}
+
+[data-workbench="create"] .form-actions {
+  grid-area: actions;
+  margin-block-start: 0;
 }
 
 .form-section label,
@@ -379,6 +436,12 @@ textarea,
   color: var(--surface);
 }
 
+.primary-action:disabled {
+  border-color: var(--muted);
+  background: var(--muted);
+  color: var(--surface);
+}
+
 .danger-action {
   border-color: var(--danger);
   color: var(--danger);
@@ -419,7 +482,10 @@ textarea,
 }
 
 pre.paste-content,
+.paste-content pre,
+.markdown-document article pre,
 .diff-viewport {
+  max-inline-size: 100%;
   padding: 0.75rem;
   border: 1px solid var(--rule);
   background: var(--canvas);
@@ -427,15 +493,29 @@ pre.paste-content,
   white-space: pre;
 }
 
+pre.paste-content,
+.paste-content pre,
+.markdown-document article pre {
+  max-block-size: 60vh;
+}
+
 .paste-content:not(pre) {
   overflow-wrap: anywhere;
 }
 
-.paste-content table {
+.paste-content table,
+.markdown-document article table {
   display: block;
   max-inline-size: 100%;
-  overflow-x: auto;
+  max-block-size: 60vh;
+  overflow: auto;
   border-collapse: collapse;
+}
+
+.paste-content img,
+.markdown-document article img {
+  max-inline-size: 100%;
+  block-size: auto;
 }
 
 .paste-content th,
@@ -567,11 +647,29 @@ dialog::backdrop,
   }
 
   .utility-actions > a,
-  .utility-actions > button:not(:nth-last-child(-n + 2)) {
+  .utility-actions > button {
     display: none;
   }
 
+  .utility-actions > [data-action="locale"],
+  .utility-actions > [data-action="theme"] {
+    display: inline-flex;
+  }
+
   .workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-workbench="create"] .workbench-form {
+    grid-template-areas:
+      "title"
+      "format"
+      "expiration"
+      "content"
+      "password"
+      "custom-id"
+      "view-once"
+      "actions";
     grid-template-columns: minmax(0, 1fr);
   }
 

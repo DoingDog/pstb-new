@@ -119,6 +119,28 @@ describe("application documents", () => {
     expect(markdown).not.toContain("<script>literal</script>");
   });
 
+  it.each([
+    ["en", ["Optional. Up to 200 characters.", "Select the default view for this paste.", "Choose when this paste expires.", "Optional. Use 1 to 128 visible ASCII characters.", "Optional. Start with a letter or number; use up to 64 letters, numbers, underscores, or hyphens."]],
+    ["zh-CN", ["可选。最多 200 个字符。", "选择此剪贴板默认打开的视图。", "选择剪贴板何时过期。", "可选。使用 1 到 128 个可见 ASCII 字符。", "可选。以字母或数字开头，最多 64 个字母、数字、下划线或连字符。"]],
+  ] as const)("renders %s create fields in reading order with visible descriptions", (locale, descriptions) => {
+    const html = renderCreatePage(locale);
+    const ids = ["title", "format", "expiration", "content", "password", "custom-id", "view-once"];
+    const positions = ids.map((id) => html.indexOf(`id="${id}"`));
+
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+    for (const [id, description] of [
+      ["title", descriptions[0]],
+      ["format", descriptions[1]],
+      ["expiration", descriptions[2]],
+      ["password", descriptions[3]],
+      ["custom-id", descriptions[4]],
+    ]) {
+      expect(html).toContain(`aria-describedby="${id}-description ${id}-error"`);
+      expect(html).toContain(`<p id="${id}-description">${description}</p>`);
+    }
+  });
+
   it("renders a workbench shell with an accessible tab workspace and empty deferred panels", () => {
     const create = renderCreatePage("en");
     const html = renderPastePage({ locale: "en", paste, content: "source" });

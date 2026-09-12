@@ -74,11 +74,16 @@ const englishLabels = {
   create: "Create a paste",
   content: "Content",
   title: "Title",
+  titleDescription: "Optional. Up to 200 characters.",
   format: "Format",
+  formatDescription: "Select the default view for this paste.",
   expiration: "Expiration",
+  expirationDescription: "Choose when this paste expires.",
   password: "Password",
+  passwordDescription: "Optional. Use 1 to 128 visible ASCII characters.",
   viewOnce: "View once",
   customId: "Custom ID",
+  customIdDescription: "Optional. Start with a letter or number; use up to 64 letters, numbers, underscores, or hyphens.",
   submit: "Create",
   reveal: "Show password",
   theme: "Theme",
@@ -144,11 +149,16 @@ const chineseLabels: Labels = {
   create: "创建粘贴内容",
   content: "内容",
   title: "标题",
+  titleDescription: "可选。最多 200 个字符。",
   format: "格式",
+  formatDescription: "选择此剪贴板默认打开的视图。",
   expiration: "过期时间",
+  expirationDescription: "选择剪贴板何时过期。",
   password: "密码",
+  passwordDescription: "可选。使用 1 到 128 个可见 ASCII 字符。",
   viewOnce: "阅后即焚",
   customId: "自定义 ID",
+  customIdDescription: "可选。以字母或数字开头，最多 64 个字母、数字、下划线或连字符。",
   submit: "创建",
   reveal: "显示密码",
   theme: "主题",
@@ -329,13 +339,13 @@ ${createLifecycleRail(copy)}
 <section class="workbench-surface" aria-labelledby="page-title">
 <h1 id="page-title">${copy.create}</h1>
 <form id="create-form" class="workbench-form" method="post" action="/api/pastes">
-<div class="form-section editor-surface"><label for="content">${copy.content}</label><textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description content-error"></textarea><p id="content-description">${copy.storedExactly}</p><p id="content-error" class="field-error" hidden></p></div>
-<div class="form-section"><label for="title">${copy.title}</label><input id="title" name="title" type="text" maxlength="200" aria-describedby="title-error"><p id="title-error" class="field-error" hidden></p></div>
-<div class="form-section"><label for="format">${copy.format}</label><select id="format" name="format" aria-describedby="format-error"><option value="text">${copy.text}</option><option value="markdown">${copy.markdown}</option></select><p id="format-error" class="field-error" hidden></p></div>
-<div class="form-section"><label for="expiration">${copy.expiration}</label><select id="expiration" name="expiration" aria-describedby="expiration-error">${options}</select><p id="expiration-error" class="field-error" hidden></p></div>
-<div class="form-section"><label for="password">${copy.password}</label><div class="password-control"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-error"><button type="button" data-action="reveal-password" aria-label="${copy.reveal}">${copy.reveal}</button></div><p id="password-error" class="field-error" hidden></p></div>
-<div class="form-section"><label class="checkbox-label"><input id="view-once" name="viewOnce" type="checkbox" value="true" aria-describedby="view-once-description view-once-error">${copy.viewOnce}</label><p id="view-once-description">${copy.viewOnceDescription}</p><p id="view-once-error" class="field-error" hidden></p></div>
-<div class="form-section"><label for="custom-id">${copy.customId}</label><input id="custom-id" name="customId" type="text" aria-describedby="custom-id-error"><p id="custom-id-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="title"><label for="title">${copy.title}</label><input id="title" name="title" type="text" maxlength="200" aria-describedby="title-description title-error"><p id="title-description">${copy.titleDescription}</p><p id="title-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="format"><label for="format">${copy.format}</label><select id="format" name="format" aria-describedby="format-description format-error"><option value="text">${copy.text}</option><option value="markdown">${copy.markdown}</option></select><p id="format-description">${copy.formatDescription}</p><p id="format-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="expiration"><label for="expiration">${copy.expiration}</label><select id="expiration" name="expiration" aria-describedby="expiration-description expiration-error">${options}</select><p id="expiration-description">${copy.expirationDescription}</p><p id="expiration-error" class="field-error" hidden></p></div>
+<div class="form-section editor-surface" data-create-field="content"><label for="content">${copy.content}</label><textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description content-error"></textarea><p id="content-description">${copy.storedExactly}</p><p id="content-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="password"><label for="password">${copy.password}</label><div class="password-control"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-description password-error"><button type="button" data-action="reveal-password" aria-label="${copy.reveal}">${copy.reveal}</button></div><p id="password-description">${copy.passwordDescription}</p><p id="password-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="custom-id"><label for="custom-id">${copy.customId}</label><input id="custom-id" name="customId" type="text" aria-describedby="custom-id-description custom-id-error"><p id="custom-id-description">${copy.customIdDescription}</p><p id="custom-id-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="view-once"><label class="checkbox-label"><input id="view-once" name="viewOnce" type="checkbox" value="true" aria-describedby="view-once-description view-once-error">${copy.viewOnce}</label><p id="view-once-description">${copy.viewOnceDescription}</p><p id="view-once-error" class="field-error" hidden></p></div>
 <div class="form-actions"><button class="primary-action" type="submit">${copy.submit}</button><p id="create-status" aria-live="polite"></p></div>
 </form>
 </section>
