@@ -1,4 +1,6 @@
 import type { Crepe } from "@milkdown/crepe";
+import { prosePluginsCtx } from "@milkdown/kit/core";
+import { Plugin } from "@milkdown/kit/prose/state";
 
 export type MarkdownMode = "source" | "visual" | "preview";
 
@@ -83,8 +85,18 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
       if (currentAttempt !== attempt) return;
 
       const editor = new Crepe({ root: options.visualRoot, defaultValue: visualSourceSnapshot });
-      editor.on((listener) => {
-        listener.markdownUpdated(() => commitVisualDocument(editor));
+      editor.editor.config((ctx) => {
+        ctx.update(prosePluginsCtx, (plugins) =>
+          plugins.concat(
+            new Plugin({
+              view: () => ({
+                update: (view, previous) => {
+                  if (view.state.doc !== previous.doc) commitVisualDocument(editor);
+                },
+              }),
+            }),
+          ),
+        );
       });
       visualEditor = editor;
       await editor.create();

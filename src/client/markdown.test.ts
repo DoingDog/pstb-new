@@ -1,6 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const crepe = vi.hoisted(() => {
+  interface FakeEditorView {
+    state: { doc: object };
+  }
+
+  interface FakeDocumentPlugin {
+    spec: {
+      view?(view: FakeEditorView): { update?(view: FakeEditorView, previous: FakeEditorView["state"]): void };
+    };
+  }
+
   const state = {
     failCreate: false,
     instances: [] as FakeCrepe[],
@@ -10,7 +20,19 @@ const crepe = vi.hoisted(() => {
     markdown: string;
     getMarkdownCalls = 0;
     destroyed = false;
+    private doc = {};
+    private documentPlugin: FakeDocumentPlugin | undefined;
+    private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
     private readonly markdownUpdated: Array<() => void> = [];
+    readonly editor = {
+      config: (configure: (ctx: { update(key: unknown, update: (plugins: FakeDocumentPlugin[]) => FakeDocumentPlugin[]): void }) => void): void => {
+        configure({
+          update: (_key, update) => {
+            this.documentPlugin = update([]).at(-1);
+          },
+        });
+      },
+    };
 
     constructor(options: { defaultValue?: string }) {
       this.markdown = options.defaultValue ?? "";
@@ -24,6 +46,7 @@ const crepe = vi.hoisted(() => {
 
     async create(): Promise<void> {
       if (state.failCreate) throw new Error("Crepe failed to initialize");
+      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
     }
 
     async destroy(): Promise<void> {
@@ -36,8 +59,13 @@ const crepe = vi.hoisted(() => {
     }
 
     documentChanged(markdown: string): void {
+      const previous = { doc: this.doc };
       this.markdown = markdown;
-      this.markdownUpdated.forEach((callback) => callback());
+      this.doc = {};
+      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
+      if (this.markdownUpdated.length > 0) {
+        setTimeout(() => this.markdownUpdated.forEach((callback) => callback()), 1_000);
+      }
     }
   }
 
@@ -81,6 +109,10 @@ beforeEach(() => {
   preview.gfmHtml.mockClear();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("createMarkdownModes", () => {
   it("restores byte-exact source without saving when visual mode has no document transaction", async () => {
     const { source, onDocumentChange, modes } = fixture();
@@ -95,7 +127,8 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).not.toHaveBeenCalled();
   });
 
-  it("serializes a real visual document transaction as the canonical draft", async () => {
+  it("serializes a visual edit when leaving before markdown serialization", async () => {
+    vi.useFakeTimers();
     const { source, onDocumentChange, modes } = fixture();
 
     await modes.enterVisual();
@@ -105,6 +138,18 @@ describe("createMarkdownModes", () => {
     expect(source.value).toBe("# serialized\n");
     expect(onDocumentChange).toHaveBeenCalledTimes(1);
     expect(onDocumentChange).toHaveBeenCalledWith("# serialized\n");
+  });
+
+  it("notifies autosave at the edit instead of 1,000 ms later", async () => {
+    vi.useFakeTimers();
+    const { onDocumentChange, modes } = fixture();
+
+    await modes.enterVisual();
+    crepe.state.instances[0]!.documentChanged("# saved at edit\n");
+
+    expect(onDocumentChange).toHaveBeenCalledWith("# saved at edit\n");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
   });
 
   it("renders preview from the current draft without changing it", async () => {

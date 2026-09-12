@@ -1,31 +1,51 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const visual = vi.hoisted(() => {
+  interface FakeEditorView {
+    state: { doc: object };
+  }
+
+  interface FakeDocumentPlugin {
+    spec: {
+      view?(view: FakeEditorView): { update?(view: FakeEditorView, previous: FakeEditorView["state"]): void };
+    };
+  }
+
   const state = { instances: [] as FakeCrepe[] };
 
   class FakeCrepe {
     markdown = "";
-    private readonly markdownUpdated: Array<() => void> = [];
+    private doc = {};
+    private documentPlugin: FakeDocumentPlugin | undefined;
+    private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
+    readonly editor = {
+      config: (configure: (ctx: { update(key: unknown, update: (plugins: FakeDocumentPlugin[]) => FakeDocumentPlugin[]): void }) => void): void => {
+        configure({
+          update: (_key, update) => {
+            this.documentPlugin = update([]).at(-1);
+          },
+        });
+      },
+    };
 
     constructor(options: { defaultValue?: string }) {
       this.markdown = options.defaultValue ?? "";
       state.instances.push(this);
     }
 
-    on(register: (listener: { markdownUpdated(callback: () => void): void }) => void): this {
-      register({ markdownUpdated: (callback) => this.markdownUpdated.push(callback) });
-      return this;
+    async create(): Promise<void> {
+      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
     }
-
-    async create(): Promise<void> {}
     async destroy(): Promise<void> {}
     getMarkdown(): string {
       return this.markdown;
     }
 
     documentChanged(markdown: string): void {
+      const previous = { doc: this.doc };
       this.markdown = markdown;
-      this.markdownUpdated.forEach((callback) => callback());
+      this.doc = {};
+      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
     }
   }
 
