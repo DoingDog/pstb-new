@@ -2,9 +2,45 @@ import { PasteError } from "./types";
 
 const maxRequestBytes = 67_108_864;
 const maxJsonDepth = 256;
-const stringPieceLimit = 8_192;
+const tokenBlockLength = 8_192;
 
 const whitespace = /[ \t\n\r]+/y;
+
+class FlatTextBuffer {
+  #blocks: string[] = [];
+  #length = 0;
+  #parts: string[] = [];
+
+  append(source: string, start = 0, end = source.length): void {
+    while (start < end) {
+      const next = Math.min(start + tokenBlockLength - this.#length, end);
+      this.#parts.push(source.slice(start, next));
+      this.#length += next - start;
+      start = next;
+      if (this.#length === tokenBlockLength) this.flush();
+    }
+  }
+
+  finish(): string {
+    this.flush();
+    const value = this.#blocks.join("");
+    this.reset();
+    return value;
+  }
+
+  reset(): void {
+    this.#blocks = [];
+    this.#length = 0;
+    this.#parts = [];
+  }
+
+  private flush(): void {
+    if (this.#length === 0) return;
+    this.#blocks.push(this.#parts.join(""));
+    this.#length = 0;
+    this.#parts = [];
+  }
+}
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
@@ -121,12 +157,11 @@ class StrictJsonParser {
   #literal = "";
   #literalIndex = 0;
   #literalValue: boolean | null = null;
-  #number = "";
+  #number = new FlatTextBuffer();
   #numberState: NumberState = "minus";
   #root: JsonValue | undefined;
   #state: ParserState = "normal";
-  #string = "";
-  #stringPart = "";
+  #string = new FlatTextBuffer();
   #unicode = "";
 
   write(source: string): void {
@@ -146,7 +181,7 @@ class StrictJsonParser {
           position = this.readUnicode(source, position);
           break;
         case "number":
-          if (this.readNumber(source[position]!)) position += 1;
+          position = this.readNumber(source, position);
           break;
         case "literal":
           position = this.readLiteral(source, position);
@@ -208,8 +243,7 @@ class StrictJsonParser {
       case "7":
       case "8":
       case "9":
-        this.startNumber(character);
-        return position + 1;
+        return this.startNumber(source, position);
       default:
         this.invalid();
     }
@@ -217,7 +251,7 @@ class StrictJsonParser {
 
   private readString(source: string, position: number): number {
     const end = this.findStringSpecial(source, position);
-    if (end > position) this.appendString(source.slice(position, end));
+    if (end > position) this.#string.append(source, position, end);
     if (end === source.length) return end;
 
     const character = source[end]!;
@@ -248,27 +282,27 @@ class StrictJsonParser {
       case '"':
       case "\\":
       case "/":
-        this.appendString(character);
+        this.#string.append(character);
         this.#state = "string";
         return position + 1;
       case "b":
-        this.appendString("\b");
+        this.#string.append("\b");
         this.#state = "string";
         return position + 1;
       case "f":
-        this.appendString("\f");
+        this.#string.append("\f");
         this.#state = "string";
         return position + 1;
       case "n":
-        this.appendString("\n");
+        this.#string.append("\n");
         this.#state = "string";
         return position + 1;
       case "r":
-        this.appendString("\r");
+        this.#string.append("\r");
         this.#state = "string";
         return position + 1;
       case "t":
-        this.appendString("\t");
+        this.#string.append("\t");
         this.#state = "string";
         return position + 1;
       case "u":
@@ -285,103 +319,74 @@ class StrictJsonParser {
     if (!this.isHexadecimal(character)) this.invalid();
     this.#unicode += character;
     if (this.#unicode.length === 4) {
-      this.appendString(String.fromCharCode(Number.parseInt(this.#unicode, 16)));
+      this.#string.append(String.fromCharCode(Number.parseInt(this.#unicode, 16)));
       this.#state = "string";
     }
     return position + 1;
   }
 
-  private readNumber(character: string): boolean {
+  private readNumber(source: string, position: number): number {
+    const character = source[position]!;
     switch (this.#numberState) {
       case "minus":
-        if (character === "0") {
-          this.appendNumber(character, "zero");
-          return true;
-        }
-        if (this.isDigitOneToNine(character)) {
-          this.appendNumber(character, "integer");
-          return true;
-        }
+        if (character === "0") return this.appendNumber(source, position, position + 1, "zero");
+        if (this.isDigitOneToNine(character)) return this.readNumberDigits(source, position, "integer");
         this.invalid();
       case "zero":
-        if (character === ".") {
-          this.appendNumber(character, "fractionFirst");
-          return true;
-        }
-        if (character === "e" || character === "E") {
-          this.appendNumber(character, "exponentFirst");
-          return true;
-        }
+        if (character === ".") return this.appendNumber(source, position, position + 1, "fractionFirst");
+        if (character === "e" || character === "E") return this.appendNumber(source, position, position + 1, "exponentFirst");
         if (this.isNumberDelimiter(character)) {
           this.finishNumber();
-          return false;
+          return position;
         }
         this.invalid();
       case "integer":
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "integer");
-          return true;
-        }
-        if (character === ".") {
-          this.appendNumber(character, "fractionFirst");
-          return true;
-        }
-        if (character === "e" || character === "E") {
-          this.appendNumber(character, "exponentFirst");
-          return true;
-        }
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "integer");
+        if (character === ".") return this.appendNumber(source, position, position + 1, "fractionFirst");
+        if (character === "e" || character === "E") return this.appendNumber(source, position, position + 1, "exponentFirst");
         if (this.isNumberDelimiter(character)) {
           this.finishNumber();
-          return false;
+          return position;
         }
         this.invalid();
       case "fractionFirst":
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "fraction");
-          return true;
-        }
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "fraction");
         this.invalid();
       case "fraction":
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "fraction");
-          return true;
-        }
-        if (character === "e" || character === "E") {
-          this.appendNumber(character, "exponentFirst");
-          return true;
-        }
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "fraction");
+        if (character === "e" || character === "E") return this.appendNumber(source, position, position + 1, "exponentFirst");
         if (this.isNumberDelimiter(character)) {
           this.finishNumber();
-          return false;
+          return position;
         }
         this.invalid();
       case "exponentFirst":
-        if (character === "+" || character === "-") {
-          this.appendNumber(character, "exponentSign");
-          return true;
-        }
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "exponent");
-          return true;
-        }
+        if (character === "+" || character === "-") return this.appendNumber(source, position, position + 1, "exponentSign");
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "exponent");
         this.invalid();
       case "exponentSign":
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "exponent");
-          return true;
-        }
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "exponent");
         this.invalid();
       case "exponent":
-        if (this.isDigit(character)) {
-          this.appendNumber(character, "exponent");
-          return true;
-        }
+        if (this.isDigit(character)) return this.readNumberDigits(source, position, "exponent");
         if (this.isNumberDelimiter(character)) {
           this.finishNumber();
-          return false;
+          return position;
         }
         this.invalid();
     }
+  }
+
+  private appendNumber(source: string, start: number, end: number, state: NumberState): number {
+    this.#number.append(source, start, end);
+    this.#numberState = state;
+    return end;
+  }
+
+  private readNumberDigits(source: string, position: number, state: NumberState): number {
+    let end = position + 1;
+    while (end < source.length && this.isDigit(source[end]!)) end += 1;
+    return this.appendNumber(source, position, end, state);
   }
 
   private readLiteral(source: string, position: number): number {
@@ -480,43 +485,28 @@ class StrictJsonParser {
   }
 
   private startString(): void {
-    this.#string = "";
-    this.#stringPart = "";
+    this.#string.reset();
     this.#state = "string";
   }
 
-  private appendString(value: string): void {
-    this.#stringPart += value;
-    if (this.#stringPart.length >= stringPieceLimit) {
-      this.#string += this.#stringPart;
-      this.#stringPart = "";
-    }
-  }
-
   private finishString(): string {
-    const value = this.#string + this.#stringPart;
-    this.#string = "";
-    this.#stringPart = "";
-    return value;
+    return this.#string.finish();
   }
 
-  private startNumber(character: string): void {
-    this.#number = character;
+  private startNumber(source: string, position: number): number {
+    const character = source[position]!;
+    this.#number.reset();
     this.#numberState = character === "-" ? "minus" : character === "0" ? "zero" : "integer";
     this.#state = "number";
-  }
-
-  private appendNumber(character: string, state: NumberState): void {
-    this.#number += character;
-    this.#numberState = state;
+    this.appendNumber(source, position, position + 1, this.#numberState);
+    return position + 1 === source.length ? source.length : this.readNumber(source, position + 1);
   }
 
   private finishNumber(): void {
     if (this.#numberState !== "zero" && this.#numberState !== "integer" && this.#numberState !== "fraction" && this.#numberState !== "exponent") {
       this.invalid();
     }
-    const value = Number(this.#number);
-    this.#number = "";
+    const value = Number(this.#number.finish());
     this.#state = "normal";
     this.acceptValue(value);
   }

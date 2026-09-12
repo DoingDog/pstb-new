@@ -17,6 +17,22 @@ function streamedRequest(body: ReadableStream<Uint8Array>, headers?: HeadersInit
   return { body, headers: new Headers(headers) } as Request;
 }
 
+function chunkedUtf8Request(source: string, chunkBytes = 65_537): Request {
+  const bytes = new TextEncoder().encode(source);
+  let position = 0;
+  return streamedRequest(new ReadableStream({
+    pull(controller) {
+      if (position === bytes.byteLength) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(position + chunkBytes, bytes.byteLength);
+      controller.enqueue(bytes.subarray(position, end));
+      position = end;
+    },
+  }));
+}
+
 function trackedBody(chunks: number, chunkBytes: number, rejectCancel = false): {
   body: ReadableStream<Uint8Array>;
   state: { cancels: number; pulls: number };
@@ -185,6 +201,25 @@ describe("strict JSON boundary", () => {
     await expect(
       parseStrictJsonObject(request('{"pas\\u0073word":"correct"}'), new Set(["password"])),
     ).resolves.toEqual({ password: "correct" });
+  });
+
+  it("parses a multi-megabyte escaped string across decoded chunks", async () => {
+    const length = 2 * 1024 * 1024;
+    const parsed = await parseStrictJsonObject(
+      chunkedUtf8Request(`{"value":"${"\\u0061".repeat(length)}"}`),
+      new Set(["value"]),
+    );
+
+    expect(parsed.value).toBe("a".repeat(length));
+  });
+
+  it("accepts a long numeric token without a token-length limit", async () => {
+    const parsed = await parseStrictJsonObject(
+      chunkedUtf8Request(`{"value":1${"0".repeat(4 * 1024 * 1024)}}`),
+      new Set(["value"]),
+    );
+
+    expect(parsed.value).toBe(Infinity);
   });
 
   it("reads a body with the supplied byte limit and decodes valid UTF-8", async () => {
