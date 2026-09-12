@@ -25,11 +25,12 @@ type Operation = {
 class RecordingKV {
   readonly entries = new Map<string, Entry>();
   readonly operations: Operation[] = [];
-  private failAt: number | undefined;
+  private readonly failureOperations = new Set<number>();
   private stale: Map<string, Entry> | undefined;
 
-  injectFailure(operation: number): void {
-    this.failAt = operation;
+  injectFailure(...operations: number[]): void {
+    this.failureOperations.clear();
+    for (const operation of operations) this.failureOperations.add(operation);
   }
 
   useStaleSnapshot(): void {
@@ -69,7 +70,7 @@ class RecordingKV {
 
   private record(operation: Operation): void {
     this.operations.push(operation);
-    if (this.operations.length === this.failAt) throw new Error(`injected failure at ${this.failAt}`);
+    if (this.failureOperations.has(this.operations.length)) throw new Error(`injected failure at ${this.operations.length}`);
   }
 }
 
@@ -157,7 +158,17 @@ describe("validation", () => {
     });
   });
 
-  it.each([59, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, "Permanent", "2026-09-13T00:01:00", "2026-02-30T00:01:00Z", "2026-09-13T00:00:59.999Z"])
+  it("accepts the RFC3339 relative-expiration boundary and rejects one second beyond it", () => {
+    const boundaryNow = new Date("9999-12-31T23:58:59.999Z");
+
+    expect(normalizeExpiration(60, boundaryNow)).toMatchObject({
+      expiration: { kind: "relative", seconds: 60 },
+      expiresAt: "9999-12-31T23:59:59.999Z",
+    });
+    expectPasteError(() => normalizeExpiration(61, boundaryNow), "VALIDATION_FAILED");
+  });
+
+  it.each([59, Number.MAX_SAFE_INTEGER + 1, "Permanent", "2026-09-13T00:01:00", "2026-02-30T00:01:00Z", "2026-09-13T00:00:59.999Z"])
     ("rejects invalid expiration input: %s", (expiration) => {
       expectPasteError(() => normalizeExpiration(expiration, now), "VALIDATION_FAILED");
     });
@@ -186,6 +197,19 @@ describe("create", () => {
     expect(kv.entries.get(summary.id)?.expiration).toBe(kv.entries.get(metaKey(summary.id))?.expiration);
   });
 
+  it("preserves the current-schema Cloudflare T1 country value through a coherent read", async () => {
+    const kv = new RecordingKV();
+    const pasteService = service(kv);
+
+    const created = await pasteService.create({ content: "content", customId: "cloudflare-country", expiration: 60 }, { country: "T1" });
+
+    expect(created.createdCountry).toBe("T1");
+    expect(JSON.parse(kv.entries.get(metaKey("cloudflare-country"))!.value)).toMatchObject({ createdCountry: "T1" });
+    await expect(pasteService.loadContent("cloudflare-country", undefined)).resolves.toMatchObject({
+      summary: { createdCountry: "T1" },
+    });
+  });
+
   it("checks every key before accepting a custom ID", async () => {
     for (const occupied of fiveKeys("taken")) {
       const kv = new RecordingKV();
@@ -206,6 +230,24 @@ describe("create", () => {
     expect(kv.operations.slice(0, 5).map((operation) => operation.key)).toEqual(fiveKeys("ordered"));
     expect(kv.operations.slice(0, 5).map((operation) => operation.type)).toEqual(["get", "get", "get", "get", "get"]);
   });
+
+  it.each(fiveKeys("collision-failure").map((key, index) => [key, index + 1] as const))(
+    "returns STORAGE_READ_FAILED when collision read %s fails",
+    async (_key, failureOffset) => {
+      const kv = new RecordingKV();
+      kv.injectFailure(failureOffset);
+
+      await expect(service(kv).create({ content: "content", customId: "collision-failure", expiration: 60 }, {})).rejects.toMatchObject({
+        code: "STORAGE_READ_FAILED",
+        status: 503,
+        details: { retryable: true },
+      });
+      expect(kv.operations.map((operation) => `${operation.type}:${operation.key}`)).toEqual(
+        fiveKeys("collision-failure").slice(0, failureOffset).map((key) => `get:${key}`),
+      );
+      expect(kv.operations.some((operation) => operation.type === "put" || operation.type === "delete")).toBe(false);
+    },
+  );
 
   it("retries automatic IDs deterministically no more than five times", async () => {
     const ids = Array.from({ length: 5 }, (_, index) => `00000000-0000-4000-8000-00000000000${index + 1}`);
@@ -239,20 +281,36 @@ describe("create", () => {
     expect(calls).toBe(4);
   });
 
-  it("removes metadata and revision siblings when the main write fails", async () => {
+  it.each([
+    ["metadata put", [6], false],
+    ["main put", [7], false],
+    ["metadata compensation delete", [7, 8], true],
+    ["first revision compensation delete", [7, 9], true],
+    ["second revision compensation delete", [7, 10], true],
+    ["third revision compensation delete", [7, 11], true],
+  ])("reports create failure from %s after every later required operation", async (_name, failures, mutationMayHaveApplied) => {
     const kv = new RecordingKV();
-    kv.injectFailure(7);
+    kv.injectFailure(...failures);
 
     await expect(service(kv).create({ content: "content", customId: "failure", expiration: 60 }, {})).rejects.toMatchObject({
       code: "STORAGE_WRITE_FAILED",
       status: 503,
+      details: { retryable: true, mutationMayHaveApplied },
     });
-    expect(kv.operations.filter((operation) => operation.type === "delete").map((operation) => operation.key)).toEqual([
-      metaKey("failure"),
-      revisionKey("failure", 0),
-      revisionKey("failure", 1),
-      revisionKey("failure", 2),
-    ]);
+
+    const reads = fiveKeys("failure").map((key) => `get:${key}`);
+    const operationOrder = failures[0] === 6
+      ? [...reads, `put:${metaKey("failure")}`]
+      : [
+          ...reads,
+          `put:${metaKey("failure")}`,
+          "put:failure",
+          `delete:${metaKey("failure")}`,
+          `delete:${revisionKey("failure", 0)}`,
+          `delete:${revisionKey("failure", 1)}`,
+          `delete:${revisionKey("failure", 2)}`,
+        ];
+    expect(kv.operations.map((operation) => `${operation.type}:${operation.key}`)).toEqual(operationOrder);
   });
 
   it("never exposes the plaintext password in a create summary", async () => {
@@ -288,6 +346,26 @@ describe("read", () => {
     expect(loaded.marker).toMatchObject({ kind: "cfpb/content", schemaVersion: 2, commit: null });
   });
 
+  it.each([
+    ["main", 1],
+    ["metadata", 2],
+  ])("returns STORAGE_READ_FAILED when coherent %s read fails after both reads start", async (_name, failureOffset) => {
+    const { kv, pasteService } = await createdV2();
+    const before = kv.operations.length;
+    kv.injectFailure(before + failureOffset);
+
+    await expect(pasteService.loadContent("coherent", undefined)).rejects.toMatchObject({
+      code: "STORAGE_READ_FAILED",
+      status: 503,
+      details: { retryable: true },
+    });
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual([
+      "getWithMetadata:coherent",
+      `get:${metaKey("coherent")}`,
+    ]);
+    expect(kv.operations.slice(before).every((operation) => operation.type === "get" || operation.type === "getWithMetadata")).toBe(true);
+  });
+
   it("returns settings from coherent authorized state without returning content", async () => {
     const { pasteService } = await createdV2(undefined, { password: "correct password" });
 
@@ -310,6 +388,38 @@ describe("read", () => {
       fiveKeys("coherent").sort(),
     );
     expect(kv.entries.size).toBe(0);
+  });
+
+  it.each([
+    ["main", 1],
+    ["first revision", 2],
+    ["second revision", 3],
+    ["third revision", 4],
+    ["metadata", 5],
+  ])("reports a logical-expiry %s delete failure after every cleanup delete", async (_name, deleteOffset) => {
+    const { kv } = await createdV2();
+    const expiredService = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:01:00.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+    kv.injectFailure(before + 2 + deleteOffset);
+
+    await expect(expiredService.loadContent("coherent", undefined)).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      status: 503,
+      details: { retryable: true, mutationMayHaveApplied: true },
+    });
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual([
+      "getWithMetadata:coherent",
+      `get:${metaKey("coherent")}`,
+      "delete:coherent",
+      `delete:${revisionKey("coherent", 0)}`,
+      `delete:${revisionKey("coherent", 1)}`,
+      `delete:${revisionKey("coherent", 2)}`,
+      `delete:${metaKey("coherent")}`,
+    ]);
   });
 
   it("treats a metadata-only orphan as missing without deleting it", async () => {
@@ -385,6 +495,20 @@ describe("read", () => {
     expect(kv.operations.filter((operation) => operation.type === "put" || operation.type === "delete")).toHaveLength(0);
   });
 
+  it.each([
+    ["US", "US"],
+    ["T1", null],
+    ["USA", null],
+    ["", null],
+  ])("retains only alphabetic two-letter legacy countries: %s", async (country, createdCountry) => {
+    const kv = new RecordingKV();
+    kv.seed("legacy-country", "legacy", { country });
+
+    await expect(service(kv).loadContent("legacy-country", undefined)).resolves.toMatchObject({
+      summary: { createdCountry },
+    });
+  });
+
   it("computes legacy expiry from createdAt plus expiration seconds", async () => {
     const kv = new RecordingKV();
     kv.seed("legacy-expiry", "legacy", { createdAt: 1_789_257_600_000, expiration: 86_400 });
@@ -429,24 +553,31 @@ describe("consume", () => {
     expect(kv.entries.size).toBe(0);
   });
 
-  it("attempts every delete and reports a consume failure when deletion is partial", async () => {
+  it.each([
+    ["main", 1],
+    ["first revision", 2],
+    ["second revision", 3],
+    ["third revision", 4],
+    ["metadata", 5],
+  ])("reports a consume %s delete failure after every delete is attempted", async (_name, deleteOffset) => {
     const kv = new RecordingKV();
     const pasteService = service(kv);
     await pasteService.create({ content: "once", customId: "partial", expiration: 60, viewOnce: true }, {});
     const loaded = await pasteService.loadContent("partial", undefined);
-    kv.injectFailure(kv.operations.length + 3);
+    const before = kv.operations.length;
+    kv.injectFailure(before + deleteOffset);
 
     await expect(pasteService.consume(loaded)).rejects.toMatchObject({
       code: "CONSUME_FAILED",
       status: 503,
-      details: { mutationMayHaveApplied: true },
+      details: { retryable: true, mutationMayHaveApplied: true },
     });
-    expect(kv.operations.filter((operation) => operation.type === "delete").map((operation) => operation.key)).toEqual([
-      contentKey("partial"),
-      revisionKey("partial", 0),
-      revisionKey("partial", 1),
-      revisionKey("partial", 2),
-      metaKey("partial"),
+    expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual([
+      "delete:partial",
+      `delete:${revisionKey("partial", 0)}`,
+      `delete:${revisionKey("partial", 1)}`,
+      `delete:${revisionKey("partial", 2)}`,
+      `delete:${metaKey("partial")}`,
     ]);
   });
 });

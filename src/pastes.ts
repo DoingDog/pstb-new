@@ -14,6 +14,7 @@ import { PasteError } from "./types";
 import { parseStrictJsonObject } from "./json";
 
 const MAX_CONTENT_BYTES = 10_485_760;
+const MAX_RELATIVE_EXPIRATION = Date.parse("9999-12-31T23:59:59.999Z");
 const RESERVED_IDS = new Set([
   "api",
   "raw",
@@ -240,9 +241,10 @@ export function normalizeExpiration(value: ExpirationInput, now: Date): Normaliz
     if (!Number.isSafeInteger(value) || value < 60) {
       throw validationError("expiration", "Must be permanent, at least 60 seconds, or a timezone-bearing RFC3339 timestamp.");
     }
-    const date = new Date(now.getTime() + value * 1000);
-    if (!Number.isFinite(date.getTime())) throw validationError("expiration", "Is outside the supported timestamp range.");
-    const expiresAt = date.toISOString();
+    if (value > Math.floor((MAX_RELATIVE_EXPIRATION - now.getTime()) / 1000)) {
+      throw validationError("expiration", "Is outside the supported timestamp range.");
+    }
+    const expiresAt = new Date(now.getTime() + value * 1000).toISOString();
     return {
       expiration: { kind: "relative", seconds: value },
       expiresAt,
@@ -484,7 +486,7 @@ function parseMetadataShape(value: unknown, expectedId: string): PasteMetadataV2
     !isPositiveSafeInteger(contentRevision) ||
     !isPositiveSafeInteger(contentBytes) ||
     contentBytes > MAX_CONTENT_BYTES ||
-    (createdCountry !== null && (typeof createdCountry !== "string" || !/^[A-Za-z]{2}$/.test(createdCountry)))
+    (createdCountry !== null && typeof createdCountry !== "string")
   ) {
     throw inconsistent();
   }
@@ -663,7 +665,7 @@ export class PasteService {
       versionCounter: 1,
       contentRevision: 1,
       contentBytes,
-      createdCountry: typeof requestMeta.country === "string" && /^[A-Za-z]{2}$/.test(requestMeta.country) ? requestMeta.country : null,
+      createdCountry: requestMeta.country ?? null,
       history: { nextSlot: 0, entries: [] },
     };
     const marker: ContentMarkerV2 = {
