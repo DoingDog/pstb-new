@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
 import {
   applicationHeaders,
+  dictionaries,
   deriveDownloadHeaders,
   escapeBootstrapJson,
   renderCreatePage,
@@ -84,20 +85,38 @@ describe("bootstrap and application headers", () => {
 });
 
 describe("application documents", () => {
-  it("creates a labeled form with seven expiration choices", () => {
-    const html = renderCreatePage("zh-CN");
+  it("uses the exact ordered expiration values with one day selected by default", () => {
+    const html = renderCreatePage("en");
+    const options = html.match(/<select id="expiration"[^>]*>(.*?)<\/select>/)?.[1];
 
-    expect(html).toContain('<html lang="zh-CN">');
-    expect(html).toContain('<label for="content">');
-    expect(html).toContain('id="content" name="content"');
-    expect(html).toContain('<label for="title">');
-    expect(html).toContain('id="format" name="format"');
-    expect(html).toContain('id="expiration" name="expiration"');
-    expect(html.match(/<select id="expiration"[^>]*>(.*?)<\/select>/)?.[1]?.match(/<option\b/g)).toHaveLength(7);
-    expect(html).toContain('id="password" name="password" type="password"');
-    expect(html).toContain('id="view-once" name="viewOnce" type="checkbox"');
-    expect(html).toContain('id="custom-id" name="customId"');
-    expect(html).toContain("exactly once");
+    expect(options).toBeDefined();
+    expect([...options!.matchAll(/<option value="([^"]+)"([^>]*)>/g)].map((match) => [match[1], (match[2] ?? "").includes("selected")])).toEqual([
+      ["60", false],
+      ["3600", false],
+      ["86400", true],
+      ["604800", false],
+      ["2592000", false],
+      ["31104000", false],
+      ["permanent", false],
+    ]);
+  });
+
+  it("renders the initial View as exact text or sanitized Markdown", () => {
+    const text = renderPastePage({
+      locale: "en",
+      paste: { ...paste, format: "text" },
+      content: "exact\r\n<script>literal</script>\n  ",
+    });
+    const markdown = renderPastePage({
+      locale: "en",
+      paste: { ...paste, format: "markdown" },
+      content: "## Heading\n\n<script>literal</script>",
+    });
+
+    expect(text).toContain('<section role="tabpanel" data-panel="view"><pre class="paste-content">exact\r\n&lt;script&gt;literal&lt;/script&gt;\n  </pre></section>');
+    expect(text).not.toContain("<script>literal</script>");
+    expect(markdown).toContain('<section role="tabpanel" data-panel="view"><article class="paste-content"><h2>Heading</h2>\n&lt;script&gt;literal&lt;/script&gt;</article></section>');
+    expect(markdown).not.toContain("<script>literal</script>");
   });
 
   it("escapes user text and never puts a supplied password in bootstrap data", () => {
@@ -114,19 +133,49 @@ describe("application documents", () => {
     expect(html).not.toContain("not-for-bootstrap");
   });
 
-  it("renders ordinary paste controls and restricts consumed view-once pages to local actions", () => {
+  it("renders consumed view-once pages with only a root create link and local actions", () => {
     const ordinary = renderPastePage({ locale: "en", paste, content: "source" });
     const consumed = renderPastePage({ locale: "en", paste: { ...paste, viewOnce: true }, content: "source", consumed: true });
+    const links = [...consumed.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
 
     expect(ordinary).toContain('role="tablist"');
     expect(ordinary).toContain('data-action="delete"');
     expect(consumed).toContain('data-consumed="true"');
+    expect(consumed).toContain('<a href="/">Create a paste</a>');
+    expect(links).toEqual(["/"]);
     expect(consumed).toContain('data-action="copy"');
     expect(consumed).toContain('data-action="download"');
     expect(consumed).not.toContain('data-action="delete"');
     expect(consumed).not.toContain('data-tab="edit"');
     expect(consumed).not.toContain('data-tab="history"');
     expect(consumed).not.toContain('data-tab="settings"');
+    expect(consumed).not.toContain('"links"');
+    expect(consumed).not.toContain('href="/example"');
+    expect(consumed).not.toContain('href="/raw/example"');
+    expect(consumed).not.toContain('href="/html/example"');
+    expect(consumed).not.toContain('href="/md/example"');
+    expect(consumed).not.toContain('href="/file/example"');
+  });
+
+  it("keeps English and Chinese dictionary keys in parity", () => {
+    expect(Object.keys(dictionaries.en).sort()).toEqual(Object.keys(dictionaries["zh-CN"]).sort());
+  });
+
+  it.each(["en", "zh-CN"] as const)("renders every %s dictionary entry across representative whole pages", (locale) => {
+    const localizedPaste = { ...paste, title: "" };
+    const pages = [
+      renderCreatePage(locale),
+      renderPastePage({ locale, paste: localizedPaste, content: "source" }),
+      renderPastePage({ locale, paste: { ...localizedPaste, viewOnce: true }, content: "source", consumed: true }),
+      renderPasswordPage({ locale, error: "Incorrect password" }),
+      renderErrorPage({ locale, error: "Missing paste" }),
+      renderMarkdownDocument({ locale, paste: localizedPaste, content: "source" }),
+    ].join("\n");
+
+    expect(pages).toContain(`<html lang="${locale}">`);
+    for (const [key, value] of Object.entries(dictionaries[locale])) {
+      expect(pages, key).toContain(value);
+    }
   });
 
   it("renders generic password and escaped error pages without paste data", () => {

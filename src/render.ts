@@ -68,40 +68,121 @@ function publicSummary(paste: PasteSummary): PasteSummary {
   };
 }
 
-function labels(locale: Locale) {
-  return locale === "zh-CN"
-    ? {
-        create: "创建粘贴内容",
-        content: "内容",
-        title: "标题",
-        format: "格式",
-        expiration: "过期时间",
-        password: "密码",
-        viewOnce: "阅后即焚",
-        customId: "自定义 ID",
-        submit: "创建",
-        reveal: "显示密码",
-        theme: "主题",
-        locale: "语言",
-      }
-    : {
-        create: "Create a paste",
-        content: "Content",
-        title: "Title",
-        format: "Format",
-        expiration: "Expiration",
-        password: "Password",
-        viewOnce: "View once",
-        customId: "Custom ID",
-        submit: "Create",
-        reveal: "Show password",
-        theme: "Theme",
-        locale: "Language",
-      };
+const englishLabels = {
+  application: "Application",
+  brand: "Pastebin",
+  create: "Create a paste",
+  content: "Content",
+  title: "Title",
+  format: "Format",
+  expiration: "Expiration",
+  password: "Password",
+  viewOnce: "View once",
+  customId: "Custom ID",
+  submit: "Create",
+  reveal: "Show password",
+  theme: "Theme",
+  locale: "Language",
+  storedExactly: "Stored exactly as entered.",
+  text: "Text",
+  markdown: "Markdown",
+  oneMinute: "1 minute",
+  oneHour: "1 hour",
+  oneDay: "1 day",
+  oneWeek: "1 week",
+  thirtyDays: "30 days",
+  oneYear: "1 year",
+  permanent: "Permanent",
+  viewOnceDescription: "View-once reads use distributed storage and cannot guarantee globally exactly once.",
+  pasteViews: "Paste views",
+  view: "View",
+  edit: "Edit",
+  history: "History",
+  settings: "Settings",
+  localActions: "Local actions",
+  copy: "Copy",
+  wrap: "Wrap",
+  source: "Source",
+  preview: "Preview",
+  download: "Download",
+  openHtmlLocally: "Open HTML locally",
+  representations: "Representations",
+  raw: "Raw",
+  html: "HTML",
+  file: "File",
+  delete: "Delete",
+  consumed: "This view-once paste has been consumed. These actions use only the content already loaded in this page.",
+  passwordRequired: "Password required",
+  continue: "Continue",
+  error: "Error",
+  openSource: "Open source",
+  paste: "Paste",
+};
+
+type Labels = { [Key in keyof typeof englishLabels]: string };
+
+const chineseLabels: Labels = {
+  application: "应用",
+  brand: "Pastebin",
+  create: "创建粘贴内容",
+  content: "内容",
+  title: "标题",
+  format: "格式",
+  expiration: "过期时间",
+  password: "密码",
+  viewOnce: "阅后即焚",
+  customId: "自定义 ID",
+  submit: "创建",
+  reveal: "显示密码",
+  theme: "主题",
+  locale: "语言",
+  storedExactly: "按输入内容原样保存。",
+  text: "文本",
+  markdown: "Markdown",
+  oneMinute: "1 分钟",
+  oneHour: "1 小时",
+  oneDay: "1 天",
+  oneWeek: "1 周",
+  thirtyDays: "30 天",
+  oneYear: "1 年",
+  permanent: "永久",
+  viewOnceDescription: "阅后即焚内容使用分布式存储，无法保证在所有位置都恰好只读取一次。",
+  pasteViews: "粘贴内容视图",
+  view: "查看",
+  edit: "编辑",
+  history: "历史记录",
+  settings: "设置",
+  localActions: "本地操作",
+  copy: "复制",
+  wrap: "自动换行",
+  source: "源码",
+  preview: "预览",
+  download: "下载",
+  openHtmlLocally: "在本地打开 HTML",
+  representations: "表示形式",
+  raw: "Raw",
+  html: "HTML",
+  file: "文件",
+  delete: "删除",
+  consumed: "此阅后即焚内容已被读取。这些操作只使用当前页面已加载的内容。",
+  passwordRequired: "需要密码",
+  continue: "继续",
+  error: "错误",
+  openSource: "打开源内容",
+  paste: "粘贴内容",
+};
+
+export const dictionaries: Record<Locale, Labels> = {
+  en: englishLabels,
+  "zh-CN": chineseLabels,
+};
+
+function labels(locale: Locale): Labels {
+  return dictionaries[locale];
 }
 
-function documentTitle(paste: PasteSummary): string {
-  return paste.title === "" ? `Paste ${paste.id}` : paste.title;
+function documentTitle(locale: Locale, paste: PasteSummary): string {
+  return paste.title === "" ? `${labels(locale).paste} ${paste.id}` : paste.title;
 }
 
 function pageDocument(locale: Locale, page: string, title: string, body: string, bootstrap: unknown): string {
@@ -125,14 +206,14 @@ function sourceTextarea(content: string): string {
   return `<textarea id="source" name="source" readonly spellcheck="false">${escapeText(content)}</textarea>`;
 }
 
-function localActions(): string {
-  return `<div class="actions" aria-label="Local actions">
-<button type="button" data-action="copy">Copy</button>
-<button type="button" data-action="wrap">Wrap</button>
-<button type="button" data-action="toggle-source">Source</button>
-<button type="button" data-action="preview">Preview</button>
-<button type="button" data-action="download">Download</button>
-<button type="button" data-action="open-html">Open HTML locally</button>
+function localActions(copy: Labels): string {
+  return `<div class="actions" aria-label="${copy.localActions}">
+<button type="button" data-action="copy">${copy.copy}</button>
+<button type="button" data-action="wrap">${copy.wrap}</button>
+<button type="button" data-action="toggle-source">${copy.source}</button>
+<button type="button" data-action="preview">${copy.preview}</button>
+<button type="button" data-action="download">${copy.download}</button>
+<button type="button" data-action="open-html">${copy.openHtmlLocally}</button>
 </div>`;
 }
 
@@ -143,6 +224,12 @@ export function renderMarkdown(source: string): string {
     extensions: [gfm()],
     htmlExtensions: [gfmHtml()],
   });
+}
+
+function pasteContentView(content: string, format: PasteSummary["format"]): string {
+  return format === "markdown"
+    ? `<article class="paste-content">${renderMarkdown(content)}</article>`
+    : `<pre class="paste-content">${escapeText(content)}</pre>`;
 }
 
 export function escapeBootstrapJson(value: unknown): string {
@@ -166,32 +253,32 @@ export function applicationHeaders(): Headers {
 export function renderCreatePage(locale: Locale): string {
   const copy = labels(locale);
   const expiration = [
-    ["permanent", "Permanent"],
-    ["600", "10 minutes"],
-    ["3600", "1 hour"],
-    ["86400", "1 day"],
-    ["604800", "1 week"],
-    ["2592000", "30 days"],
-    ["31536000", "1 year"],
+    ["60", copy.oneMinute],
+    ["3600", copy.oneHour],
+    ["86400", copy.oneDay],
+    ["604800", copy.oneWeek],
+    ["2592000", copy.thirtyDays],
+    ["31104000", copy.oneYear],
+    ["permanent", copy.permanent],
   ] as const;
   const options = expiration.map(([value, label]) => `<option value="${value}"${value === "86400" ? " selected" : ""}>${label}</option>`).join("");
-  const body = `<header><nav aria-label="Application"><a href="/">Pastebin</a><button type="button" data-action="locale">${copy.locale}</button><button type="button" data-action="theme">${copy.theme}</button></nav></header>
+  const body = `<header><nav aria-label="${copy.application}"><a href="/">${copy.brand}</a><button type="button" data-action="locale">${copy.locale}</button><button type="button" data-action="theme">${copy.theme}</button></nav></header>
 <main>
 <h1>${copy.create}</h1>
 <form id="create-form" method="post" action="/api/pastes">
 <label for="content">${copy.content}</label>
 <textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description"></textarea>
-<p id="content-description">Stored exactly as entered.</p>
+<p id="content-description">${copy.storedExactly}</p>
 <label for="title">${copy.title}</label>
 <input id="title" name="title" type="text" maxlength="200">
 <label for="format">${copy.format}</label>
-<select id="format" name="format"><option value="text">Text</option><option value="markdown">Markdown</option></select>
+<select id="format" name="format"><option value="text">${copy.text}</option><option value="markdown">${copy.markdown}</option></select>
 <label for="expiration">${copy.expiration}</label>
 <select id="expiration" name="expiration">${options}</select>
 <label for="password">${copy.password}</label>
 <div><input id="password" name="password" type="password" autocomplete="new-password"><button type="button" data-action="reveal-password" aria-label="${copy.reveal}">${copy.reveal}</button></div>
 <label><input id="view-once" name="viewOnce" type="checkbox" value="true">${copy.viewOnce}</label>
-<p id="view-once-description">View-once reads use distributed storage and cannot guarantee globally exactly once.</p>
+<p id="view-once-description">${copy.viewOnceDescription}</p>
 <label for="custom-id">${copy.customId}</label>
 <input id="custom-id" name="customId" type="text">
 <button type="submit">${copy.submit}</button>
@@ -202,32 +289,44 @@ export function renderCreatePage(locale: Locale): string {
 
 export function renderPastePage(model: PastePageModel): string {
   const paste = publicSummary(model.paste);
+  const copy = labels(model.locale);
   const restricted = paste.viewOnce || model.consumed === true;
-  const title = documentTitle(paste);
-  const common = `<header><nav aria-label="Application"><a href="/">Pastebin</a><a href="${escapeText(paste.links.view)}">${escapeText(title)}</a></nav></header>
+  const title = documentTitle(model.locale, paste);
+  const contentView = pasteContentView(model.content, paste.format);
+  const source = `<section data-panel="source" hidden>${sourceTextarea(model.content)}</section>`;
+  const header = restricted
+    ? `<header><nav aria-label="${copy.application}"><a href="/">${copy.create}</a></nav></header>`
+    : `<header><nav aria-label="${copy.application}"><a href="/">${copy.brand}</a><a href="${escapeText(paste.links.view)}">${escapeText(title)}</a></nav></header>`;
+  const common = `${header}
 <main data-consumed="${restricted}">
 <h1>${escapeText(title)}</h1>`;
   const body = restricted
-    ? `${common}<p role="status">This view-once paste has been consumed. These actions use only the content already loaded in this page.</p>${sourceTextarea(model.content)}${localActions()}<p aria-live="polite"></p></main>`
-    : `${common}<nav aria-label="Paste views"><div role="tablist" aria-label="Paste views"><button type="button" role="tab" aria-selected="true" data-tab="view">View</button><button type="button" role="tab" aria-selected="false" data-tab="edit">Edit</button><button type="button" role="tab" aria-selected="false" data-tab="markdown">Markdown</button><button type="button" role="tab" aria-selected="false" data-tab="history">History</button><button type="button" role="tab" aria-selected="false" data-tab="settings">Settings</button></div></nav><section role="tabpanel" data-panel="view">${sourceTextarea(model.content)}</section>${localActions()}<div class="representations" aria-label="Representations"><a data-action="raw" href="${escapeText(paste.links.raw)}">Raw</a><a data-action="html" href="${escapeText(paste.links.html)}">HTML</a><a data-action="markdown-document" href="${escapeText(paste.links.markdown)}">Markdown</a><a data-action="file" href="${escapeText(paste.links.file)}">File</a></div><button type="button" data-action="delete">Delete</button><p aria-live="polite"></p></main>`;
-  return pageDocument(model.locale, "paste", title, body, { page: "paste", paste, content: model.content, consumed: restricted });
+    ? `${common}<p role="status">${copy.consumed}</p><section data-panel="view">${contentView}</section>${source}${localActions(copy)}<p aria-live="polite"></p></main>`
+    : `${common}<nav aria-label="${copy.pasteViews}"><div role="tablist" aria-label="${copy.pasteViews}"><button type="button" role="tab" aria-selected="true" data-tab="view">${copy.view}</button><button type="button" role="tab" aria-selected="false" data-tab="edit">${copy.edit}</button><button type="button" role="tab" aria-selected="false" data-tab="markdown">${copy.markdown}</button><button type="button" role="tab" aria-selected="false" data-tab="history">${copy.history}</button><button type="button" role="tab" aria-selected="false" data-tab="settings">${copy.settings}</button></div></nav><section role="tabpanel" data-panel="view">${contentView}</section>${source}${localActions(copy)}<div class="representations" aria-label="${copy.representations}"><a data-action="raw" href="${escapeText(paste.links.raw)}">${copy.raw}</a><a data-action="html" href="${escapeText(paste.links.html)}">${copy.html}</a><a data-action="markdown-document" href="${escapeText(paste.links.markdown)}">${copy.markdown}</a><a data-action="file" href="${escapeText(paste.links.file)}">${copy.file}</a></div><button type="button" data-action="delete">${copy.delete}</button><p aria-live="polite"></p></main>`;
+  const bootstrap = restricted
+    ? { page: "paste", locale: model.locale, content: model.content, consumed: true }
+    : { page: "paste", paste, content: model.content, consumed: false };
+  return pageDocument(model.locale, "paste", title, body, bootstrap);
 }
 
 export function renderPasswordPage(model: PasswordPageModel): string {
+  const copy = labels(model.locale);
   const message = model.error === undefined ? "" : `<p role="alert">${escapeText(model.error)}</p>`;
-  const body = `<main><h1>Password required</h1><form method="post"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Continue</button>${message}</form></main>`;
-  return pageDocument(model.locale, "password", "Password required", body, { page: "password", locale: model.locale });
+  const body = `<main><h1>${copy.passwordRequired}</h1><form method="post"><label for="password">${copy.password}</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">${copy.continue}</button>${message}</form></main>`;
+  return pageDocument(model.locale, "password", copy.passwordRequired, body, { page: "password", locale: model.locale });
 }
 
 export function renderErrorPage(model: ErrorPageModel): string {
-  const body = `<main><h1>Error</h1><p role="alert">${escapeText(model.error)}</p><p><a href="/">Create a paste</a></p></main>`;
-  return pageDocument(model.locale, "error", "Error", body, { page: "error", locale: model.locale });
+  const copy = labels(model.locale);
+  const body = `<main><h1>${copy.error}</h1><p role="alert">${escapeText(model.error)}</p><p><a href="/">${copy.create}</a></p></main>`;
+  return pageDocument(model.locale, "error", copy.error, body, { page: "error", locale: model.locale });
 }
 
 export function renderMarkdownDocument(model: MarkdownDocumentModel): string {
   const paste = publicSummary(model.paste);
-  const title = documentTitle(paste);
-  const body = `<header><nav aria-label="Application"><a href="/">Pastebin</a><a href="${escapeText(paste.links.view)}">Open source</a><button type="button" data-action="copy">Copy</button></nav></header><main><article><h1>${escapeText(title)}</h1>${renderMarkdown(model.content)}</article></main>`;
+  const copy = labels(model.locale);
+  const title = documentTitle(model.locale, paste);
+  const body = `<header><nav aria-label="${copy.application}"><a href="/">${copy.brand}</a><a href="${escapeText(paste.links.view)}">${copy.openSource}</a><button type="button" data-action="copy">${copy.copy}</button></nav></header><main><article><h1>${escapeText(title)}</h1>${renderMarkdown(model.content)}</article></main>`;
   return pageDocument(model.locale, "markdown", title, body, { page: "markdown", paste, content: model.content });
 }
 
