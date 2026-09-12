@@ -168,6 +168,20 @@ describe("validation", () => {
     expectPasteError(() => normalizeExpiration(61, boundaryNow), "VALIDATION_FAILED");
   });
 
+  it.each([
+    ["9999-12-31T23:59:59.999Z", "9999-12-31T23:59:59.999Z"],
+    ["9999-12-31T23:59:59.999+00:00", "9999-12-31T23:59:59.999Z"],
+    ["9999-12-31T23:59:59.999-00:00", "9999-12-31T23:59:59.999Z"],
+    ["9999-12-31T23:59:59.999+00:01", "9999-12-31T23:58:59.999Z"],
+  ])("accepts an absolute RFC3339 timestamp at or below the maximum after offset normalization: %s", (input, expiresAt) => {
+    expect(normalizeExpiration(input, now)).toMatchObject({ expiration: { kind: "absolute" }, expiresAt });
+  });
+
+  it.each(["9999-12-31T23:59:59.999-00:01", "9999-12-31T23:59:59.999-23:59"])
+    ("rejects an absolute RFC3339 timestamp above the maximum after negative-offset normalization: %s", (input) => {
+      expectPasteError(() => normalizeExpiration(input, now), "VALIDATION_FAILED");
+    });
+
   it.each([59, Number.MAX_SAFE_INTEGER + 1, "Permanent", "2026-09-13T00:01:00", "2026-02-30T00:01:00Z", "2026-09-13T00:00:59.999Z"])
     ("rejects invalid expiration input: %s", (expiration) => {
       expectPasteError(() => normalizeExpiration(expiration, now), "VALIDATION_FAILED");

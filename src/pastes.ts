@@ -229,7 +229,7 @@ function parseAbsoluteExpiration(value: string): string | null {
     offsetMinutes = sign * (offsetHour * 60 + offsetMinute);
   }
   const instant = new Date(wall.getTime() - offsetMinutes * 60_000);
-  return Number.isFinite(instant.getTime()) ? instant.toISOString() : null;
+  return Number.isFinite(instant.getTime()) && instant.getTime() <= MAX_RELATIVE_EXPIRATION ? instant.toISOString() : null;
 }
 
 export function normalizeExpiration(value: ExpirationInput, now: Date): NormalizedExpiration {
