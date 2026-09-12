@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { parseStrictJsonObject } from "./json";
-import { PasteService, type CreateInput } from "./pastes";
+import { decodeUtf8, parseStrictJsonObject, readLimitedBytes } from "./json";
+import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { applicationHeaders, renderCreatePage, type Locale } from "./render";
 import { isPasteError, PasteError, type Env } from "./types";
 
@@ -30,6 +30,88 @@ function createMediaType(request: Request): "json" | "multipart" {
     return "multipart";
   }
   throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json", "multipart/form-data"] });
+}
+
+function textMediaType(request: Request): void {
+  const parts = request.headers.get("content-type")?.split(";").map((part) => part.trim()) ?? [];
+  if (parts[0]?.toLowerCase() !== "text/plain" || (parts.length !== 1 && (parts.length !== 2 || !/^charset=utf-8$/i.test(parts[1]!)))) {
+    throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["text/plain"] });
+  }
+}
+
+function queryOrHeaderPassword(request: Request): string | undefined {
+  const passwords = new URL(request.url).searchParams.getAll("password");
+  if (passwords.length > 1) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
+  return passwords[0] ?? request.headers.get("x-paste-password") ?? undefined;
+}
+
+function ifMatchVersion(request: Request): string | undefined {
+  const value = request.headers.get("if-match");
+  if (value === null) return undefined;
+  const match = /^"([^"]*)"$/.exec(value);
+  if (match === null) throw new PasteError("AMBIGUOUS_VERSION", 400);
+  return match[1]!;
+}
+
+async function parseTextContent(request: Request): Promise<string> {
+  textMediaType(request);
+  return decodeUtf8(await readLimitedBytes(request, 67_108_864));
+}
+
+type MutationCredentials = { password?: string; version?: string };
+type ContentPatch = MutationCredentials & { content: string };
+
+function jsonMediaType(request: Request): void {
+  const parts = request.headers.get("content-type")?.split(";").map((part) => part.trim()) ?? [];
+  if (parts[0]?.toLowerCase() !== "application/json" || (parts.length !== 1 && (parts.length !== 2 || !/^charset=utf-8$/i.test(parts[1]!)))) {
+    throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json"] });
+  }
+}
+
+function parseMutationCredentials(value: Record<string, unknown>): MutationCredentials {
+  const result: MutationCredentials = {};
+  if (Object.hasOwn(value, "password")) {
+    if (typeof value.password !== "string") throw validationError("password", "Must be a string.");
+    result.password = value.password;
+  }
+  if (Object.hasOwn(value, "version")) {
+    if (typeof value.version !== "string") throw validationError("version", "Must be a string.");
+    result.version = value.version;
+  }
+  return result;
+}
+
+async function parseContentPatch(request: Request): Promise<ContentPatch> {
+  jsonMediaType(request);
+  const value = await parseStrictJsonObject(request, new Set(["content", "password", "version"]));
+  if (typeof value.content !== "string") throw validationError("content", "Must be a string.");
+  return { content: value.content, ...parseMutationCredentials(value) };
+}
+
+async function parseDeleteBody(request: Request): Promise<MutationCredentials> {
+  if (request.body === null || request.headers.get("content-length") === "0") return {};
+  jsonMediaType(request);
+  return parseMutationCredentials(await parseStrictJsonObject(request, new Set(["password", "version"])));
+}
+
+function passwordForBodyMutation(request: Request, body: { password?: string }): string | undefined {
+  const queryOrHeader = queryOrHeaderPassword(request);
+  return body.password ?? queryOrHeader;
+}
+
+function mutationVersion(request: Request, body: { version?: string }): string | undefined {
+  const headerVersion = ifMatchVersion(request);
+  if (body.version !== undefined && headerVersion !== undefined && body.version !== headerVersion) {
+    throw new PasteError("AMBIGUOUS_VERSION", 400);
+  }
+  return body.version ?? headerVersion;
+}
+
+function contentUpdateInput(content: string, password: string | undefined, version: string | undefined): UpdateContentInput {
+  const input: UpdateContentInput = { content };
+  if (password !== undefined) input.password = password;
+  if (version !== undefined) input.version = version;
+  return input;
 }
 
 async function parseMultipartCreate(request: Request): Promise<CreateInput> {
@@ -134,6 +216,38 @@ export function createHttpApp(env: Env): Hono {
   });
   app.options("/api/pastes", () => new Response(null, { status: 204, headers: { Allow: "POST,OPTIONS" } }));
   app.all("/api/pastes", () => methodNotAllowed("POST,OPTIONS"));
+
+  app.put("/api/pastes/:id", async (context) => {
+    const request = context.req.raw;
+    const result = await new PasteService(env.PASTE_DB).updateContent(
+      context.req.param("id"),
+      contentUpdateInput(await parseTextContent(request), queryOrHeaderPassword(request), ifMatchVersion(request)),
+    );
+    return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
+  });
+
+  app.patch("/api/pastes/:id", async (context) => {
+    const request = context.req.raw;
+    const body = await parseContentPatch(request);
+    const result = await new PasteService(env.PASTE_DB).updateContent(
+      context.req.param("id"),
+      contentUpdateInput(body.content, passwordForBodyMutation(request, body), mutationVersion(request, body)),
+    );
+    return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
+  });
+
+  app.delete("/api/pastes/:id", async (context) => {
+    const request = context.req.raw;
+    const body = await parseDeleteBody(request);
+    await new PasteService(env.PASTE_DB).delete(
+      context.req.param("id"),
+      passwordForBodyMutation(request, body),
+      mutationVersion(request, body),
+    );
+    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+  });
+  app.options("/api/pastes/:id", () => new Response(null, { status: 204, headers: { Allow: "PUT,PATCH,DELETE,OPTIONS" } }));
+  app.all("/api/pastes/:id", () => methodNotAllowed("PUT,PATCH,DELETE,OPTIONS"));
 
   return app;
 }
