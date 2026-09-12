@@ -24,7 +24,7 @@
 - dynamic response 使用 `Cache-Control:no-store`；hashed asset 使用一年 immutable cache。
 - `wrangler.jsonc` 只声明 `PASTE_DB`，开发 namespace ID 固定为明显占位值 `11111111111111111111111111111111`，不得执行 deploy。
 - 不保留 `GET|POST /api`、旧 response shape 或 `GET /delete/:id`。
-- 不创建 git commit，不 push，不 deploy；每个任务以测试结果代替 commit checkpoint。
+- 每个独立实现任务在自己的 worktree 中创建聚焦 commit，并由主 feature worktree cherry-pick；不 push，不 deploy。
 
 ## Locked File Map
 
@@ -766,4 +766,4 @@ Walk spec rows C01..C34 and T01..T10. For each row, record at least one automate
 
 - [ ] **Step 10: Final status report**
 
-Report exact command results, test counts, dry-run upload size, Edge/WebKit status, Safari omission, changed/deleted files and the accepted production limitations. State plainly that no commit, push or deploy was performed.
+Report exact command results, test counts, dry-run upload size, Edge/WebKit status, Safari omission, changed/deleted files, task commits and the accepted production limitations. State plainly that no push or deploy was performed.
