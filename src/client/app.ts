@@ -1,3 +1,318 @@
 import "./styles.css";
 
-export function startApp(): void {}
+export interface AutosaveSaveRequest {
+  content: string;
+  version?: string;
+  password?: string;
+}
+
+export type AutosaveSaveResult =
+  | { status: 200; changed: boolean; paste: { version: string } }
+  | { status: number };
+
+export type AutosaveState = "clean" | "waiting" | "saving" | "saved" | "error" | "conflict";
+
+export interface AutosaveSnapshot {
+  state: AutosaveState;
+  draft: string;
+  lastSavedContent: string;
+  version: string;
+  lastInputAt: number | null;
+  dueAt: number | null;
+  inFlightContent: string | null;
+  dirtyWhileSaving: boolean;
+  failureStatus: number | null;
+}
+
+export interface AutosaveOptions {
+  content: string;
+  version: string;
+  now: () => number;
+  setTimer: (callback: () => void, delay: number) => unknown;
+  clearTimer: (timer: unknown) => void;
+  save: (request: AutosaveSaveRequest) => Promise<AutosaveSaveResult>;
+  getPassword?: () => string | null;
+  onStateChange: (snapshot: AutosaveSnapshot) => void;
+}
+
+export class AutosaveController {
+  private timer: unknown;
+  private state: AutosaveState = "clean";
+  private draft: string;
+  private lastSavedContent: string;
+  private version: string;
+  private lastInputAt: number | null = null;
+  private dueAt: number | null = null;
+  private inFlightContent: string | null = null;
+  private dirtyWhileSaving = false;
+  private failureStatus: number | null = null;
+  private composing = false;
+  private disposed = false;
+  private unloadRegistered = false;
+
+  constructor(private readonly options: AutosaveOptions) {
+    this.draft = options.content;
+    this.lastSavedContent = options.content;
+    this.version = options.version;
+    this.emit();
+  }
+
+  input(content: string): void {
+    if (this.disposed) return;
+
+    this.draft = content;
+    if (this.composing) {
+      if (this.inFlightContent !== null) this.dirtyWhileSaving = true;
+      this.emit();
+      return;
+    }
+
+    this.lastInputAt = this.options.now();
+    this.dueAt = this.lastInputAt + 1_000;
+    if (this.inFlightContent !== null) {
+      this.dirtyWhileSaving = true;
+      this.emit();
+      return;
+    }
+    if (this.state === "conflict" || this.failureStatus === 403 || this.failureStatus === 404) {
+      this.emit();
+      return;
+    }
+
+    this.failureStatus = null;
+    this.state = "waiting";
+    this.schedule();
+    this.emit();
+  }
+
+  compositionStart(): void {
+    if (this.disposed) return;
+    this.composing = true;
+    this.cancelTimer();
+    this.emit();
+  }
+
+  compositionEnd(content: string): void {
+    if (this.disposed) return;
+    this.composing = false;
+    this.input(content);
+  }
+
+  retry(): void {
+    if (
+      this.disposed ||
+      this.composing ||
+      this.state !== "error" ||
+      this.failureStatus === 404 ||
+      this.inFlightContent !== null ||
+      this.draft === this.lastSavedContent
+    ) {
+      return;
+    }
+    this.cancelTimer();
+    this.dueAt = null;
+    this.startSave(false);
+  }
+
+  overwrite(): void {
+    if (
+      this.disposed ||
+      this.composing ||
+      this.state !== "conflict" ||
+      this.inFlightContent !== null ||
+      this.draft === this.lastSavedContent
+    ) {
+      return;
+    }
+    this.cancelTimer();
+    this.dueAt = null;
+    this.startSave(true);
+  }
+
+  reload(content: string, version: string): void {
+    if (this.disposed || this.state !== "conflict" || this.inFlightContent !== null) return;
+
+    this.cancelTimer();
+    this.draft = content;
+    this.lastSavedContent = content;
+    this.version = version;
+    this.lastInputAt = null;
+    this.dueAt = null;
+    this.dirtyWhileSaving = false;
+    this.failureStatus = null;
+    this.state = "clean";
+    this.emit();
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.cancelTimer();
+    this.removeBeforeUnloadWarning();
+  }
+
+  private schedule(): void {
+    if (this.disposed || this.composing || this.state === "conflict" || this.failureStatus === 403 || this.failureStatus === 404) {
+      return;
+    }
+
+    this.cancelTimer();
+    if (this.dueAt === null) return;
+
+    let timer: unknown;
+    timer = this.options.setTimer(() => {
+      if (this.disposed || this.timer !== timer) return;
+      this.timer = undefined;
+      this.dueAt = null;
+      this.startSave(false);
+    }, Math.max(0, this.dueAt - this.options.now()));
+    this.timer = timer;
+  }
+
+  private startSave(omitVersion: boolean): void {
+    if (
+      this.disposed ||
+      this.composing ||
+      this.inFlightContent !== null ||
+      (!omitVersion && this.state === "conflict") ||
+      this.failureStatus === 404
+    ) {
+      return;
+    }
+    if (this.draft === this.lastSavedContent) {
+      this.dueAt = null;
+      this.dirtyWhileSaving = false;
+      this.state = "saved";
+      this.emit();
+      return;
+    }
+
+    const content = this.draft;
+    this.inFlightContent = content;
+    this.dirtyWhileSaving = false;
+    this.dueAt = null;
+    this.failureStatus = null;
+    this.state = "saving";
+    this.emit();
+
+    const password = this.options.getPassword?.() ?? null;
+    const request: AutosaveSaveRequest = omitVersion
+      ? { content, ...(password === null ? {} : { password }) }
+      : { content, version: this.version, ...(password === null ? {} : { password }) };
+
+    void this.options.save(request).then(
+      (result) => this.completeSave(content, result),
+      () => this.failSave(content, null),
+    );
+  }
+
+  private completeSave(content: string, result: AutosaveSaveResult): void {
+    if (this.disposed || this.inFlightContent !== content) return;
+    if (result.status !== 200 || !("paste" in result)) {
+      this.failSave(content, result.status);
+      return;
+    }
+
+    this.lastSavedContent = content;
+    this.version = result.paste.version;
+    this.inFlightContent = null;
+    this.dirtyWhileSaving = false;
+    this.failureStatus = null;
+    if (this.draft === this.lastSavedContent) {
+      this.cancelTimer();
+      this.dueAt = null;
+      this.state = "saved";
+    } else {
+      this.state = "waiting";
+      this.schedule();
+    }
+    this.emit();
+  }
+
+  private failSave(content: string, status: number | null): void {
+    if (this.disposed || this.inFlightContent !== content) return;
+
+    this.inFlightContent = null;
+    this.dirtyWhileSaving = false;
+    this.cancelTimer();
+    this.dueAt = null;
+    this.failureStatus = status;
+    this.state = status === 409 ? "conflict" : "error";
+    this.emit();
+  }
+
+  private cancelTimer(): void {
+    if (this.timer === undefined) return;
+    this.options.clearTimer(this.timer);
+    this.timer = undefined;
+  }
+
+  private emit(): void {
+    this.updateBeforeUnloadWarning();
+    this.options.onStateChange({
+      state: this.state,
+      draft: this.draft,
+      lastSavedContent: this.lastSavedContent,
+      version: this.version,
+      lastInputAt: this.lastInputAt,
+      dueAt: this.dueAt,
+      inFlightContent: this.inFlightContent,
+      dirtyWhileSaving: this.dirtyWhileSaving,
+      failureStatus: this.failureStatus,
+    });
+  }
+
+  private updateBeforeUnloadWarning(): void {
+    if (typeof document === "undefined") return;
+
+    const needed = this.draft !== this.lastSavedContent || this.inFlightContent !== null;
+    if (needed && !this.unloadRegistered) {
+      globalThis.addEventListener("beforeunload", this.beforeUnload);
+      this.unloadRegistered = true;
+    } else if (!needed && this.unloadRegistered) {
+      this.removeBeforeUnloadWarning();
+    }
+  }
+
+  private removeBeforeUnloadWarning(): void {
+    if (!this.unloadRegistered) return;
+    globalThis.removeEventListener("beforeunload", this.beforeUnload);
+    this.unloadRegistered = false;
+  }
+
+  private readonly beforeUnload = (event: Event): void => {
+    event.preventDefault();
+    (event as BeforeUnloadEvent).returnValue = "";
+  };
+}
+
+let pastePassword: string | null = null;
+
+function currentDocumentUrl(): URL | null {
+  if (typeof document === "undefined" || typeof location === "undefined") return null;
+  return new URL(location.href);
+}
+
+export function currentPastePassword(): string | null {
+  return pastePassword;
+}
+
+export function setPastePassword(password: string | null): void {
+  pastePassword = password;
+  const url = currentDocumentUrl();
+  if (url === null || typeof history === "undefined") return;
+
+  url.searchParams.delete("password");
+  if (password !== null) url.searchParams.set("password", password);
+  history.replaceState(history.state, "", url.toString());
+}
+
+export function startApp(): void {
+  const url = currentDocumentUrl();
+  if (url === null) return;
+
+  const passwords = url.searchParams.getAll("password");
+  pastePassword = passwords.length === 1 ? passwords[0] ?? null : null;
+}
+
+if (typeof document !== "undefined") startApp();
