@@ -1,7 +1,45 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const visual = vi.hoisted(() => {
+  const state = { instances: [] as FakeCrepe[] };
+
+  class FakeCrepe {
+    markdown = "";
+    private readonly markdownUpdated: Array<() => void> = [];
+
+    constructor(options: { defaultValue?: string }) {
+      this.markdown = options.defaultValue ?? "";
+      state.instances.push(this);
+    }
+
+    on(register: (listener: { markdownUpdated(callback: () => void): void }) => void): this {
+      register({ markdownUpdated: (callback) => this.markdownUpdated.push(callback) });
+      return this;
+    }
+
+    async create(): Promise<void> {}
+    async destroy(): Promise<void> {}
+    getMarkdown(): string {
+      return this.markdown;
+    }
+
+    documentChanged(markdown: string): void {
+      this.markdown = markdown;
+      this.markdownUpdated.forEach((callback) => callback());
+    }
+  }
+
+  return { state, Crepe: FakeCrepe };
+});
+
+vi.mock("@milkdown/crepe", () => ({ Crepe: visual.Crepe }));
+
 import * as app from "./app";
 import {
   AutosaveController,
+  createAutosaveMarkdownModes,
+  createHistoryDiff,
+  formatHistoryDiffLine,
   type AutosaveSaveRequest,
   type AutosaveSaveResult,
   type AutosaveSnapshot,
@@ -498,5 +536,81 @@ describe("browser document state", () => {
     expect(withoutPassword.searchParams.get("keep")).toBe("yes");
     expect(localStorage.setItem).not.toHaveBeenCalled();
     expect(sessionStorage.setItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("Markdown and history integration", () => {
+  it("does not autosave a visual mode switch but saves one serialized document edit after 1,000 ms", () => {
+    const { clock, controller, save } = setup();
+    visual.state.instances.length = 0;
+    const source = { value: "first" } as HTMLTextAreaElement;
+    const modes = createAutosaveMarkdownModes({
+      autosave: controller,
+      source,
+      visualRoot: {} as Node,
+    });
+
+    return modes.enterVisual().then(async () => {
+      await modes.enterSource();
+      clock.advance(1_000);
+      expect(save.calls).toEqual([]);
+
+      await modes.enterVisual();
+      visual.state.instances.at(-1)!.documentChanged("second");
+      clock.advance(999);
+      expect(save.calls).toEqual([]);
+      clock.advance(1);
+      expect(save.calls).toEqual([{ content: "second", version: "g.1" }]);
+      await modes.destroy();
+    });
+  });
+
+  it("formats diff prefixes as text without constructing HTML", () => {
+    expect(formatHistoryDiffLine({ kind: "same", text: "unchanged\n" })).toBe(" unchanged\n");
+    expect(formatHistoryDiffLine({ kind: "delete", text: "<script>old</script>\n" })).toBe("-<script>old</script>\n");
+    expect(formatHistoryDiffLine({ kind: "add", text: "<img src=x>\n" })).toBe("+<img src=x>\n");
+  });
+
+  it("creates the diff worker only for a selected revision and ignores stale text responses", () => {
+    const workers: Array<{
+      postMessage: ReturnType<typeof vi.fn>;
+      terminate: ReturnType<typeof vi.fn>;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null;
+      onerror: ((event: ErrorEvent) => void) | null;
+    }> = [];
+    const onLines = vi.fn();
+    const history = createHistoryDiff({
+      createWorker: () => {
+        const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null };
+        workers.push(worker);
+        return worker;
+      },
+      onLines,
+    });
+
+    expect(history.selectRevision("1", "a\nb\n", "a\nc\n")).toBe("automatic");
+    expect(workers).toHaveLength(1);
+    expect(history.selectRevision("2", "old\n", "<img src=x>\n")).toBe("automatic");
+
+    workers[0]!.onmessage?.({
+      data: { type: "result", id: 1, lines: [{ kind: "same", text: "stale\n" }] },
+    } as MessageEvent<unknown>);
+    expect(onLines).not.toHaveBeenCalled();
+
+    workers[0]!.onmessage?.({
+      data: { type: "result", id: 2, lines: [{ kind: "add", text: "<img src=x>\n" }] },
+    } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenCalledWith([{ kind: "add", text: "<img src=x>\n" }]);
+
+    history.destroy();
+    expect(workers[0]!.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("requires explicit diff calculation when either side exceeds the automatic policy", () => {
+    const createWorker = vi.fn();
+    const history = createHistoryDiff({ createWorker, onLines: vi.fn() });
+
+    expect(history.selectRevision("1", "x".repeat(1_048_577), "current")).toBe("manual");
+    expect(createWorker).not.toHaveBeenCalled();
   });
 });
