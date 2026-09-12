@@ -156,6 +156,29 @@ describe("AutosaveController", () => {
     expect(save.calls).toEqual([{ content: "最终", version: "g.1" }]);
   });
 
+  it("reports a composition edit as waiting until its post-composition debounce completes", () => {
+    const { clock, controller, save, states } = setup();
+
+    controller.compositionStart();
+    controller.input("zhong");
+    expect(lastState(states)).toMatchObject({
+      state: "waiting",
+      draft: "zhong",
+      lastSavedContent: "first",
+      lastInputAt: null,
+      dueAt: null,
+      inFlightContent: null,
+    });
+
+    clock.advance(500);
+    expect(save.calls).toEqual([]);
+    controller.compositionEnd("最终");
+    clock.advance(999);
+    expect(save.calls).toEqual([]);
+    clock.advance(1);
+    expect(save.calls).toEqual([{ content: "最终", version: "g.1" }]);
+  });
+
   it("keeps one request in flight and coalesces to the latest overdue draft", async () => {
     const { clock, controller, save } = setup();
 
@@ -347,6 +370,29 @@ describe("AutosaveController", () => {
       lastSavedContent: "newer local draft",
       version: "g.3",
     });
+  });
+
+  it("overwrites a conflicted in-flight edit after reverting to confirmed content", async () => {
+    const { clock, controller, save, states } = setup();
+
+    controller.input("in-flight draft B");
+    clock.advance(1_000);
+    controller.input("first");
+    save.pending[0]!.resolve({ status: 409 });
+    await settle();
+    expect(lastState(states)).toMatchObject({
+      state: "conflict",
+      draft: "first",
+      lastSavedContent: "first",
+      inFlightContent: null,
+    });
+
+    controller.overwrite();
+
+    expect(save.calls).toEqual([
+      { content: "in-flight draft B", version: "g.1" },
+      { content: "first" },
+    ]);
   });
 
   it("reloads confirmed server content only from an explicit conflict action", async () => {

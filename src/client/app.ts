@@ -63,6 +63,7 @@ export class AutosaveController {
     this.draft = content;
     if (this.composing) {
       if (this.inFlightContent !== null) this.dirtyWhileSaving = true;
+      else if (this.draft !== this.lastSavedContent && (this.state === "clean" || this.state === "saved")) this.state = "waiting";
       this.emit();
       return;
     }
@@ -119,8 +120,7 @@ export class AutosaveController {
       this.disposed ||
       this.composing ||
       this.state !== "conflict" ||
-      this.inFlightContent !== null ||
-      this.draft === this.lastSavedContent
+      this.inFlightContent !== null
     ) {
       return;
     }
@@ -179,7 +179,7 @@ export class AutosaveController {
     ) {
       return;
     }
-    if (this.draft === this.lastSavedContent) {
+    if (!omitVersion && this.draft === this.lastSavedContent) {
       this.dueAt = null;
       this.dirtyWhileSaving = false;
       this.state = "saved";
