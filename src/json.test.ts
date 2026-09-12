@@ -13,16 +13,55 @@ function request(body: BodyInit, headers?: HeadersInit): Request {
   });
 }
 
-function streamedBody(chunks: number, chunkBytes: number): ReadableStream<Uint8Array> {
+function streamedRequest(body: ReadableStream<Uint8Array>, headers?: HeadersInit): Request {
+  return { body, headers: new Headers(headers) } as Request;
+}
+
+function trackedBody(chunks: number, chunkBytes: number, rejectCancel = false): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number; pulls: number };
+} {
+  const state = { cancels: 0, pulls: 0 };
   let sent = 0;
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        state.pulls += 1;
+        if (sent === chunks) {
+          controller.close();
+          return;
+        }
+        sent += 1;
+        controller.enqueue(new Uint8Array(chunkBytes).fill(0x20));
+      },
+      cancel() {
+        state.cancels += 1;
+        if (rejectCancel) return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
+}
+
+function exactLengthWhitespaceBody(bytes: number): ReadableStream<Uint8Array> {
+  const whitespace = new Uint8Array(65_536).fill(0x20);
+  let remaining = bytes - 2;
+  let started = false;
   return new ReadableStream({
     pull(controller) {
-      if (sent === chunks) {
-        controller.close();
+      if (!started) {
+        started = true;
+        controller.enqueue(Uint8Array.of(0x7b));
         return;
       }
-      sent += 1;
-      controller.enqueue(new Uint8Array(chunkBytes));
+      if (remaining > 0) {
+        const chunk = remaining < whitespace.byteLength ? whitespace.subarray(0, remaining) : whitespace;
+        remaining -= chunk.byteLength;
+        controller.enqueue(chunk);
+        return;
+      }
+      controller.enqueue(Uint8Array.of(0x7d));
+      controller.close();
     },
   });
 }
@@ -89,23 +128,56 @@ describe("strict JSON boundary", () => {
     });
   });
 
-  it("rejects an announced body larger than 64 MiB before reading it", async () => {
-    await expect(
-      parseStrictJsonObject(request("{}", { "content-length": String(wireBodyLimit + 1) }), new Set()),
-    ).rejects.toMatchObject({
+  it("cancels an announced oversized body without pulling it", async () => {
+    const { body, state } = trackedBody(1, 1, true);
+    const oversized = streamedRequest(body, { "content-length": String(wireBodyLimit + 1) });
+
+    await expect(parseStrictJsonObject(oversized, new Set())).rejects.toMatchObject({
       code: "REQUEST_TOO_LARGE",
       status: 413,
       details: { maxBytes: wireBodyLimit },
     });
+    expect(state).toEqual({ cancels: 1, pulls: 0 });
+    expect(oversized.body?.locked).toBe(false);
   });
 
-  it("rejects a streamed body once it exceeds 64 MiB", async () => {
-    await expect(
-      parseStrictJsonObject(request(streamedBody(65, 1_048_576)), new Set()),
-    ).rejects.toMatchObject({
+  it("cancels a streamed body as soon as it exceeds 64 MiB", async () => {
+    const { body, state } = trackedBody(65, 1_048_576);
+    const oversized = streamedRequest(body);
+
+    await expect(parseStrictJsonObject(oversized, new Set())).rejects.toMatchObject({
       code: "REQUEST_TOO_LARGE",
       status: 413,
       details: { maxBytes: wireBodyLimit },
+    });
+    expect(state).toEqual({ cancels: 1, pulls: 65 });
+    expect(oversized.body?.locked).toBe(false);
+  });
+
+  it("preserves REQUEST_TOO_LARGE when overflow cancellation rejects", async () => {
+    const { body, state } = trackedBody(1, 2, true);
+    const oversized = streamedRequest(body);
+
+    await expect(readLimitedBytes(oversized, 1)).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: 1 },
+    });
+    expect(state).toEqual({ cancels: 1, pulls: 1 });
+    expect(oversized.body?.locked).toBe(false);
+  });
+
+  it("accepts an exact 64 MiB body with no body-sized parsed value", async () => {
+    await expect(parseStrictJsonObject(streamedRequest(exactLengthWhitespaceBody(wireBodyLimit)), new Set())).resolves.toEqual({});
+  });
+
+  it.each([
+    ["arrays", "[".repeat(10_000) + "0" + "]".repeat(10_000)],
+    ["objects", '{"value":'.repeat(10_000) + "0" + "}".repeat(10_000)],
+  ])("rejects deeply nested %s with PasteError", async (_kind, body) => {
+    await expect(parseStrictJsonObject(request(body), new Set())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
     });
   });
 
