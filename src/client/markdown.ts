@@ -191,19 +191,23 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           const mountedSession = session;
           editor = new Crepe({ root: mountedSession, defaultValue: visualSourceSnapshot });
           const mountedEditor = editor;
+          let serializationAttempt = 0;
           const serializeVisualDocument = (): void => {
             if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+            const attempt = ++serializationAttempt;
             try {
               const markdown = mountedEditor.getMarkdown();
-              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return;
               visualSerialized = markdown;
               options.source.value = markdown;
               options.onDocumentChange(markdown);
             } catch (error) {
-              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return;
               options.onVisualError?.({
                 message: error instanceof Error ? error.message : String(error),
-                retry: async () => serializeVisualDocument(),
+                retry: async () => {
+                  if (attempt === serializationAttempt) serializeVisualDocument();
+                },
               });
             }
           };

@@ -23,10 +23,11 @@ const visual = vi.hoisted(() => {
     },
   });
 
-  const state = { instances: [] as FakeCrepe[] };
+  const state = { failGetMarkdown: false, instances: [] as FakeCrepe[] };
 
   class FakeCrepe {
     markdown = "";
+    getMarkdownCalls = 0;
     private doc = fakeDocument("");
     private documentPlugin: FakeDocumentPlugin | undefined;
     private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
@@ -51,6 +52,8 @@ const visual = vi.hoisted(() => {
     }
     async destroy(): Promise<void> {}
     getMarkdown(): string {
+      this.getMarkdownCalls += 1;
+      if (state.failGetMarkdown) throw new Error("Crepe failed to serialize");
       return this.markdown;
     }
 
@@ -193,6 +196,8 @@ function lastState(states: AutosaveSnapshot[]): AutosaveSnapshot {
 afterEach(() => {
   vi.unstubAllGlobals();
   browser.setPastePassword?.(null);
+  visual.state.failGetMarkdown = false;
+  visual.state.instances.length = 0;
 });
 
 describe("AutosaveController", () => {
@@ -573,6 +578,78 @@ describe("browser document state", () => {
 });
 
 describe("Markdown and history integration", () => {
+  it("queues one autosave when a recovered serialization retry succeeds once", async () => {
+    const { clock, controller, save } = setup();
+    const input = vi.spyOn(controller, "input");
+    const source = { value: "first" } as HTMLTextAreaElement;
+    const onVisualError = vi.fn();
+    const modes = createAutosaveMarkdownModes({
+      autosave: controller,
+      source,
+      visualRoot: { childNodes: [], removeChild: vi.fn() } as unknown as Node,
+      onVisualError,
+    });
+
+    await modes.enterVisual();
+    const editor = visual.state.instances.at(-1)!;
+    visual.state.failGetMarkdown = true;
+    editor.documentChanged("second");
+    const retry = onVisualError.mock.calls[0]![0].retry;
+
+    visual.state.failGetMarkdown = false;
+    await retry();
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(input).toHaveBeenCalledWith("second");
+    expect(editor.getMarkdownCalls).toBe(2);
+    clock.advance(999);
+    expect(save.calls).toEqual([]);
+
+    await retry();
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(editor.getMarkdownCalls).toBe(2);
+    clock.advance(1);
+    expect(save.calls).toEqual([{ content: "second", version: "g.1" }]);
+    await modes.destroy();
+  });
+
+  it("keeps an autosave retry stale after a newer visual transaction succeeds", async () => {
+    const { clock, controller, save } = setup();
+    const input = vi.spyOn(controller, "input");
+    const source = { value: "first" } as HTMLTextAreaElement;
+    const onVisualError = vi.fn();
+    const modes = createAutosaveMarkdownModes({
+      autosave: controller,
+      source,
+      visualRoot: { childNodes: [], removeChild: vi.fn() } as unknown as Node,
+      onVisualError,
+    });
+
+    await modes.enterVisual();
+    const editor = visual.state.instances.at(-1)!;
+    visual.state.failGetMarkdown = true;
+    editor.documentChanged("failed");
+    const retry = onVisualError.mock.calls[0]![0].retry;
+
+    visual.state.failGetMarkdown = false;
+    editor.documentChanged("newer");
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(input).toHaveBeenCalledWith("newer");
+    expect(editor.getMarkdownCalls).toBe(2);
+    clock.advance(999);
+    expect(save.calls).toEqual([]);
+
+    await retry();
+
+    expect(input).toHaveBeenCalledTimes(1);
+    expect(editor.getMarkdownCalls).toBe(2);
+    clock.advance(1);
+    expect(save.calls).toEqual([{ content: "newer", version: "g.1" }]);
+    await modes.destroy();
+  });
+
   it("does not autosave a visual mode switch but saves one serialized document edit after 1,000 ms", () => {
     const { clock, controller, save } = setup();
     visual.state.instances.length = 0;

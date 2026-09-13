@@ -394,6 +394,56 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).toHaveBeenCalledWith(edited);
   });
 
+  it("publishes an edit serialization retry at most once", async () => {
+    const { source, onDocumentChange, onVisualError, modes } = fixture();
+    const edited = "# recovered once\n";
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    crepe.state.failGetMarkdown = true;
+    editor.documentChanged(edited);
+    const retry = onVisualError.mock.calls[0]![0].retry;
+
+    crepe.state.failGetMarkdown = false;
+    await retry();
+
+    expect(source.value).toBe(edited);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(onDocumentChange).toHaveBeenCalledWith(edited);
+    expect(editor.getMarkdownCalls).toBe(2);
+
+    await retry();
+
+    expect(source.value).toBe(edited);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(editor.getMarkdownCalls).toBe(2);
+  });
+
+  it("does not publish an edit serialization retry after a newer transaction succeeds", async () => {
+    const { source, onDocumentChange, onVisualError, modes } = fixture();
+    const newer = "# newer serialized document\n";
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    crepe.state.failGetMarkdown = true;
+    editor.documentChanged("# failed serialization\n");
+    const retry = onVisualError.mock.calls[0]![0].retry;
+
+    crepe.state.failGetMarkdown = false;
+    editor.documentChanged(newer);
+
+    expect(source.value).toBe(newer);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(onDocumentChange).toHaveBeenCalledWith(newer);
+    expect(editor.getMarkdownCalls).toBe(2);
+
+    await retry();
+
+    expect(source.value).toBe(newer);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(editor.getMarkdownCalls).toBe(2);
+  });
+
   it.each(["source", "preview", "destroy"])("does not publish a failed edit serialization retry after a newer %s transition", async (next) => {
     const { source, onDocumentChange, onVisualError, modes } = fixture();
     const canonical = source.value;
