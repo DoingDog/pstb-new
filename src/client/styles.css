@@ -172,6 +172,7 @@ textarea,
 .utility-actions > button {
   display: inline-flex;
   align-items: center;
+  min-inline-size: 44px;
   min-block-size: 44px;
 }
 
@@ -503,8 +504,12 @@ pre.paste-content,
   overflow-wrap: anywhere;
 }
 
-.markdown-document article :is(h1, h2, h3, h4, h5, h6, p, code) {
+.markdown-document article {
   overflow-wrap: anywhere;
+}
+
+.markdown-document article :is(pre, table) {
+  overflow-wrap: normal;
 }
 
 .paste-content table,
@@ -658,6 +663,15 @@ dialog::backdrop,
   .utility-actions > [data-action="locale"],
   .utility-actions > [data-action="theme"] {
     display: inline-flex;
+  }
+
+  body[data-page="markdown"] .utility-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  body[data-page="markdown"] .page-location {
+    grid-row: 3;
   }
 
   body[data-page="markdown"] .utility-actions > .markdown-document-action {
