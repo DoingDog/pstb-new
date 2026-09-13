@@ -717,6 +717,33 @@ describe("strict JSON boundary", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("reports immediate parser validation before malformed UTF-8 for decoder and network chunks", async () => {
+    const wrongKindPolicy: StrictJsonParsePolicy = {
+      ...fieldBoundPolicy,
+      expectedTopLevelKinds: new Map([["content", new Set(["string"] as const)]]),
+      onUnexpectedTopLevelKind: (field) => new PasteError("VALIDATION_FAILED", 422, undefined, {
+        fields: [{ field, message: "Must be a string." }],
+      }),
+    };
+    const cases: Array<{ allowedKeys: Set<string>; policy: StrictJsonParsePolicy; prefix: string }> = [
+      { allowedKeys: new Set(["content"]), policy: wrongKindPolicy, prefix: `${" ".repeat(8_192)}{"content":0` },
+      { allowedKeys: new Set(["format"]), policy: fieldBoundPolicy, prefix: `${" ".repeat(8_192)}{"format":"markdownx` },
+    ];
+
+    for (const { allowedKeys, policy, prefix } of cases) {
+      const encodedPrefix = new TextEncoder().encode(prefix);
+      const bytes = new Uint8Array(encodedPrefix.byteLength + 3);
+      bytes.set(encodedPrefix);
+      bytes.set([0xc3, 0x28, 0x7d], encodedPrefix.byteLength);
+      for (const chunks of [[bytes], [bytes.subarray(0, encodedPrefix.byteLength), bytes.subarray(encodedPrefix.byteLength)]]) {
+        await expect(parseStrictJsonObject(streamedRequest(chunkedBody(chunks).body), allowedKeys, policy)).rejects.toMatchObject({
+          code: "VALIDATION_FAILED",
+          status: 422,
+        });
+      }
+    }
+  });
+
   it("validates content Unicode scalar pairs across parser chunks before applying its UTF-8 byte limit", async () => {
     for (const source of ['{"content":"🙂"}', '{"content":"\\uD83D\\uDE42"}']) {
       await expect(parseStrictJsonObject(chunkedUtf8Request(source, 1), new Set(["content"]), fieldBoundPolicy)).resolves.toEqual({

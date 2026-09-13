@@ -199,6 +199,31 @@ describe("HTTP slice 1", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("preserves create JSON validation before malformed UTF-8 across stream chunks", async () => {
+    const app = createHttpApp(env as unknown as Env);
+    const body = (chunks: readonly Uint8Array[]) => new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    for (const prefix of ['{"content":0', '{"format":"markdownx']) {
+      const encodedPrefix = new TextEncoder().encode(prefix);
+      const bytes = new Uint8Array(encodedPrefix.byteLength + 3);
+      bytes.set(encodedPrefix);
+      bytes.set([0xc3, 0x28, 0x7d], encodedPrefix.byteLength);
+      for (const chunks of [[bytes], [bytes.subarray(0, encodedPrefix.byteLength), bytes.subarray(encodedPrefix.byteLength)]]) {
+        const response = await app.fetch(new Request("https://paste.test/api/pastes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: body(chunks),
+        }));
+        expect(response.status).toBe(422);
+        await expect(response.json()).resolves.toMatchObject({ error: { code: "VALIDATION_FAILED" } });
+      }
+    }
+  });
+
   it("creates a multipart paste with form values normalized at the HTTP boundary", async () => {
     const id = `http-${crypto.randomUUID()}`;
     const form = new FormData();

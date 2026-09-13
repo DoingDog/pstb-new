@@ -3,7 +3,6 @@ import { PasteError } from "./types";
 const maxRequestBytes = 67_108_864;
 const maxJsonDepth = 256;
 const tokenBlockLength = 8_192;
-const maxUtf8PendingBytes = 3;
 const retainedContainerUnits = 256;
 const retainedKeyUnits = 32;
 
@@ -351,14 +350,6 @@ class StrictJsonParser {
           break;
       }
     }
-  }
-
-  needsIncrementalUtf8Decode(): boolean {
-    return (
-      this.#stringByteLimit !== undefined &&
-      (this.#state === "string" || this.#state === "escape" || this.#state === "unicode") &&
-      this.#stringUtf8Bytes >= this.#stringByteLimit - tokenBlockLength - maxUtf8PendingBytes
-    );
   }
 
   finish(): JsonValue {
@@ -990,33 +981,89 @@ class StrictJsonParser {
   }
 }
 
+type Utf8DecodeState = { pending: Uint8Array };
+
+type Utf8Prefix = { length: number; malformed: boolean };
+
+function appendUtf8Pending(pending: Uint8Array, bytes: Uint8Array): Uint8Array {
+  if (pending.byteLength === 0) return bytes;
+  const source = new Uint8Array(pending.byteLength + bytes.byteLength);
+  source.set(pending);
+  source.set(bytes, pending.byteLength);
+  return source;
+}
+
+function validUtf8Prefix(bytes: Uint8Array): Utf8Prefix {
+  let position = 0;
+  while (position < bytes.byteLength) {
+    const first = bytes[position]!;
+    let length = 1;
+    let secondMinimum = 0x80;
+    let secondMaximum = 0xbf;
+    if (first >= 0xc2 && first <= 0xdf) {
+      length = 2;
+    } else if (first === 0xe0) {
+      length = 3;
+      secondMinimum = 0xa0;
+    } else if ((first >= 0xe1 && first <= 0xec) || (first >= 0xee && first <= 0xef)) {
+      length = 3;
+    } else if (first === 0xed) {
+      length = 3;
+      secondMaximum = 0x9f;
+    } else if (first === 0xf0) {
+      length = 4;
+      secondMinimum = 0x90;
+    } else if (first >= 0xf1 && first <= 0xf3) {
+      length = 4;
+    } else if (first === 0xf4) {
+      length = 4;
+      secondMaximum = 0x8f;
+    } else if (first > 0x7f) {
+      return { length: position, malformed: true };
+    }
+
+    const available = Math.min(length, bytes.byteLength - position);
+    for (let offset = 1; offset < available; offset += 1) {
+      const byte = bytes[position + offset]!;
+      if (byte < (offset === 1 ? secondMinimum : 0x80) || byte > (offset === 1 ? secondMaximum : 0xbf)) {
+        return { length: position, malformed: true };
+      }
+    }
+    if (available < length) return { length: position, malformed: false };
+    position += length;
+  }
+  return { length: position, malformed: false };
+}
+
 function decodeChunk(
   decoder: TextDecoder,
+  state: Utf8DecodeState,
   bytes: Uint8Array,
   stream: boolean,
   write: (source: string) => void,
-  needsIncrementalDecode?: () => boolean,
 ): void {
   if (!stream) {
     let source: string;
     try {
-      source = decoder.decode(bytes);
+      source = decoder.decode(appendUtf8Pending(state.pending, bytes));
     } catch {
       throw badRequest();
     }
     write(source);
     return;
   }
-  for (let start = 0; start < bytes.byteLength;) {
-    const end = needsIncrementalDecode?.() ? start + 1 : Math.min(start + tokenBlockLength, bytes.byteLength);
+  for (let start = 0; start < bytes.byteLength; start += tokenBlockLength) {
+    const input = appendUtf8Pending(state.pending, bytes.subarray(start, Math.min(start + tokenBlockLength, bytes.byteLength)));
+    const prefix = validUtf8Prefix(input);
     let source: string;
     try {
-      source = decoder.decode(bytes.subarray(start, end), { stream: true });
+      source = decoder.decode(input.subarray(0, prefix.length), { stream: true });
     } catch {
       throw badRequest();
     }
     write(source);
-    start = end;
+    if (prefix.malformed) throw badRequest();
+    state.pending = input.slice(prefix.length);
   }
 }
 
@@ -1028,12 +1075,13 @@ async function parseStrictJsonObjectValue(
   policy?: StrictJsonParsePolicy,
 ): Promise<JsonObject | undefined> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const state: Utf8DecodeState = { pending: new Uint8Array() };
   const parser = new StrictJsonParser(allowedKeys, policy);
   const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
-    decodeChunk(decoder, chunk, true, (source) => parser.write(source), () => parser.needsIncrementalUtf8Decode());
+    decodeChunk(decoder, state, chunk, true, (source) => parser.write(source));
   }, onNonEmpty);
   if (!hasBytes && allowEmpty) return undefined;
-  decodeChunk(decoder, new Uint8Array(), false, (source) => parser.write(source));
+  decodeChunk(decoder, state, new Uint8Array(), false, (source) => parser.write(source));
 
   const value = parser.finish();
   if (value === null || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
