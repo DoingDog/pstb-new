@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BoundedDecimalNumberAccumulator,
   decodeUtf8,
   impossibleOpaqueMatch,
   parseStrictJsonObject,
@@ -31,6 +32,11 @@ const fieldBoundPolicy: StrictJsonParsePolicy = {
     : new PasteError("VALIDATION_FAILED", 422),
   onRetainedLimit: () => new PasteError("BAD_REQUEST", 400),
   topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
+};
+
+const expirationNumberPolicy: StrictJsonParsePolicy = {
+  ...fieldBoundPolicy,
+  topLevelNumberAccumulators: new Map([["expiration", () => new BoundedDecimalNumberAccumulator()]]),
 };
 
 const opaqueVersionPolicy: StrictJsonParsePolicy = {
@@ -69,6 +75,15 @@ function chunkedUtf8Request(source: string, chunkBytes = 65_537): Request {
       position = end;
     },
   }));
+}
+
+async function parseBoundedExpirationNumber(source: string, chunkBytes = 65_537): Promise<number> {
+  const parsed = await parseStrictJsonObject(
+    chunkedUtf8Request(`{"expiration":${source}}`, chunkBytes),
+    new Set(["expiration"]),
+    expirationNumberPolicy,
+  );
+  return parsed.expiration as number;
 }
 
 function trackedBody(chunks: number, chunkBytes: number, rejectCancel = false): {
@@ -118,6 +133,43 @@ function exactLengthWhitespaceBody(bytes: number): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function streamedExpirationNumberBody(bytes: number, close = true): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number; pulls: number };
+} {
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode('{"expiration":60.');
+  const suffix = encoder.encode("}");
+  const zeroes = new Uint8Array(65_536).fill(0x30);
+  let remaining = bytes - prefix.byteLength - suffix.byteLength;
+  let sentPrefix = false;
+  let sentSuffix = false;
+  const state = { cancels: 0, pulls: 0 };
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        state.pulls += 1;
+        if (!sentPrefix) {
+          sentPrefix = true;
+          controller.enqueue(prefix);
+        } else if (remaining > 0) {
+          const chunk = remaining < zeroes.byteLength ? zeroes.subarray(0, remaining) : zeroes;
+          remaining -= chunk.byteLength;
+          controller.enqueue(chunk);
+        } else if (!sentSuffix) {
+          sentSuffix = true;
+          controller.enqueue(suffix);
+          if (close) controller.close();
+        }
+      },
+      cancel() {
+        state.cancels += 1;
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
 }
 
 function streamedOpaqueVersionBody(characters: number, tail = '"}', close = true): {
@@ -336,6 +388,47 @@ describe("strict JSON boundary", () => {
     expect(oversized.body?.locked).toBe(false);
   });
 
+  it("accepts an exact 64 MiB expiration number without retaining its token", async () => {
+    const streamed = streamedExpirationNumberBody(wireBodyLimit);
+    const parsed = await parseStrictJsonObject(
+      streamedRequest(streamed.body, { "content-length": String(wireBodyLimit) }),
+      new Set(["expiration"]),
+      { ...expirationNumberPolicy, maxRetainedCodeUnits: 1_024 },
+    );
+
+    expect(parsed).toEqual({ expiration: 60 });
+    expect(streamed.state.cancels).toBe(0);
+  }, 20_000);
+
+  it("cancels an announced oversized expiration number before its first byte", async () => {
+    const streamed = streamedExpirationNumberBody(wireBodyLimit + 1, false);
+    const parsed = streamedRequest(streamed.body, { "content-length": String(wireBodyLimit + 1) });
+
+    await expect(parseStrictJsonObject(parsed, new Set(["expiration"]), expirationNumberPolicy)).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: wireBodyLimit },
+    });
+    expect(streamed.state).toEqual({ cancels: 1, pulls: 0 });
+    expect(parsed.body?.locked).toBe(false);
+  });
+
+  it("cancels an unknown 64 MiB plus one expiration number stream", async () => {
+    const streamed = streamedExpirationNumberBody(wireBodyLimit + 1, false);
+    const parsed = streamedRequest(streamed.body);
+
+    await expect(parseStrictJsonObject(parsed, new Set(["expiration"]), {
+      ...expirationNumberPolicy,
+      maxRetainedCodeUnits: 1_024,
+    })).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: wireBodyLimit },
+    });
+    expect(streamed.state.cancels).toBe(1);
+    expect(parsed.body?.locked).toBe(false);
+  }, 20_000);
+
   it("accepts an exact 64 MiB body with no body-sized parsed value", async () => {
     await expect(parseStrictJsonObject(streamedRequest(exactLengthWhitespaceBody(wireBodyLimit)), new Set())).resolves.toEqual({});
   });
@@ -377,6 +470,89 @@ describe("strict JSON boundary", () => {
     );
 
     expect(parsed.value).toBe(Infinity);
+  });
+
+  it("preserves bounded expiration numbers across every JSON number grammar state and one-byte chunks", async () => {
+    for (const source of ["-0", "-60", "0", "60", "60.0", "6e1", "6e+1", "6e-1"]) {
+      const expected = JSON.parse(`{"expiration":${source}}`).expiration as number;
+      const actual = await parseBoundedExpirationNumber(source, 1);
+      expect(Object.is(actual, expected)).toBe(true);
+    }
+  });
+
+  it("discards long leading, fractional, and exponent zero runs across one-byte chunks", async () => {
+    const zeroes = 32_768;
+    for (const source of [
+      `60.${"0".repeat(zeroes)}`,
+      `0.${"0".repeat(zeroes)}60e${zeroes + 2}`,
+      `6e${"0".repeat(zeroes)}1`,
+    ]) {
+      expect(await parseBoundedExpirationNumber(source, 1)).toBe(60);
+    }
+  }, 20_000);
+
+  it("rounds bounded expiration numbers exactly at safe-integer ties", async () => {
+    for (const source of [
+      "59.999999999999996447286321199499070644378662109375",
+      "59.9999999999999964472863211994990706443786621093751",
+      "60.000000000000003552713678800500929355621337890625",
+      "60.0000000000000035527136788005009293556213378906251",
+      `60.000000000000003552713678800500929355621337890625${"0".repeat(16_384)}`,
+      `60.000000000000003552713678800500929355621337890625${"0".repeat(16_384)}1`,
+      "9007199254740990.5",
+      "9007199254740991.5",
+    ]) {
+      const expected = JSON.parse(`{"expiration":${source}}`).expiration as number;
+      const actual = await parseBoundedExpirationNumber(source, 1);
+      expect(Object.is(actual, expected)).toBe(true);
+    }
+  });
+
+  it("matches JSON.parse for a deterministic corpus of safe expiration spellings", async () => {
+    const next = random(0x5eeda11c);
+    const bases = [60, 1_000_000, 4_503_599_627_370_000, 9_007_199_254_730_000];
+    for (let index = 0; index < 512; index += 1) {
+      const integer = bases[index % bases.length]! + next() % 10_000;
+      const digits = String(integer);
+      const decimalPoint = 1 + (next() % digits.length);
+      const exponent = digits.length - decimalPoint;
+      const zeroes = index % 31 === 0 ? 16_384 : 1 + next() % 32;
+      const source = index % 3 === 0
+        ? `${digits}.${"0".repeat(zeroes)}`
+        : index % 3 === 1
+          ? `${digits.slice(0, decimalPoint)}${decimalPoint === digits.length ? "" : `.${digits.slice(decimalPoint)}`}e+${"0".repeat(zeroes)}${exponent}`
+          : `0.${"0".repeat(zeroes)}${digits}e${zeroes + digits.length}`;
+      const expected = JSON.parse(`{"expiration":${source}}`).expiration as number;
+      const actual = await parseBoundedExpirationNumber(source, index % 5 + 1);
+      expect(Object.is(actual, expected)).toBe(true);
+      expect(Number.isSafeInteger(actual)).toBe(true);
+    }
+  }, 20_000);
+
+  it("rejects malformed long expiration number endings after streaming their digits", async () => {
+    const prefix = `{"expiration":60.${"0".repeat(2 * 1024 * 1024)}`;
+    for (const source of [`${prefix}x}`, prefix]) {
+      await expect(parseStrictJsonObject(
+        chunkedUtf8Request(source),
+        new Set(["expiration"]),
+        expirationNumberPolicy,
+      )).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    }
+  }, 20_000);
+
+  it("rejects invalid UTF-8 and trailing JSON after a complete expiration number", async () => {
+    const valid = new TextEncoder().encode('{"expiration":60}');
+    const invalidUtf8 = new Uint8Array(valid.byteLength + 2);
+    invalidUtf8.set(valid);
+    invalidUtf8.set([0xc3, 0x28], valid.byteLength);
+    await expect(parseStrictJsonObject(request(invalidUtf8), new Set(["expiration"]), expirationNumberPolicy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    await expect(parseStrictJsonObject(request('{"expiration":60} null'), new Set(["expiration"]), expirationNumberPolicy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
   });
 
   it.each([

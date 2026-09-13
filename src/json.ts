@@ -44,6 +44,82 @@ class FlatTextBuffer {
   }
 }
 
+// Safe expiration results are at least 60, where a binary64 rounding midpoint needs no more than 48 decimal places.
+const retainedSignificantDigits = 64;
+const maxTrackedExponent = 1_000_000_000;
+
+export class BoundedDecimalNumberAccumulator implements StrictJsonNumberAccumulator {
+  #coefficientDigits = 0;
+  #decimalPosition = 0;
+  #exponentMagnitude = 0;
+  #exponentNegative = false;
+  #firstSignificantPosition = 0;
+  #fraction = false;
+  #guard = "";
+  #inExponent = false;
+  #negative = false;
+  #prefix = "";
+  #sticky = false;
+
+  append(source: string, start: number, end: number): void {
+    for (let position = start; position < end; position += 1) {
+      const character = source[position]!;
+      if (this.#inExponent) {
+        if (character === "+" || character === "-") {
+          this.#exponentNegative = character === "-";
+        } else {
+          this.#exponentMagnitude = Math.min(maxTrackedExponent, this.#exponentMagnitude * 10 + Number(character));
+        }
+        continue;
+      }
+      if (character === "-") {
+        this.#negative = true;
+      } else if (character === ".") {
+        this.#fraction = true;
+      } else if (character === "e" || character === "E") {
+        this.#inExponent = true;
+      } else {
+        this.#coefficientDigits += 1;
+        if (!this.#fraction) this.#decimalPosition += 1;
+        if (this.#firstSignificantPosition === 0 && character !== "0") {
+          this.#firstSignificantPosition = this.#coefficientDigits;
+        }
+        if (this.#firstSignificantPosition !== 0) this.appendSignificant(character);
+      }
+    }
+  }
+
+  finish(): number {
+    if (this.#firstSignificantPosition === 0) return this.#negative ? -0 : 0;
+
+    const exponent = this.#exponentNegative ? -this.#exponentMagnitude : this.#exponentMagnitude;
+    const scientificExponent = this.saturatingAdd(
+      this.saturatingAdd(this.#decimalPosition, exponent),
+      -this.#firstSignificantPosition,
+    );
+    // A nonzero tail only changes a safe-result midpoint when it lies at this retained boundary.
+    const significand = `${this.#prefix}${this.#guard}${this.#sticky ? "1" : ""}`;
+    const scale = scientificExponent - significand.length + 1;
+    return Number(`${this.#negative ? "-" : ""}${significand}e${scale}`);
+  }
+
+  private appendSignificant(character: string): void {
+    if (this.#prefix.length < retainedSignificantDigits) {
+      this.#prefix += character;
+    } else if (this.#guard === "") {
+      this.#guard = character;
+    } else if (character !== "0") {
+      this.#sticky = true;
+    }
+  }
+
+  private saturatingAdd(left: number, right: number): number {
+    if (right > maxTrackedExponent - left) return maxTrackedExponent;
+    if (right < -maxTrackedExponent - left) return -maxTrackedExponent;
+    return left + right;
+  }
+}
+
 export const impossibleOpaqueMatch: unique symbol = Symbol("impossible opaque match");
 
 type JsonValue = null | boolean | number | string | typeof impossibleOpaqueMatch | JsonValue[] | { [key: string]: JsonValue };
@@ -57,6 +133,11 @@ export type StrictJsonOpaqueStringPolicy = {
   isComplete: (value: string) => boolean;
 };
 
+export type StrictJsonNumberAccumulator = {
+  append: (source: string, start: number, end: number) => void;
+  finish: () => number;
+};
+
 export type StrictJsonParsePolicy = {
   maxRetainedCodeUnits: number;
   maxTopLevelKeyCodeUnits: number;
@@ -66,6 +147,7 @@ export type StrictJsonParsePolicy = {
   expectedTopLevelKinds?: ReadonlyMap<string, ReadonlySet<StrictJsonKind>>;
   onUnexpectedTopLevelKind?: (field: string) => PasteError;
   topLevelNumberMaxCodeUnits?: ReadonlyMap<string, number>;
+  topLevelNumberAccumulators?: ReadonlyMap<string, () => StrictJsonNumberAccumulator>;
   topLevelUtf8ByteMax?: ReadonlyMap<string, number>;
   topLevelOpaqueStrings?: ReadonlyMap<string, StrictJsonOpaqueStringPolicy>;
   topLevelOpaqueStringComparisons?: ReadonlyMap<string, string>;
@@ -198,6 +280,7 @@ class StrictJsonParser {
   #literalIndex = 0;
   #literalValue: boolean | null = null;
   #number = new FlatTextBuffer();
+  #numberAccumulator: StrictJsonNumberAccumulator | undefined;
   #numberDiscarded = false;
   #numberLength = 0;
   #numberLimit: number | undefined;
@@ -455,8 +538,12 @@ class StrictJsonParser {
       throw this.#policy!.onStringLimit(this.#numberLimitField!);
     }
     if (!this.#numberDiscarded) {
-      this.retain(length);
-      this.#number.append(source, start, end);
+      if (this.#numberAccumulator !== undefined) {
+        this.#numberAccumulator.append(source, start, end);
+      } else {
+        this.retain(length);
+        this.#number.append(source, start, end);
+      }
     }
     this.#numberLength += length;
     this.#numberState = state;
@@ -831,10 +918,13 @@ class StrictJsonParser {
     const field = this.topLevelValueField();
     this.#number.reset();
     this.#numberDiscarded = this.isDiscardingValue();
-    this.#numberLength = 0;
-    this.#numberLimit = field === undefined || !this.#allowedTopLevelKeys?.has(field)
+    this.#numberAccumulator = this.#numberDiscarded || field === undefined || !this.#allowedTopLevelKeys?.has(field)
       ? undefined
-      : this.#policy?.topLevelNumberMaxCodeUnits?.get(field);
+      : this.#policy?.topLevelNumberAccumulators?.get(field)?.();
+    this.#numberLength = 0;
+    this.#numberLimit = this.#numberAccumulator === undefined && field !== undefined && this.#allowedTopLevelKeys?.has(field)
+      ? this.#policy?.topLevelNumberMaxCodeUnits?.get(field)
+      : undefined;
     this.#numberLimitField = field;
     this.#numberState = character === "-" ? "minus" : character === "0" ? "zero" : "integer";
     this.#state = "number";
@@ -846,7 +936,7 @@ class StrictJsonParser {
     if (this.#numberState !== "zero" && this.#numberState !== "integer" && this.#numberState !== "fraction" && this.#numberState !== "exponent") {
       this.invalid();
     }
-    const value = this.#numberDiscarded ? 0 : Number(this.#number.finish());
+    const value = this.#numberDiscarded ? 0 : this.#numberAccumulator?.finish() ?? Number(this.#number.finish());
     this.#state = "normal";
     this.acceptValue(value);
   }

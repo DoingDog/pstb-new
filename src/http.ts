@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { impossibleOpaqueMatch, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
+import { BoundedDecimalNumberAccumulator, impossibleOpaqueMatch, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
 import { parseMultipartBoundary } from "./multipart";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
@@ -288,7 +288,7 @@ const httpJsonPolicy: StrictJsonParsePolicy = {
   onRetainedLimit: badRequest,
   onStringLimit: jsonStringLimitError,
   onUnexpectedTopLevelKind: jsonKindError,
-  topLevelNumberMaxCodeUnits: new Map([["expiration", 64]]),
+  topLevelNumberAccumulators: new Map([["expiration", () => new BoundedDecimalNumberAccumulator()]]),
   topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
 };
 

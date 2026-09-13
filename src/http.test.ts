@@ -1546,6 +1546,66 @@ describe("HTTP slice 1", () => {
     expect(pulls).toBe(2);
   }, 20_000);
 
+  it("accepts multi-megabyte legal expiration number spellings", async () => {
+    const ids: string[] = [];
+    try {
+      for (const expiration of [
+        `60.${"0".repeat(2 * 1024 * 1024)}`,
+        `6e${"0".repeat(2 * 1024 * 1024)}1`,
+      ]) {
+        const id = `http-${crypto.randomUUID()}`;
+        ids.push(id);
+        const response = await request("/api/pastes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"content":"source","customId":"${id}","expiration":${expiration}}`,
+        });
+        expect(response.status).toBe(201);
+        await expect(response.json()).resolves.toMatchObject({ expiration: { kind: "relative", seconds: 60 } });
+      }
+    } finally {
+      await Promise.all(ids.map(deletePaste));
+    }
+  }, 20_000);
+
+  it("uses the rounded binary64 value for expiration domain validation", async () => {
+    const ids: string[] = [];
+    try {
+      for (const expiration of [
+        "59.999999999999999999999999999999999999999999999999999999999999999999999999",
+        "60.000000000000003552713678800500929355621337890625",
+      ]) {
+        const id = `http-${crypto.randomUUID()}`;
+        ids.push(id);
+        const response = await request("/api/pastes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"content":"source","customId":"${id}","expiration":${expiration}}`,
+        });
+        expect(response.status).toBe(201);
+      }
+      for (const expiration of [
+        "59.99999999999999",
+        "60.0000000000000035527136788005009293556213378906251",
+        `60.000000000000003552713678800500929355621337890625${"0".repeat(2 * 1024 * 1024)}1`,
+        "9007199254740992",
+        "253402300800",
+        "1e100000",
+        "1e-100000",
+        "-0",
+      ]) {
+        const response = await request("/api/pastes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"content":"source","expiration":${expiration}}`,
+        });
+        expect(response.status).toBe(422);
+      }
+    } finally {
+      await Promise.all(ids.map(deletePaste));
+    }
+  });
+
   it("accepts normal numeric expiration spellings and rejects malformed or extra charset parameters", async () => {
     const ids: string[] = [];
     try {
