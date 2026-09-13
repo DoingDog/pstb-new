@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import worker from "./index";
 import { handleMcp } from "./mcp";
 import { renderMarkdown } from "./render";
 import type { Env } from "./types";
@@ -10,6 +11,7 @@ vi.mock("./render", async (importOriginal) => {
 
 const context = undefined as unknown as ExecutionContext;
 const url = "https://paste.test/mcp";
+const wireBodyLimit = 67_108_864;
 const meta = {
   "io.modelcontextprotocol/protocolVersion": "2026-07-28",
   "io.modelcontextprotocol/clientCapabilities": {},
@@ -52,6 +54,86 @@ function request(method: string, headers?: HeadersInit, body?: BodyInit | null):
   return new Request(url, init);
 }
 
+function streamRequest(body: ReadableStream<Uint8Array>, headers: HeadersInit, method = "POST"): Request {
+  return new Request(url, {
+    method,
+    headers,
+    body,
+    duplex: "half",
+  } as RequestInit);
+}
+
+function rawContentLengthRequest(body: ReadableStream<Uint8Array>, contentLength: string): Request {
+  const headers = new Headers(modernHeaders());
+  return {
+    body,
+    headers: { get(name: string) { return name.toLowerCase() === "content-length" ? contentLength : headers.get(name); } },
+    method: "POST",
+    url,
+  } as Request;
+}
+
+function trackedBody(chunks: readonly Uint8Array[], rejectCancel = false): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number; pulls: number };
+} {
+  const state = { cancels: 0, pulls: 0 };
+  let position = 0;
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        state.pulls += 1;
+        if (position === chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[position++]!);
+      },
+      cancel() {
+        state.cancels += 1;
+        if (rejectCancel) return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
+}
+
+function paddedJsonBody(source: string, bytes: number, rejectCancel = false): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number; pulls: number };
+} {
+  const prefix = new TextEncoder().encode(source);
+  if (prefix.byteLength > bytes) throw new Error("JSON source exceeds body size.");
+  const whitespace = new Uint8Array(65_536).fill(0x20);
+  const state = { cancels: 0, pulls: 0 };
+  let remaining = bytes - prefix.byteLength;
+  let sentPrefix = false;
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        state.pulls += 1;
+        if (!sentPrefix) {
+          sentPrefix = true;
+          controller.enqueue(prefix);
+          return;
+        }
+        if (remaining === 0) {
+          controller.close();
+          return;
+        }
+        const chunk = remaining < whitespace.byteLength ? whitespace.subarray(0, remaining) : whitespace;
+        remaining -= chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        state.cancels += 1;
+        if (rejectCancel) return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
+}
+
 function modernRequest(method: string, params: Record<string, unknown>, name?: string): Request {
   const headers: HeadersInit = {
     "content-type": "application/json",
@@ -66,6 +148,34 @@ function modernRequest(method: string, params: Record<string, unknown>, name?: s
     method,
     params: { ...params, _meta: meta },
   }));
+}
+
+function modernDiscoverySource(): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "server/discover",
+    params: { _meta: meta },
+  });
+}
+
+function modernHeaders(): HeadersInit {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "server/discover",
+  };
+}
+
+async function expectMcpParseError(response: Response): Promise<void> {
+  expect(response.status).toBe(400);
+  expect(response.headers.get("content-type")).toContain("application/json");
+  await expect(response.json()).resolves.toMatchObject({
+    jsonrpc: "2.0",
+    id: null,
+    error: { code: -32700 },
+  });
 }
 
 async function toolCallBody(
@@ -140,6 +250,152 @@ describe("MCP transport boundary", () => {
 
       expect(response.status).toBe(405);
       expect(response.headers.get("allow")).toBe("POST,OPTIONS");
+    }
+  });
+
+  it("mounts MCP at exactly /mcp and leaves /mcp/ with Hono", async () => {
+    const fetch = worker.fetch as unknown as (request: Request, env: Env, ctx: ExecutionContext) => Promise<Response>;
+    const exact = await fetch(modernRequest("server/discover", {}), env, context);
+    expect(exact.status).toBe(200);
+
+    const nonExact = await fetch(new Request("https://paste.test/mcp/", { method: "OPTIONS" }), env, context);
+    expect(nonExact.status).toBe(404);
+    await expect(nonExact.json()).resolves.toMatchObject({ error: { code: "PASTE_NOT_FOUND" } });
+  });
+
+  it("does not read bodies rejected by the Origin and method guards", async () => {
+    for (const [method, headers, status] of [
+      ["POST", { origin: "https://other.test", "content-type": "application/json" }, 403],
+      ["OPTIONS", { "content-type": "application/json" }, 204],
+    ] as const) {
+      const streamed = trackedBody([new TextEncoder().encode(modernDiscoverySource())]);
+      const response = await handleMcp(streamRequest(streamed.body, headers, method), env, context);
+      expect(response.status).toBe(status);
+      expect(streamed.state).toEqual({ cancels: 0, pulls: 0 });
+    }
+
+    const streamed = trackedBody([new TextEncoder().encode(modernDiscoverySource())]);
+    const response = await handleMcp({
+      body: streamed.body,
+      headers: new Headers({ "content-type": "application/json" }),
+      method: "GET",
+      url,
+    } as Request, env, context);
+    expect(response.status).toBe(405);
+    expect(streamed.state).toEqual({ cancels: 0, pulls: 0 });
+  });
+
+  it("leaves unsupported media-type bodies unread for the SDK's 415 response", async () => {
+    const streamed = trackedBody([new TextEncoder().encode(modernDiscoverySource())]);
+    const parsed = streamRequest(streamed.body, { "content-type": "text/plain" });
+
+    const response = await handleMcp(parsed, env, context);
+
+    expect(response.status).toBe(415);
+    expect(streamed.state).toEqual({ cancels: 0, pulls: 0 });
+    expect(parsed.bodyUsed).toBe(false);
+  });
+
+  it("validates malformed and zero-padded Content-Length before MCP parsing", async () => {
+    const source = modernDiscoverySource();
+    const bytes = new TextEncoder().encode(source);
+    const valid = await handleMcp(streamRequest(trackedBody([bytes]).body, {
+      ...modernHeaders(),
+      "content-length": `000${bytes.byteLength}`,
+    }), env, context);
+    expect(valid.status).toBe(200);
+
+    for (const contentLength of ["+1", "-1", " 1", "1 ", "1\\t"]) {
+      const malformed = await handleMcp(rawContentLengthRequest(trackedBody([bytes]).body, contentLength), env, context);
+      await expectMcpParseError(malformed);
+    }
+  });
+
+  it("cancels known over-limit MCP bodies before the first pull and preserves 413 on cancellation rejection", async () => {
+    for (const rejectCancel of [false, true]) {
+      const streamed = paddedJsonBody(modernDiscoverySource(), wireBodyLimit + 1, rejectCancel);
+      const parsed = streamRequest(streamed.body, {
+        ...modernHeaders(),
+        "content-length": String(wireBodyLimit + 1),
+      });
+
+      const response = await handleMcp(parsed, env, context);
+
+      expect(response.status).toBe(413);
+      expect(streamed.state).toEqual({ cancels: 1, pulls: 0 });
+      expect(parsed.bodyUsed).toBe(true);
+    }
+  });
+
+  it("accepts an exact 64 MiB MCP request and cancels an unknown-length byte over", async () => {
+    const exact = paddedJsonBody(modernDiscoverySource(), wireBodyLimit);
+    const exactRequest = streamRequest(exact.body, {
+      ...modernHeaders(),
+      "content-length": String(wireBodyLimit),
+    });
+    const exactResponse = await handleMcp(exactRequest, env, context);
+    expect(exactResponse.status).toBe(200);
+    expect(exact.state.cancels).toBe(0);
+
+    const overflow = paddedJsonBody(modernDiscoverySource(), wireBodyLimit + 1);
+    const overflowRequest = streamRequest(overflow.body, modernHeaders());
+    const overflowResponse = await handleMcp(overflowRequest, env, context);
+    expect(overflowResponse.status).toBe(413);
+    expect(overflow.state.cancels).toBe(1);
+  }, 20_000);
+
+  it("returns a JSON-RPC parse error for malformed UTF-8, malformed JSON, and trailing JSON", async () => {
+    const cases = [
+      new Uint8Array([...new TextEncoder().encode('{"jsonrpc":"2.0"'), 0xc3, 0x28]),
+      new TextEncoder().encode('{"jsonrpc":'),
+      new TextEncoder().encode(`${modernDiscoverySource()} null`),
+    ];
+
+    for (const body of cases) {
+      await expectMcpParseError(await handleMcp(streamRequest(trackedBody([body]).body, modernHeaders()), env, context));
+    }
+  });
+
+  it("rejects decoded duplicate keys at root and nested depth before the SDK handles the body", async () => {
+    const cases = [
+      `{"jsonrpc":"2.0","id":1,"method":"server/discover","meth\\u006fd":"server/discover","params":{"_meta":${JSON.stringify(meta)}}}`,
+      `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":${JSON.stringify(meta)},"_m\\u0065ta":${JSON.stringify(meta)}}}`,
+    ];
+
+    for (const source of cases) {
+      await expectMcpParseError(await handleMcp(streamRequest(
+        trackedBody([new TextEncoder().encode(source)]).body,
+        modernHeaders(),
+      ), env, context));
+    }
+  });
+
+  it("parses one-byte chunks through UTF-8, escapes, numbers, objects, and a legacy batch array", async () => {
+    const source = JSON.stringify([{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "tést", version: "β" },
+      },
+    }]).replace("tést", "t\\u00e9st");
+    const bytes = new TextEncoder().encode(source);
+    const response = await handleMcp(streamRequest(trackedBody(Array.from(bytes, (byte) => Uint8Array.of(byte))).body, {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    }), env, context);
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toContain('"protocolVersion":"2025-11-25"');
+  });
+
+  it("rejects empty and primitive JSON roots without letting the SDK reread them", async () => {
+    for (const source of ["", "null", "1", "true", '"request"']) {
+      const parsed = streamRequest(trackedBody([new TextEncoder().encode(source)]).body, modernHeaders());
+      await expectMcpParseError(await handleMcp(parsed, env, context));
+      expect(parsed.bodyUsed).toBe(true);
     }
   });
 

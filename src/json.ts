@@ -127,6 +127,8 @@ type JsonObject = { [key: string]: JsonValue };
 
 export type StrictJsonKind = "array" | "boolean" | "null" | "number" | "object" | "string";
 
+const objectRootKind = new Set<StrictJsonKind>(["object"]);
+
 export type StrictJsonOpaqueStringPolicy = {
   maxCodeUnits: number;
   canContinue: (prefix: string, next: string) => boolean;
@@ -298,6 +300,7 @@ class StrictJsonParser {
   #policy: StrictJsonParsePolicy | undefined;
   #retainedCodeUnits = 0;
   #root: JsonValue | undefined;
+  #rootKinds: ReadonlySet<StrictJsonKind>;
   #state: ParserState = "normal";
   #string = new FlatTextBuffer();
   #stringByteLimit: number | undefined;
@@ -321,9 +324,14 @@ class StrictJsonParser {
   #stringUtf8Bytes = 0;
   #unicode = "";
 
-  constructor(allowedTopLevelKeys?: ReadonlySet<string>, policy?: StrictJsonParsePolicy) {
+  constructor(
+    allowedTopLevelKeys?: ReadonlySet<string>,
+    policy?: StrictJsonParsePolicy,
+    rootKinds: ReadonlySet<StrictJsonKind> = objectRootKind,
+  ) {
     this.#allowedTopLevelKeys = allowedTopLevelKeys;
     this.#policy = policy;
+    this.#rootKinds = rootKinds;
   }
 
   write(source: string): void {
@@ -577,7 +585,7 @@ class StrictJsonParser {
   }
 
   private startContainer(kind: Frame["kind"]): void {
-    this.assertObjectRoot(kind);
+    this.assertRootKind(kind);
     this.assertValueExpected();
     this.assertTopLevelKind(kind);
     if (this.#frameStack.length >= maxJsonDepth) this.invalid();
@@ -717,8 +725,8 @@ class StrictJsonParser {
     }
   }
 
-  private assertObjectRoot(kind: StrictJsonKind): void {
-    if (kind !== "object" && this.#frameStack.length === 0 && !this.#hasRoot) {
+  private assertRootKind(kind: StrictJsonKind): void {
+    if (this.#frameStack.length === 0 && !this.#hasRoot && !this.#rootKinds.has(kind)) {
       throw validationError("body", "Expected a JSON object.");
     }
   }
@@ -769,7 +777,7 @@ class StrictJsonParser {
         this.#stringTopLevelKeyCandidates = new Set(this.#allowedTopLevelKeys);
       }
     } else {
-      this.assertObjectRoot("string");
+      this.assertRootKind("string");
       this.assertValueExpected();
       this.assertTopLevelKind("string");
       this.#stringDiscarded = this.isDiscardingValue();
@@ -920,7 +928,7 @@ class StrictJsonParser {
   }
 
   private startNumber(source: string, position: number): number {
-    this.assertObjectRoot("number");
+    this.assertRootKind("number");
     this.assertValueExpected();
     this.assertTopLevelKind("number");
     const character = source[position]!;
@@ -951,7 +959,7 @@ class StrictJsonParser {
   }
 
   private startLiteral(literal: string, value: boolean | null): void {
-    this.assertObjectRoot(value === null ? "null" : "boolean");
+    this.assertRootKind(value === null ? "null" : "boolean");
     this.assertValueExpected();
     this.assertTopLevelKind(value === null ? "null" : "boolean");
     this.#literal = literal;
@@ -1067,6 +1075,29 @@ function decodeChunk(
   }
 }
 
+async function parseStrictJsonValue(
+  request: Request,
+  allowedKeys: ReadonlySet<string> | undefined,
+  rootKinds: ReadonlySet<StrictJsonKind>,
+  allowEmpty: boolean,
+  onNonEmpty?: () => void,
+  policy?: StrictJsonParsePolicy,
+): Promise<JsonValue | undefined> {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const state: Utf8DecodeState = { pending: new Uint8Array() };
+  const parser = new StrictJsonParser(allowedKeys, policy, rootKinds);
+  const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
+    decodeChunk(decoder, state, chunk, true, (source) => parser.write(source));
+  }, onNonEmpty);
+  if (!hasBytes && allowEmpty) return undefined;
+  decodeChunk(decoder, state, new Uint8Array(), false, (source) => parser.write(source));
+  return parser.finish();
+}
+
+export async function parseStrictJson(request: Request, rootKinds: ReadonlySet<StrictJsonKind>): Promise<unknown> {
+  return (await parseStrictJsonValue(request, undefined, rootKinds, false))!;
+}
+
 async function parseStrictJsonObjectValue(
   request: Request,
   allowedKeys: ReadonlySet<string>,
@@ -1074,16 +1105,9 @@ async function parseStrictJsonObjectValue(
   onNonEmpty?: () => void,
   policy?: StrictJsonParsePolicy,
 ): Promise<JsonObject | undefined> {
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const state: Utf8DecodeState = { pending: new Uint8Array() };
-  const parser = new StrictJsonParser(allowedKeys, policy);
-  const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
-    decodeChunk(decoder, state, chunk, true, (source) => parser.write(source));
-  }, onNonEmpty);
-  if (!hasBytes && allowEmpty) return undefined;
-  decodeChunk(decoder, state, new Uint8Array(), false, (source) => parser.write(source));
+  const value = await parseStrictJsonValue(request, allowedKeys, objectRootKind, allowEmpty, onNonEmpty, policy);
+  if (value === undefined) return undefined;
 
-  const value = parser.finish();
   if (value === null || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw validationError("body", "Expected a JSON object.");
   }

@@ -1,5 +1,6 @@
-import { createMcpHandler, McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
+import { createMcpHandler, isJsonContentType, McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { parseStrictJson, type StrictJsonKind } from "./json";
 import {
   PasteService,
   type CreateInput,
@@ -11,6 +12,7 @@ import { deriveDownloadFileName, renderMarkdown } from "./render";
 import { isPasteError, PasteError, type Env, type LoadedPaste } from "./types";
 
 const allow = "POST,OPTIONS";
+const mcpRootKinds: ReadonlySet<StrictJsonKind> = new Set(["array", "object"]);
 const textPlainUtf8 = "text/plain; charset=utf-8";
 const textHtmlUtf8 = "text/html; charset=utf-8";
 
@@ -303,6 +305,14 @@ function hasAllowedOrigin(request: Request): boolean {
   }
 }
 
+function mcpParseError(status: number): Response {
+  return new Response(JSON.stringify({
+    jsonrpc: "2.0",
+    id: null,
+    error: { code: ProtocolErrorCode.ParseError, message: "Parse error" },
+  }), { status, headers: { "content-type": "application/json" } });
+}
+
 export async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (!hasAllowedOrigin(request)) return new Response(null, { status: 403 });
 
@@ -310,7 +320,7 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { Allow: allow } });
 
   const country = request.cf?.country;
-  return createMcpHandler(() => {
+  const handler = createMcpHandler(() => {
     const service = new PasteService(env.PASTE_DB);
     const server = new McpServer({ name: "cf-pastebin", version: "2.0.0" });
 
@@ -453,5 +463,15 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
     });
 
     return server;
-  }).fetch(request);
+  });
+
+  if (!isJsonContentType(request.headers.get("content-type"))) return handler.fetch(request);
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = await parseStrictJson(request, mcpRootKinds);
+  } catch (error) {
+    return mcpParseError(isPasteError(error) && error.code === "REQUEST_TOO_LARGE" ? 413 : 400);
+  }
+  return handler.fetch(request, { parsedBody });
 }
