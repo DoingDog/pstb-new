@@ -76,6 +76,8 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     try {
       await editor.destroy();
     } catch {
+      // Keep teardown recoverable when the editor rejects its own cleanup.
+    } finally {
       if (initialNodes !== undefined) removePartialVisualRoot(initialNodes);
     }
   };
@@ -188,7 +190,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
                 new Plugin({
                   view: () => ({
                     update: (view, previous) => {
-                      if (!ready || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
+                      if (!ready || !current(id) || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
                       visualDirty = true;
                       const markdown = editor.getMarkdown();
                       visualSerialized = markdown;
@@ -251,10 +253,16 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   const enterPreview = (): Promise<void> => {
     const id = ++transition;
     return useVisualRoot(async () => {
-      await leaveCurrentVisual();
+      try {
+        await leaveCurrentVisual();
+      } catch (error) {
+        reportVisualError(id, error);
+        return false;
+      }
       if (current(id)) setMode("source");
-    }).then(async () => {
-      if (!current(id)) return;
+      return true;
+    }).then(async (canPreview) => {
+      if (!canPreview || !current(id)) return;
 
       try {
         const [{ micromark }, { gfm, gfmHtml }] = await (options.loadPreview?.() ??

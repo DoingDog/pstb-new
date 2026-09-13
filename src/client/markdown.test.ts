@@ -33,6 +33,7 @@ const crepe = vi.hoisted(() => {
     failCreate: false,
     failDestroy: false,
     failGetMarkdown: false,
+    preserveRootOnDestroy: false,
     createWait: undefined as Promise<void> | undefined,
     destroyWait: undefined as Promise<void> | undefined,
     onCreate: undefined as (() => void) | undefined,
@@ -83,7 +84,7 @@ const crepe = vi.hoisted(() => {
       this.destroyed = true;
       if (state.destroyWait !== undefined) await state.destroyWait;
       if (state.failDestroy) throw new Error("Crepe failed to clean up");
-      this.root.removeChild(this.rootNode);
+      if (!state.preserveRootOnDestroy) this.root.removeChild(this.rootNode);
     }
 
     getMarkdown(): string {
@@ -169,6 +170,7 @@ beforeEach(() => {
   crepe.state.failCreate = false;
   crepe.state.failDestroy = false;
   crepe.state.failGetMarkdown = false;
+  crepe.state.preserveRootOnDestroy = false;
   crepe.state.createWait = undefined;
   crepe.state.destroyWait = undefined;
   crepe.state.onCreate = undefined;
@@ -285,6 +287,62 @@ describe("createMarkdownModes", () => {
     expect(crepe.state.instances[1]!.markdown).toBe(lastValid);
     expect(visualRoot.childNodes).toHaveLength(1);
     expect(onModeChange).toHaveBeenLastCalledWith("visual");
+  });
+
+  it.each([
+    ["resolves", false, true],
+    ["rejects", true, false],
+  ])("recovers from a preview teardown serialization failure when destroy %s", async (_outcome, failDestroy, preserveRootOnDestroy) => {
+    const { source, visualRoot, onDocumentChange, onModeChange, onPreview, onVisualError, modes } = fixture();
+    const canonical = "# canonical visual source  \n\n";
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    editor.documentChanged(canonical);
+    crepe.state.failGetMarkdown = true;
+    crepe.state.failDestroy = failDestroy;
+    crepe.state.preserveRootOnDestroy = preserveRootOnDestroy;
+
+    await expect(modes.enterPreview()).resolves.toBeUndefined();
+
+    expect(source.value).toBe(canonical);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(editor.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([]);
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(preview.micromark).not.toHaveBeenCalled();
+    expect(onModeChange).toHaveBeenLastCalledWith("source");
+    expect(onVisualError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Crepe failed to serialize" }),
+    );
+
+    crepe.state.failGetMarkdown = false;
+    crepe.state.failDestroy = false;
+    crepe.state.preserveRootOnDestroy = false;
+    await onVisualError.mock.calls[0]![0].retry();
+
+    expect(crepe.state.instances).toHaveLength(2);
+    expect(crepe.state.instances[1]!.markdown).toBe(canonical);
+    expect(visualRoot.childNodes).toHaveLength(1);
+    expect(onModeChange).toHaveBeenLastCalledWith("visual");
+  });
+
+  it.each([
+    ["source", false],
+    ["preview", true],
+  ])("ignores an editor transaction after %s transition is requested", async (_mode, previewRequested) => {
+    const { source, onDocumentChange, onModeChange, modes } = fixture();
+    const exact = source.value;
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    const pendingTransition = previewRequested ? modes.enterPreview() : modes.enterSource();
+    editor.documentChanged("# stale visual transaction\n");
+    await pendingTransition;
+
+    expect(source.value).toBe(exact);
+    expect(onDocumentChange).not.toHaveBeenCalled();
+    expect(onModeChange).toHaveBeenLastCalledWith(previewRequested ? "preview" : "source");
   });
 
   it("notifies autosave at the edit instead of 1,000 ms later", async () => {
