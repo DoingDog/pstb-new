@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { decodeUtf8, parseStrictJsonObject, readLimitedBytes } from "./json";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
-import { applicationHeaders, renderCreatePage, type Locale } from "./render";
+import { applicationHeaders, renderCreatePage, renderErrorPage, type Locale } from "./render";
 import { isPasteError, PasteError, type Env } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
@@ -68,7 +68,11 @@ async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuf
   const body = request.body;
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null && /^\d+$/.test(contentLength) && BigInt(contentLength) > BigInt(wireBodyLimit)) {
-    await body?.cancel();
+    try {
+      await body?.cancel();
+    } catch {
+      // Preserve the boundary error that caused cancellation.
+    }
     throw requestTooLarge();
   }
   if (body === null) return new Uint8Array();
@@ -82,7 +86,11 @@ async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuf
       if (done) break;
       if (value === undefined) continue;
       if (value.byteLength > wireBodyLimit - length) {
-        await reader.cancel();
+        try {
+          await reader.cancel();
+        } catch {
+          // Preserve the boundary error that caused cancellation.
+        }
         throw requestTooLarge();
       }
       chunks.push(value);
@@ -249,11 +257,13 @@ function locale(request: Request): Locale {
 }
 
 function rootMethodNotAllowed(request: Request): Response {
-  const isChinese = locale(request) === "zh-CN";
-  const message = isChinese ? "请求方法不被允许" : "Method not allowed";
-  const headers = new Headers(applicationHeaders());
-  headers.set("Allow", "GET,HEAD,OPTIONS");
-  return new Response(`<!doctype html><html lang="${isChinese ? "zh-CN" : "en"}"><head><meta charset="utf-8"><title>${message}</title></head><body><main><h1>${message}</h1></main></body></html>`, { status: 405, headers });
+  const requestLocale = locale(request);
+  const response = new Response(renderErrorPage({
+    locale: requestLocale,
+    error: requestLocale === "zh-CN" ? "请求方法不被允许" : "Method not allowed",
+  }), { status: 405, headers: applicationHeaders() });
+  response.headers.set("Allow", "GET,HEAD,OPTIONS");
+  return response;
 }
 
 function pastePathError(request: Request): PasteError | undefined {

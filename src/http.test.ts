@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApp } from "./http";
+import { assetPaths } from "./generated/assets";
 import { renderCreatePage } from "./render";
 import type { Env, MutationResult, PasteSummary } from "./types";
 
@@ -57,8 +58,13 @@ describe("HTTP slice 1", () => {
     expect(method.headers.get("allow")).toBe("GET,HEAD,OPTIONS");
     expect(method.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(method.headers.get("cache-control")).toBe("no-store");
+    expect(method.headers.get("content-security-policy")).toBeTruthy();
     expect(method.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(await method.text()).toContain("请求方法不被允许");
+    const methodHtml = await method.text();
+    expect(methodHtml).toContain(`href="${assetPaths.appCss}"`);
+    expect(methodHtml).toContain(`src="${assetPaths.appJs}"`);
+    expect(methodHtml).toContain('data-workbench="error"');
+    expect(methodHtml).toContain("请求方法不被允许");
   });
 
   it("does not render the create page for HEAD", async () => {
@@ -663,6 +669,30 @@ describe("HTTP slice 1", () => {
     });
   });
 
+  it("preserves REQUEST_TOO_LARGE when announced multipart cancellation rejects", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=paste-boundary",
+        "content-length": "67108865",
+      },
+      body,
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it("cancels an oversized multipart stream without Content-Length", async () => {
     let chunks = 0;
     let cancelled = false;
@@ -680,6 +710,39 @@ describe("HTTP slice 1", () => {
       },
       cancel() {
         cancelled = true;
+      },
+    });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=paste-boundary" },
+      body,
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it("preserves REQUEST_TOO_LARGE when counted multipart cancellation rejects", async () => {
+    let chunks = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (chunks < 64) {
+          chunks += 1;
+          controller.enqueue(new Uint8Array(1_048_576));
+        } else if (chunks === 64) {
+          chunks += 1;
+          controller.enqueue(new Uint8Array(1));
+        } else {
+          controller.close();
+        }
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
       },
     });
     const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
