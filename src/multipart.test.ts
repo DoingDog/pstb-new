@@ -133,7 +133,11 @@ describe("strict multipart boundary", () => {
     `multipart/form-data; boundary=${"a".repeat(71)}`,
     "multipart/form-data; boundary=x; charset=utf-8",
   ])("rejects unsupported boundary content type: %j", (contentType) => {
-    expect(() => parseMultipartBoundary(contentType)).toThrow(expect.objectContaining({ code: "UNSUPPORTED_MEDIA_TYPE", status: 415 }));
+    expect(() => parseMultipartBoundary(contentType)).toThrow(expect.objectContaining({
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      status: 415,
+      details: { accepted: ["application/json", "multipart/form-data"] },
+    }));
   });
 });
 
@@ -354,5 +358,113 @@ describe("strict multipart create fields", () => {
       vi.unstubAllGlobals();
       formData.mockRestore();
     }
+  });
+
+  it.each([undefined, 1])("preserves exact leading BOM and control scalars in every field with %s-byte chunks", async (chunkBytes) => {
+    const boundary = "bom";
+    const values = {
+      content: "﻿content\r\nmixed\n\r\0�",
+      title: "﻿title\n\rmixed\r\0�",
+      password: "﻿password\r\n\0�",
+    };
+
+    await expect(fieldsFor(multipart(boundary, Object.entries(values).map(([name, value]) => formPart(name, value))), boundary, chunkBytes)).resolves.toEqual(
+      Object.assign(Object.create(null), values),
+    );
+  });
+
+  it("checks invalid UTF-8 in the legal field prefix before reporting later content overflow for every delivery size", async () => {
+    const boundary = "invalid-before-overflow";
+    const oversized = new Uint8Array(contentLimit + 1).fill(0x61);
+    oversized.set([0xc3, 0x28]);
+    const body = multipart(boundary, [formPart("content", oversized)]);
+    const errors = await Promise.all([undefined, 8_192, 1].map(async (chunkBytes) => {
+      try {
+        await fieldsFor(body, boundary, chunkBytes);
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    }));
+
+    for (const error of errors) expect(error).toMatchObject({ code: "BAD_REQUEST", status: 400 });
+  });
+
+  it.each([
+    ["title", 800, "Must contain at most 200 Unicode scalars."],
+    ["format", 8, "Must be text or markdown."],
+    ["expiration", 29, "Must be permanent, at least 60 seconds, or a timezone-bearing RFC3339 timestamp."],
+    ["password", 128, "Must be empty or 1 to 128 visible ASCII characters."],
+    ["viewOnce", 5, "Must be true or false."],
+    ["customId", 64, "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens."],
+  ])("returns the canonical field validation for oversized %s", async (field, limit, message) => {
+    const boundary = "field-message";
+
+    await expect(fieldsFor(multipart(boundary, [formPart(field, "a".repeat(limit + 1))]), boundary)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      details: { fields: [{ field, message }] },
+    });
+  });
+
+  it("processes malformed wire prefixes before selecting the wire-size error for every delivery size", async () => {
+    const boundary = "wire-prefix";
+    const oversized = new Uint8Array(wireBodyLimit + 1);
+    oversized[0] = 0x78;
+    const errors = await Promise.all([undefined, 1_048_576, 8_192, 1].map(async (chunkBytes) => {
+      const source = chunkBytes === undefined ? request(oversized, boundary) : streamedRequest(oversized, boundary, chunkBytes);
+      try {
+        await parseMultipartCreateFields(source, boundary);
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    }));
+
+    for (const error of errors) expect(error).toMatchObject({ code: "BAD_REQUEST", status: 400 });
+  });
+
+  it("accepts leading-zero Content-Length values and rejects all non-decimal forms", async () => {
+    const boundary = "length-grammar";
+    const body = multipart(boundary, [formPart("content", "value")]);
+    const leadingZeroLength = request(body, boundary, { "content-length": `000${body.byteLength}` });
+    await expect(parseMultipartCreateFields(leadingZeroLength, boundary)).resolves.toMatchObject({ content: "value" });
+
+    for (const contentLength of ["+1", " 1", "1 ", "1.0", "-1", ""]) {
+      const source = {
+        body: request(body, boundary).body,
+        headers: { get: (name: string) => name.toLowerCase() === "content-length" ? contentLength : null },
+      } as unknown as Request;
+      await expect(parseMultipartCreateFields(source, boundary)).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    }
+  });
+
+  it("accepts one valid Content-Type header and rejects unknown, duplicate, and malformed headers", async () => {
+    const boundary = "part-headers";
+    await expect(fieldsFor(multipart(boundary, [formPart("content", "literal", { extraHeaders: ["Content-Type: text/plain; charset=utf-8"] })]), boundary)).resolves.toMatchObject({
+      content: "literal",
+    });
+
+    const malformed = [
+      multipart(boundary, [formPart("content", "value", { extraHeaders: ["X-Extra: nope"] })]),
+      multipart(boundary, [formPart("content", "value", { extraHeaders: ['Content-Disposition: form-data; name="title"'] })]),
+      multipart(boundary, [formPart("content", "value", { extraHeaders: ["Content-Type: text/plain", "Content-Type: text/plain"] })]),
+      multipart(boundary, [formPart("content", "value", { extraHeaders: ["Content-Type: text/plain; charset="] })]),
+      multipart(boundary, [{ body: "value", disposition: 'Content-Disposition: form-data; name="content"; creation-date="today"' }]),
+    ];
+    for (const body of malformed) await expect(fieldsFor(body, boundary)).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+  });
+
+  it.each(["filename", "filename*", "filename*0", "filename*0*", "filename*1", "filename*1*"])("rejects %s parts before decoding their bodies", async (parameter) => {
+    const boundary = "file-parameters";
+    const source = multipart(boundary, [{
+      body: Uint8Array.of(0xc3),
+      disposition: `Content-Disposition: form-data; name="content"; ${parameter}="upload.txt"`,
+      extraHeaders: ["Content-Type: application/octet-stream"],
+    }]);
+
+    await expect(fieldsFor(source, boundary)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      details: { fields: [{ field: "content", message: "Must be a string." }] },
+    });
   });
 });

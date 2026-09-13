@@ -17,12 +17,21 @@ const fieldLimits = {
 type FieldName = keyof typeof fieldLimits;
 type ParserState = "initial" | "initialSuffix" | "headers" | "body" | "bodyDelimiterSuffix" | "final" | "finalCr" | "afterFinal";
 
+const nonContentFieldLimitMessages = {
+  title: "Must contain at most 200 Unicode scalars.",
+  format: "Must be text or markdown.",
+  expiration: "Must be permanent, at least 60 seconds, or a timezone-bearing RFC3339 timestamp.",
+  password: "Must be empty or 1 to 128 visible ASCII characters.",
+  viewOnce: "Must be true or false.",
+  customId: "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.",
+} as const satisfies Record<Exclude<FieldName, "content">, string>;
+
 function badRequest(): PasteError {
   return new PasteError("BAD_REQUEST", 400);
 }
 
 function unsupportedMediaType(): PasteError {
-  return new PasteError("UNSUPPORTED_MEDIA_TYPE", 415);
+  return new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json", "multipart/form-data"] });
 }
 
 function requestTooLarge(): PasteError {
@@ -31,6 +40,11 @@ function requestTooLarge(): PasteError {
 
 function contentTooLarge(): PasteError {
   return new PasteError("CONTENT_TOO_LARGE", 413, undefined, { maxBytes: contentLimit });
+}
+
+function fieldTooLarge(field: FieldName): PasteError {
+  if (field === "content") return contentTooLarge();
+  return validationError(field, nonContentFieldLimitMessages[field]);
 }
 
 function validationError(field: string, message: string): PasteError {
@@ -146,13 +160,33 @@ function headerText(bytes: Uint8Array): string {
   return value;
 }
 
-function parseContentDisposition(bytes: Uint8Array): { name: string; file: boolean } {
-  const source = headerText(bytes);
-  if (source.split("\r\n").length !== 1) throw badRequest();
+function headerLines(bytes: Uint8Array): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  for (let position = 0; position < bytes.byteLength; position += 1) {
+    if (bytes[position] === 0x0d) {
+      if (bytes[position + 1] !== 0x0a) throw badRequest();
+      lines.push(headerText(bytes.subarray(start, position)));
+      position += 1;
+      start = position + 1;
+    } else if (bytes[position] === 0x0a) {
+      throw badRequest();
+    }
+  }
+  lines.push(headerText(bytes.subarray(start)));
+  return lines;
+}
 
+function splitHeader(source: string): { name: string; valuePosition: number } {
   const colon = source.indexOf(":");
-  if (colon <= 0 || source.slice(0, colon).toLowerCase() !== "content-disposition") throw badRequest();
-  let position = skipOws(source, colon + 1);
+  if (colon <= 0 || ![...source.slice(0, colon)].every(isTokenCharacter)) throw badRequest();
+  return { name: source.slice(0, colon).toLowerCase(), valuePosition: colon + 1 };
+}
+
+function parseContentDisposition(source: string): { name: string; file: boolean } {
+  const header = splitHeader(source);
+  if (header.name !== "content-disposition") throw badRequest();
+  let position = skipOws(source, header.valuePosition);
   const disposition = readToken(source, position);
   if (disposition?.value.toLowerCase() !== "form-data") throw badRequest();
   position = skipOws(source, disposition.position);
@@ -173,18 +207,65 @@ function parseContentDisposition(bytes: Uint8Array): { name: string; file: boole
     position = skipOws(source, value.position);
     if (parameters.has(key)) throw badRequest();
     parameters.add(key);
-    if (key === "name") name = value.value;
-    if (key === "filename" || key === "filename*") file = true;
+    if (key === "name") {
+      name = value.value;
+    } else if (key === "filename" || /^filename\*(?:\d+\*?)?$/.test(key)) {
+      file = true;
+    } else {
+      throw badRequest();
+    }
   }
 
   if (name === undefined) throw badRequest();
   return { name, file };
 }
 
+function parseContentType(source: string): void {
+  const header = splitHeader(source);
+  if (header.name !== "content-type") throw badRequest();
+  let position = skipOws(source, header.valuePosition);
+  const type = readToken(source, position);
+  if (type === undefined || source[type.position] !== "/") throw badRequest();
+  const subtype = readToken(source, type.position + 1);
+  if (subtype === undefined) throw badRequest();
+  position = skipOws(source, subtype.position);
+  while (position < source.length) {
+    if (source[position] !== ";") throw badRequest();
+    position = skipOws(source, position + 1);
+    const parameter = readToken(source, position);
+    if (parameter === undefined) throw badRequest();
+    position = skipOws(source, parameter.position);
+    if (source[position] !== "=") throw badRequest();
+    position = skipOws(source, position + 1);
+    const value = readParameterValue(source, position, () => { throw badRequest(); });
+    position = skipOws(source, value.position);
+  }
+}
+
+function parsePartHeaders(bytes: Uint8Array): { name: string; file: boolean } {
+  let disposition: { name: string; file: boolean } | undefined;
+  let contentType = false;
+  for (const line of headerLines(bytes)) {
+    const header = splitHeader(line);
+    if (header.name === "content-disposition") {
+      if (disposition !== undefined) throw badRequest();
+      disposition = parseContentDisposition(line);
+    } else if (header.name === "content-type") {
+      if (contentType) throw badRequest();
+      parseContentType(line);
+      contentType = true;
+    } else {
+      throw badRequest();
+    }
+  }
+  if (disposition === undefined) throw badRequest();
+  return disposition;
+}
+
 class TextFieldBuffer {
   #byteLength = 0;
   #chunks: string[] = [];
-  #decoder = new TextDecoder("utf-8", { fatal: true });
+  #decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   #pending = new Uint8Array(textBufferSize);
   #pendingLength = 0;
 
@@ -194,25 +275,25 @@ class TextFieldBuffer {
   ) {}
 
   write(source: Uint8Array, start = 0, end = source.byteLength): void {
-    const length = end - start;
-    if (length > this.limit - this.#byteLength) {
-      if (this.field === "content") throw contentTooLarge();
-      throw validationError(this.field, "Must not exceed the maximum length.");
-    }
-    this.#byteLength += length;
-    while (start < end) {
-      const amount = Math.min(this.#pending.byteLength - this.#pendingLength, end - start);
+    const prefixEnd = start + Math.min(end - start, this.limit - this.#byteLength);
+    this.#byteLength += prefixEnd - start;
+    while (start < prefixEnd) {
+      const amount = Math.min(this.#pending.byteLength - this.#pendingLength, prefixEnd - start);
       this.#pending.set(source.subarray(start, start + amount), this.#pendingLength);
       this.#pendingLength += amount;
       start += amount;
       if (this.#pendingLength === this.#pending.byteLength) this.flush(true);
     }
+    if (prefixEnd !== end) {
+      this.validate();
+      throw fieldTooLarge(this.field);
+    }
   }
 
   writeByte(byte: number): void {
     if (this.#byteLength === this.limit) {
-      if (this.field === "content") throw contentTooLarge();
-      throw validationError(this.field, "Must not exceed the maximum length.");
+      this.validate();
+      throw fieldTooLarge(this.field);
     }
     this.#byteLength += 1;
     this.#pending[this.#pendingLength] = byte;
@@ -221,6 +302,13 @@ class TextFieldBuffer {
   }
 
   finish(): string {
+    this.validate();
+    const chunks = this.#chunks;
+    this.#chunks = [];
+    return chunks.join("");
+  }
+
+  private validate(): void {
     this.flush(true);
     try {
       const tail = this.#decoder.decode();
@@ -228,9 +316,6 @@ class TextFieldBuffer {
     } catch {
       throw badRequest();
     }
-    const chunks = this.#chunks;
-    this.#chunks = [];
-    return chunks.join("");
   }
 
   private flush(stream: boolean): void {
@@ -431,7 +516,7 @@ class MultipartCreateParser {
   }
 
   private startPart(header: Uint8Array): void {
-    const { name, file } = parseContentDisposition(header);
+    const { name, file } = parsePartHeaders(header);
     if (file) throw validationError(name, "Must be a string.");
     if (!isFieldName(name)) throw validationError(name, "Unknown field.");
     if (Object.hasOwn(this.#fields, name)) throw validationError(name, "Duplicate field.");
@@ -477,7 +562,7 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
 /** Reads one multipart request stream and returns the textual paste-create fields. */
 export async function parseMultipartCreateFields(request: Request, boundary: string): Promise<Record<string, string>> {
   const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) {
+  if (contentLength !== null && !/^\d+$/.test(contentLength)) {
     await cancelBody(request.body);
     throw badRequest();
   }
@@ -497,9 +582,10 @@ export async function parseMultipartCreateFields(request: Request, boundary: str
       const { done, value } = await reader.read();
       if (done) return parser.finish();
       if (value === undefined) continue;
-      if (value.byteLength > wireBodyLimit - length) throw requestTooLarge();
-      length += value.byteLength;
-      parser.write(value);
+      const prefixLength = Math.min(value.byteLength, wireBodyLimit - length);
+      parser.write(value.subarray(0, prefixLength));
+      length += prefixLength;
+      if (prefixLength !== value.byteLength) throw requestTooLarge();
     }
   } catch (error) {
     try {
