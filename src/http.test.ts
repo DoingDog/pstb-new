@@ -64,7 +64,7 @@ describe("HTTP slice 1", () => {
     expect(methodHtml).toContain(`href="${assetPaths.appCss}"`);
     expect(methodHtml).toContain(`src="${assetPaths.appJs}"`);
     expect(methodHtml).toContain('data-workbench="error"');
-    expect(methodHtml).toContain("请求方法不被允许");
+    expect(methodHtml).toContain('data-i18n-error="METHOD_NOT_ALLOWED">请求方法不被允许');
   });
 
   it("does not render the create page for HEAD", async () => {

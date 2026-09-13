@@ -125,6 +125,52 @@ function sourceFixture(encoded: string) {
   return { document, node, source, view };
 }
 
+function localeFixture() {
+  const element = (attributes: Record<string, string>, textContent: string) => {
+    const values = new Map(Object.entries(attributes));
+    const listeners: Array<() => void> = [];
+    return {
+      textContent,
+      getAttribute(name: string): string | null {
+        return values.get(name) ?? null;
+      },
+      setAttribute(name: string, value: string): void {
+        values.set(name, value);
+      },
+      addEventListener(type: string, listener: () => void): void {
+        if (type === "click") listeners.push(listener);
+      },
+      click(): void {
+        for (const listener of listeners) listener();
+      },
+      listenerCount(): number {
+        return listeners.length;
+      },
+    };
+  };
+  const create = element({ "data-i18n": "create" }, "Create a paste");
+  const status = element({ "data-i18n": "saved" }, "Saved");
+  const accessible = element({ "data-i18n-aria-label": "application", "aria-label": "Application" }, "");
+  const date = element({ datetime: "2026-09-14T00:00:00.000Z", "data-i18n-date": "" }, "2026-09-14T00:00:00.000Z");
+  const error = element({ "data-i18n-error": "METHOD_NOT_ALLOWED" }, "Method not allowed");
+  const locale = element({ "data-action": "locale" }, "Language");
+  const document = {
+    documentElement: { lang: "en" },
+    querySelector(): null {
+      return null;
+    },
+    querySelectorAll(selector: string): unknown[] {
+      if (selector === "[data-i18n]") return [create, status];
+      if (selector === "[data-i18n-aria-label]") return [accessible];
+      if (selector === "time[data-i18n-date]") return [date];
+      if (selector === "[data-i18n-error]") return [error];
+      if (selector === '[data-action="locale"]') return [locale];
+      return [];
+    },
+  } as unknown as Document;
+  return { accessible, create, date, document, error, locale, status };
+}
+
 class FakeClock {
   private time = 0;
   private nextId = 1;
@@ -587,6 +633,37 @@ describe("AutosaveController", () => {
 });
 
 describe("browser document state", () => {
+  it("corrects the server locale, updates current copy, and installs one locale toggle", () => {
+    const fixture = localeFixture();
+    vi.stubGlobal("document", fixture.document);
+    vi.stubGlobal("navigator", { languages: ["zh-Hans", "en-US"] });
+    vi.stubGlobal("location", { href: "https://paste.example/a" });
+
+    browser.startApp();
+
+    expect(fixture.document.documentElement.lang).toBe("zh-CN");
+    expect(fixture.create.textContent).toBe("创建粘贴内容");
+    expect(fixture.status.textContent).toBe("已保存");
+    expect(fixture.accessible.getAttribute("aria-label")).toBe("应用");
+    expect(fixture.error.textContent).toBe("请求方法不被允许");
+    expect(fixture.date.getAttribute("datetime")).toBe("2026-09-14T00:00:00.000Z");
+    expect(fixture.date.textContent).toBe(new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "medium" }).format(new Date("2026-09-14T00:00:00.000Z")));
+
+    browser.startApp();
+    expect(fixture.locale.listenerCount()).toBe(1);
+    fixture.locale.click();
+
+    expect(fixture.document.documentElement.lang).toBe("en");
+    expect(fixture.create.textContent).toBe("Create a paste");
+    expect(fixture.status.textContent).toBe("Saved");
+    expect(fixture.accessible.getAttribute("aria-label")).toBe("Application");
+    expect(fixture.error.textContent).toBe("Method not allowed");
+
+    browser.startApp();
+    expect(fixture.document.documentElement.lang).toBe("en");
+    expect(fixture.locale.listenerCount()).toBe(1);
+  });
+
   it("keeps password only in the current document and rewrites its unique URL query", () => {
     const replaceState = vi.fn();
     const localStorage = { setItem: vi.fn() };

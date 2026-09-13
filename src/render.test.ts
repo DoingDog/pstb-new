@@ -3,7 +3,6 @@ import { assetPaths } from "./generated/assets";
 import { decodeSourceData, sourceDataEncoding } from "./source-data";
 import {
   applicationHeaders,
-  dictionaries,
   deriveDownloadFileName,
   deriveDownloadHeaders,
   escapeBootstrapJson,
@@ -14,6 +13,7 @@ import {
   renderPasswordPage,
   renderPastePage,
 } from "./render";
+import { dictionaries, formatDate } from "./i18n";
 import type { PasteSummary } from "./types";
 
 const paste: PasteSummary = {
@@ -202,15 +202,15 @@ describe("application documents", () => {
 
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
-    for (const [id, description] of [
-      ["title", descriptions[0]],
-      ["format", descriptions[1]],
-      ["expiration", descriptions[2]],
-      ["password", descriptions[3]],
-      ["custom-id", descriptions[4]],
+    for (const [id, key, description] of [
+      ["title", "titleDescription", descriptions[0]],
+      ["format", "formatDescription", descriptions[1]],
+      ["expiration", "expirationDescription", descriptions[2]],
+      ["password", "passwordDescription", descriptions[3]],
+      ["custom-id", "customIdDescription", descriptions[4]],
     ]) {
       expect(html).toContain(`aria-describedby="${id}-description ${id}-error"`);
-      expect(html).toContain(`<p id="${id}-description">${description}</p>`);
+      expect(html).toContain(`<p id="${id}-description"><span data-i18n="${key}">${description}</span></p>`);
     }
     expect(html).toContain('<input id="title" name="title" type="text" aria-describedby="title-description title-error">');
     expect(html).not.toContain("maxlength=");
@@ -224,8 +224,8 @@ describe("application documents", () => {
     expect(create).toContain('<aside class="lifecycle-rail" aria-labelledby="lifecycle-title">');
     expect(create).toContain('class="form-section editor-surface"');
     expect(html).toContain('<main class="workbench" data-workbench="paste" data-consumed="false">');
-    expect(html).toContain('<button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view">View</button>');
-    expect(html).toContain('<button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">History</button>');
+    expect(html).toContain('<button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view" data-i18n="view">View</button>');
+    expect(html).toContain('<button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history" data-i18n="history">History</button>');
     expect(html).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">');
     expect(html).toContain('<section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section>');
     expect(html).toContain('<section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>');
@@ -241,9 +241,27 @@ describe("application documents", () => {
     expect(html).toContain('<code>example</code>');
     expect(html).toContain('Not protected');
     expect(html).toContain('Standard');
-    expect(html).toContain('<time datetime="2026-09-14T00:00:00.000Z">2026-09-14T00:00:00.000Z</time>');
+    expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
     expect(html).toContain('<code>4</code>');
-    expect(html).toContain('321 bytes');
+    expect(html).toContain('321 <span data-i18n="bytes">bytes</span>');
+  });
+
+  it("annotates all rendered labels and dates for document-only locale updates", () => {
+    const html = [
+      renderCreatePage("en"),
+      renderPastePage({ locale: "en", paste: { ...paste, expiresAt: "2026-09-14T00:00:00.000Z" }, content: "source" }),
+      renderPastePage({ locale: "en", paste: { ...paste, protected: false }, content: "source" }),
+      renderPastePage({ locale: "en", paste: { ...paste, viewOnce: true }, content: "source", consumed: true }),
+      renderPasswordPage({ locale: "en" }),
+      renderErrorPage({ locale: "en", error: "Method not allowed" }),
+      renderMarkdownDocument({ locale: "en", paste, content: "source" }),
+    ].join("\n");
+    const annotated = [...html.matchAll(/data-i18n(?:-aria-label)?="([^"]+)"/g)].map((match) => match[1]).sort();
+
+    expect([...new Set(annotated)]).toEqual(Object.keys(dictionaries.en.labels).sort());
+    expect(html).toContain('data-i18n-aria-label="application"');
+    expect(html).toContain('data-i18n-aria-label="reveal"');
+    expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
   });
 
   it("renders CSS hooks for the responsive workbench, history, and dialog primitives", () => {
@@ -280,7 +298,7 @@ describe("application documents", () => {
     expect(ordinary).toContain('role="tablist"');
     expect(ordinary).toContain('data-action="delete"');
     expect(consumed).toContain('data-consumed="true"');
-    expect(consumed).toContain('<a href="/">Create a paste</a>');
+    expect(consumed).toContain('<a href="/"><span data-i18n="create">Create a paste</span></a>');
     expect(links).toEqual(["/"]);
     expect(consumed).toContain('data-action="copy"');
     expect(consumed).toContain('data-action="download"');
@@ -302,7 +320,7 @@ describe("application documents", () => {
 
     expect(links).toEqual(["/"]);
     expect(html).toContain('data-consumed="true"');
-    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy">Copy</button>');
+    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy" data-i18n="copy">Copy</button>');
     expect(html).not.toContain('data-action="open-source"');
     expect(html).not.toContain('"links"');
   });
@@ -310,12 +328,12 @@ describe("application documents", () => {
   it("marks ordinary Markdown document actions for narrow screens", () => {
     const html = renderMarkdownDocument({ locale: "en", paste, content: "# source" });
 
-    expect(html).toContain('<a class="markdown-document-action" data-action="open-source" href="/example">Open source</a>');
-    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy">Copy</button>');
+    expect(html).toContain('<a class="markdown-document-action" data-action="open-source" href="/example" data-i18n="openSource">Open source</a>');
+    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy" data-i18n="copy">Copy</button>');
   });
 
   it("keeps English and Chinese dictionary keys in parity", () => {
-    expect(Object.keys(dictionaries.en).sort()).toEqual(Object.keys(dictionaries["zh-CN"]).sort());
+    expect(Object.keys(dictionaries.en.labels).sort()).toEqual(Object.keys(dictionaries["zh-CN"].labels).sort());
   });
 
   it.each(["en", "zh-CN"] as const)("renders every %s dictionary entry across representative whole pages", (locale) => {
@@ -331,7 +349,7 @@ describe("application documents", () => {
     ].join("\n");
 
     expect(pages).toContain(`<html lang="${locale}">`);
-    for (const [key, value] of Object.entries(dictionaries[locale])) {
+    for (const [key, value] of Object.entries(dictionaries[locale].labels)) {
       expect(pages, key).toContain(value);
     }
   });

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty } from "./json";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
-import { applicationHeaders, renderCreatePage, renderErrorPage, type Locale } from "./render";
+import { resolveServerLocale } from "./i18n";
+import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
 import { isPasteError, PasteError, type Env } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
@@ -297,17 +298,12 @@ function methodNotAllowed(allow: string): Response {
   return response;
 }
 
-function locale(request: Request): Locale {
-  return request.headers.get("accept-language")?.split(",", 1)[0]?.trim().toLowerCase().startsWith("zh")
-    ? "zh-CN"
-    : "en";
-}
-
 function rootMethodNotAllowed(request: Request): Response {
-  const requestLocale = locale(request);
+  const requestLocale = resolveServerLocale(request.headers.get("accept-language"));
   const response = new Response(renderErrorPage({
     locale: requestLocale,
     error: requestLocale === "zh-CN" ? "请求方法不被允许" : "Method not allowed",
+    errorCode: "METHOD_NOT_ALLOWED",
   }), { status: 405, headers: applicationHeaders() });
   response.headers.set("Allow", "GET,HEAD,OPTIONS");
   return response;
@@ -339,7 +335,7 @@ export function createHttpApp(env: Env): Hono {
 
   app.on(["GET", "HEAD"], "/", (context) => context.req.raw.method === "HEAD"
     ? new Response(null, { headers: applicationHeaders() })
-    : new Response(renderCreatePage(locale(context.req.raw)), { headers: applicationHeaders() }));
+    : new Response(renderCreatePage(resolveServerLocale(context.req.raw.headers.get("accept-language"))), { headers: applicationHeaders() }));
   app.options("/", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,OPTIONS" } }));
   app.all("/", (context) => rootMethodNotAllowed(context.req.raw));
 

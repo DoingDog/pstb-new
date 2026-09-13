@@ -1,4 +1,5 @@
 import "./styles.css";
+import { dictionaries, formatDate, resolveBrowserLocale, type ErrorMessageCode, type LabelKey, type Locale } from "../i18n";
 import { decodeSourceData, sourceDataEncoding } from "../source-data";
 import { createMarkdownModes, type MarkdownModes, type MarkdownModesOptions } from "./markdown";
 import type { DiffId, DiffLine, DiffRequest, DiffResponse } from "./diff";
@@ -469,6 +470,61 @@ function hydratePasteSource(): void {
   transport.remove();
 }
 
+interface LocalizedElement {
+  textContent: string | null;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+}
+
+export interface LocaleDocument {
+  documentElement: { lang: string };
+  querySelectorAll(selector: string): Iterable<LocalizedElement>;
+}
+
+function isLabelKey(value: string | null): value is LabelKey {
+  return value !== null && Object.hasOwn(dictionaries.en.labels, value);
+}
+
+function isErrorMessageCode(value: string | null): value is ErrorMessageCode {
+  return value !== null && Object.hasOwn(dictionaries.en.errors, value);
+}
+
+export function updateDocumentLocale(root: LocaleDocument, locale: Locale): void {
+  const dictionary = dictionaries[locale];
+  root.documentElement.lang = locale;
+
+  for (const element of root.querySelectorAll("[data-i18n]")) {
+    const key = element.getAttribute("data-i18n");
+    if (isLabelKey(key)) element.textContent = dictionary.labels[key];
+  }
+  for (const element of root.querySelectorAll("[data-i18n-aria-label]")) {
+    const key = element.getAttribute("data-i18n-aria-label");
+    if (isLabelKey(key)) element.setAttribute("aria-label", dictionary.labels[key]);
+  }
+  for (const element of root.querySelectorAll("time[data-i18n-date]")) {
+    const datetime = element.getAttribute("datetime");
+    if (datetime !== null) element.textContent = formatDate(locale, datetime);
+  }
+  for (const element of root.querySelectorAll("[data-i18n-error]")) {
+    const code = element.getAttribute("data-i18n-error");
+    if (isErrorMessageCode(code)) element.textContent = dictionary.errors[code];
+  }
+}
+
+const localeDocuments = new WeakSet<Document>();
+
+function initializeDocumentLocale(): void {
+  if (typeof document === "undefined" || document.documentElement === undefined || localeDocuments.has(document)) return;
+  updateDocumentLocale(document, resolveBrowserLocale(typeof navigator === "undefined" ? undefined : navigator.languages, document.documentElement.lang));
+
+  for (const control of document.querySelectorAll('[data-action="locale"]')) {
+    control.addEventListener("click", () => {
+      updateDocumentLocale(document, document.documentElement.lang === "zh-CN" ? "en" : "zh-CN");
+    });
+  }
+  localeDocuments.add(document);
+}
+
 function currentDocumentUrl(): URL | null {
   if (typeof document === "undefined" || typeof location === "undefined") return null;
   return new URL(location.href);
@@ -489,6 +545,7 @@ export function setPastePassword(password: string | null): void {
 }
 
 export function startApp(): void {
+  initializeDocumentLocale();
   const url = currentDocumentUrl();
   if (url !== null) {
     const passwords = url.searchParams.getAll("password");

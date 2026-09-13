@@ -2,10 +2,12 @@ import { micromark } from "micromark";
 import { gfm, gfmHtml } from "micromark-extension-gfm";
 import { validateTitle } from "./pastes";
 import { assetPaths } from "./generated/assets";
+import { errorMessage, formatDate, labels, type ErrorMessageCode, type LabelKey, type Labels, type Locale } from "./i18n";
 import { encodeSourceData, sourceDataEncoding } from "./source-data";
 import type { PasteSummary } from "./types";
 
-export type Locale = "en" | "zh-CN";
+export { dictionaries } from "./i18n";
+export type { Locale } from "./i18n";
 
 export interface PastePageModel {
   locale: Locale;
@@ -17,11 +19,13 @@ export interface PastePageModel {
 export interface PasswordPageModel {
   locale: Locale;
   error?: string;
+  errorCode?: ErrorMessageCode;
 }
 
 export interface ErrorPageModel {
   locale: Locale;
   error: string;
+  errorCode?: ErrorMessageCode;
 }
 
 export interface MarkdownDocumentModel {
@@ -69,161 +73,16 @@ function publicSummary(paste: PasteSummary): PasteSummary {
   };
 }
 
-const englishLabels = {
-  application: "Application",
-  brand: "Pastebin",
-  create: "Create a paste",
-  content: "Content",
-  title: "Title",
-  titleDescription: "Optional. Up to 200 characters.",
-  format: "Format",
-  formatDescription: "Select the default view for this paste.",
-  expiration: "Expiration",
-  expirationDescription: "Choose when this paste expires.",
-  password: "Password",
-  passwordDescription: "Optional. Use 1 to 128 visible ASCII characters.",
-  viewOnce: "View once",
-  customId: "Custom ID",
-  customIdDescription: "Optional. Start with an ASCII letter or number; use up to 64 ASCII letters, numbers, underscores, or hyphens.",
-  submit: "Create",
-  reveal: "Show password",
-  theme: "Theme",
-  locale: "Language",
-  storedExactly: "Stored exactly as entered.",
-  text: "Text",
-  markdown: "Markdown",
-  oneMinute: "1 minute",
-  oneHour: "1 hour",
-  oneDay: "1 day",
-  oneWeek: "1 week",
-  thirtyDays: "30 days",
-  oneYear: "1 year",
-  permanent: "Permanent",
-  viewOnceDescription: "View-once reads use distributed storage and cannot guarantee globally exactly once.",
-  pasteViews: "Paste views",
-  view: "View",
-  edit: "Edit",
-  history: "History",
-  settings: "Settings",
-  localActions: "Local actions",
-  copy: "Copy",
-  wrap: "Wrap",
-  source: "Source",
-  preview: "Preview",
-  download: "Download",
-  openHtmlLocally: "Open HTML locally",
-  representations: "Representations",
-  raw: "Raw",
-  html: "HTML",
-  file: "File",
-  delete: "Delete",
-  consumed: "This view-once paste has been consumed. These actions use only the content already loaded in this page.",
-  passwordRequired: "Password required",
-  continue: "Continue",
-  error: "Error",
-  openSource: "Open source",
-  paste: "Paste",
-  documentStatus: "Document status",
-  newDocument: "New document",
-  exactText: "Exact text",
-  encoding: "Encoding",
-  limit: "Limit",
-  protected: "Protected",
-  notProtected: "Not protected",
-  enabled: "Enabled",
-  standard: "Standard",
-  expires: "Expires",
-  revision: "Revision",
-  saveStatus: "Save status",
-  saved: "Saved",
-  size: "Size",
-  bytes: "bytes",
-  cancel: "Cancel",
-  deleteDescription: "Delete this paste permanently.",
-};
+function translated(copy: Labels, key: LabelKey): string {
+  return `<span data-i18n="${key}">${copy[key]}</span>`;
+}
 
-type Labels = { [Key in keyof typeof englishLabels]: string };
+function i18nAttribute(key: LabelKey): string {
+  return ` data-i18n="${key}"`;
+}
 
-const chineseLabels: Labels = {
-  application: "应用",
-  brand: "Pastebin",
-  create: "创建粘贴内容",
-  content: "内容",
-  title: "标题",
-  titleDescription: "可选。最多 200 个字符。",
-  format: "格式",
-  formatDescription: "选择此剪贴板默认打开的视图。",
-  expiration: "过期时间",
-  expirationDescription: "选择剪贴板何时过期。",
-  password: "密码",
-  passwordDescription: "可选。使用 1 到 128 个可见 ASCII 字符。",
-  viewOnce: "阅后即焚",
-  customId: "自定义 ID",
-  customIdDescription: "可选。以 ASCII 字母或数字开头，最多 64 个 ASCII 字母、数字、下划线或连字符。",
-  submit: "创建",
-  reveal: "显示密码",
-  theme: "主题",
-  locale: "语言",
-  storedExactly: "按输入内容原样保存。",
-  text: "文本",
-  markdown: "Markdown",
-  oneMinute: "1 分钟",
-  oneHour: "1 小时",
-  oneDay: "1 天",
-  oneWeek: "1 周",
-  thirtyDays: "30 天",
-  oneYear: "1 年",
-  permanent: "永久",
-  viewOnceDescription: "阅后即焚内容使用分布式存储，无法保证在所有位置都恰好只读取一次。",
-  pasteViews: "粘贴内容视图",
-  view: "查看",
-  edit: "编辑",
-  history: "历史记录",
-  settings: "设置",
-  localActions: "本地操作",
-  copy: "复制",
-  wrap: "自动换行",
-  source: "源码",
-  preview: "预览",
-  download: "下载",
-  openHtmlLocally: "在本地打开 HTML",
-  representations: "表示形式",
-  raw: "Raw",
-  html: "HTML",
-  file: "文件",
-  delete: "删除",
-  consumed: "此阅后即焚内容已被读取。这些操作只使用当前页面已加载的内容。",
-  passwordRequired: "需要密码",
-  continue: "继续",
-  error: "错误",
-  openSource: "打开源内容",
-  paste: "粘贴内容",
-  documentStatus: "文档状态",
-  newDocument: "新文档",
-  exactText: "精确文本",
-  encoding: "编码",
-  limit: "限制",
-  protected: "受密码保护",
-  notProtected: "未受密码保护",
-  enabled: "已启用",
-  standard: "普通",
-  expires: "过期时间",
-  revision: "修订版本",
-  saveStatus: "保存状态",
-  saved: "已保存",
-  size: "大小",
-  bytes: "字节",
-  cancel: "取消",
-  deleteDescription: "永久删除此剪贴板。",
-};
-
-export const dictionaries: Record<Locale, Labels> = {
-  en: englishLabels,
-  "zh-CN": chineseLabels,
-};
-
-function labels(locale: Locale): Labels {
-  return dictionaries[locale];
+function translatedError(locale: Locale, error: string, code: ErrorMessageCode | undefined): string {
+  return escapeText(code === undefined ? error : errorMessage(locale, code));
 }
 
 function documentTitle(locale: Locale, paste: PasteSummary): string {
@@ -257,18 +116,18 @@ function sourceTextarea(): string {
 }
 
 function localActions(copy: Labels): string {
-  return `<div class="actions" aria-label="${copy.localActions}">
-<button type="button" data-action="copy">${copy.copy}</button>
-<button type="button" data-action="wrap">${copy.wrap}</button>
-<button type="button" data-action="toggle-source">${copy.source}</button>
-<button type="button" data-action="preview">${copy.preview}</button>
-<button type="button" data-action="download">${copy.download}</button>
-<button type="button" data-action="open-html">${copy.openHtmlLocally}</button>
+  return `<div class="actions" aria-label="${copy.localActions}" data-i18n-aria-label="localActions">
+<button type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>
+<button type="button" data-action="wrap"${i18nAttribute("wrap")}>${copy.wrap}</button>
+<button type="button" data-action="toggle-source"${i18nAttribute("source")}>${copy.source}</button>
+<button type="button" data-action="preview"${i18nAttribute("preview")}>${copy.preview}</button>
+<button type="button" data-action="download"${i18nAttribute("download")}>${copy.download}</button>
+<button type="button" data-action="open-html"${i18nAttribute("openHtmlLocally")}>${copy.openHtmlLocally}</button>
 </div>`;
 }
 
-function siteHeader(copy: Labels, location: string, actions = "", rootLabel = copy.brand): string {
-  return `<header class="site-header"><nav class="site-nav" aria-label="${copy.application}"><a href="/">${rootLabel}</a><p class="page-location">${location}</p><div class="utility-actions"><button type="button" data-action="locale">${copy.locale}</button><button type="button" data-action="theme">${copy.theme}</button>${actions}</div></nav></header>`;
+function siteHeader(copy: Labels, location: string, actions = "", rootLabel = translated(copy, "brand")): string {
+  return `<header class="site-header"><nav class="site-nav" aria-label="${copy.application}" data-i18n-aria-label="application"><a href="/">${rootLabel}</a><p class="page-location">${location}</p><div class="utility-actions"><button type="button" data-action="locale"${i18nAttribute("locale")}>${copy.locale}</button><button type="button" data-action="theme"${i18nAttribute("theme")}>${copy.theme}</button>${actions}</div></nav></header>`;
 }
 
 function lifecycleItem(label: string, value: string): string {
@@ -276,22 +135,22 @@ function lifecycleItem(label: string, value: string): string {
 }
 
 function createLifecycleRail(copy: Labels): string {
-  return `<aside class="lifecycle-rail" aria-labelledby="lifecycle-title"><h2 id="lifecycle-title">${copy.newDocument}</h2><dl class="lifecycle-list">${lifecycleItem(copy.content, copy.exactText)}${lifecycleItem(copy.encoding, "UTF-8")}${lifecycleItem(copy.limit, "10 MiB")}</dl></aside>`;
+  return `<aside class="lifecycle-rail" aria-labelledby="lifecycle-title"><h2 id="lifecycle-title">${translated(copy, "newDocument")}</h2><dl class="lifecycle-list">${lifecycleItem(translated(copy, "content"), translated(copy, "exactText"))}${lifecycleItem(translated(copy, "encoding"), "UTF-8")}${lifecycleItem(translated(copy, "limit"), "10 MiB")}</dl></aside>`;
 }
 
-function pasteLifecycleRail(copy: Labels, paste: PasteSummary): string {
+function pasteLifecycleRail(locale: Locale, copy: Labels, paste: PasteSummary): string {
   const expires = paste.expiresAt === null
-    ? copy.permanent
-    : `<time datetime="${escapeText(paste.expiresAt)}">${escapeText(paste.expiresAt)}</time>`;
-  return `<aside class="lifecycle-rail" aria-labelledby="lifecycle-title"><h2 id="lifecycle-title">${copy.documentStatus}</h2><dl class="lifecycle-list">${lifecycleItem("ID", `<code>${escapeText(paste.id)}</code>`)}${lifecycleItem(copy.password, paste.protected ? copy.protected : copy.notProtected)}${lifecycleItem(copy.viewOnce, paste.viewOnce ? copy.enabled : copy.standard)}${lifecycleItem(copy.expires, expires)}${lifecycleItem(copy.revision, `<code>${paste.contentRevision}</code>`)}${lifecycleItem(copy.saveStatus, `<span data-save-status="saved" aria-live="polite">${copy.saved}</span>`)}${lifecycleItem(copy.size, `${paste.contentBytes} ${copy.bytes}`)}</dl></aside>`;
+    ? translated(copy, "permanent")
+    : `<time datetime="${escapeText(paste.expiresAt)}" data-i18n-date>${escapeText(formatDate(locale, paste.expiresAt))}</time>`;
+  return `<aside class="lifecycle-rail" aria-labelledby="lifecycle-title"><h2 id="lifecycle-title">${translated(copy, "documentStatus")}</h2><dl class="lifecycle-list">${lifecycleItem("ID", `<code>${escapeText(paste.id)}</code>`)}${lifecycleItem(translated(copy, "password"), paste.protected ? translated(copy, "protected") : translated(copy, "notProtected"))}${lifecycleItem(translated(copy, "viewOnce"), paste.viewOnce ? translated(copy, "enabled") : translated(copy, "standard"))}${lifecycleItem(translated(copy, "expires"), expires)}${lifecycleItem(translated(copy, "revision"), `<code>${paste.contentRevision}</code>`)}${lifecycleItem(translated(copy, "saveStatus"), `<span data-save-status="saved" aria-live="polite"${i18nAttribute("saved")}>${copy.saved}</span>`)}${lifecycleItem(translated(copy, "size"), `${paste.contentBytes} ${translated(copy, "bytes")}`)}</dl></aside>`;
 }
 
-function statusLifecycleRail(copy: Labels, heading: string): string {
+function statusLifecycleRail(heading: string): string {
   return `<aside class="lifecycle-rail" aria-labelledby="lifecycle-title"><h2 id="lifecycle-title">${heading}</h2></aside>`;
 }
 
 function pasteLocation(copy: Labels, paste: PasteSummary): string {
-  return `${copy.paste} / <code>${escapeText(paste.id)}</code>`;
+  return `${translated(copy, "paste")} / <code>${escapeText(paste.id)}</code>`;
 }
 
 export function renderMarkdown(source: string): string {
@@ -330,29 +189,29 @@ export function applicationHeaders(): Headers {
 export function renderCreatePage(locale: Locale): string {
   const copy = labels(locale);
   const expiration = [
-    ["60", copy.oneMinute],
-    ["3600", copy.oneHour],
-    ["86400", copy.oneDay],
-    ["604800", copy.oneWeek],
-    ["2592000", copy.thirtyDays],
-    ["31104000", copy.oneYear],
-    ["permanent", copy.permanent],
-  ] as const;
-  const options = expiration.map(([value, label]) => `<option value="${value}"${value === "86400" ? " selected" : ""}>${label}</option>`).join("");
-  const body = `${siteHeader(copy, copy.create)}
+    ["60", "oneMinute"],
+    ["3600", "oneHour"],
+    ["86400", "oneDay"],
+    ["604800", "oneWeek"],
+    ["2592000", "thirtyDays"],
+    ["31104000", "oneYear"],
+    ["permanent", "permanent"],
+  ] as const satisfies readonly (readonly [string, LabelKey])[];
+  const options = expiration.map(([value, key]) => `<option value="${value}"${value === "86400" ? " selected" : ""}${i18nAttribute(key)}>${copy[key]}</option>`).join("");
+  const body = `${siteHeader(copy, translated(copy, "create"))}
 <main class="workbench" data-workbench="create">
 ${createLifecycleRail(copy)}
 <section class="workbench-surface" aria-labelledby="page-title">
-<h1 id="page-title">${copy.create}</h1>
+<h1 id="page-title">${translated(copy, "create")}</h1>
 <form id="create-form" class="workbench-form" method="post" action="/api/pastes">
-<div class="form-section" data-create-field="title"><label for="title">${copy.title}</label><input id="title" name="title" type="text" aria-describedby="title-description title-error"><p id="title-description">${copy.titleDescription}</p><p id="title-error" class="field-error" hidden></p></div>
-<div class="form-section" data-create-field="format"><label for="format">${copy.format}</label><select id="format" name="format" aria-describedby="format-description format-error"><option value="text">${copy.text}</option><option value="markdown">${copy.markdown}</option></select><p id="format-description">${copy.formatDescription}</p><p id="format-error" class="field-error" hidden></p></div>
-<div class="form-section" data-create-field="expiration"><label for="expiration">${copy.expiration}</label><select id="expiration" name="expiration" aria-describedby="expiration-description expiration-error">${options}</select><p id="expiration-description">${copy.expirationDescription}</p><p id="expiration-error" class="field-error" hidden></p></div>
-<div class="form-section editor-surface" data-create-field="content"><label for="content">${copy.content}</label><textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description content-error"></textarea><p id="content-description">${copy.storedExactly}</p><p id="content-error" class="field-error" hidden></p></div>
-<div class="form-section" data-create-field="password"><label for="password">${copy.password}</label><div class="password-control"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-description password-error"><button type="button" data-action="reveal-password" aria-label="${copy.reveal}">${copy.reveal}</button></div><p id="password-description">${copy.passwordDescription}</p><p id="password-error" class="field-error" hidden></p></div>
-<div class="form-section" data-create-field="custom-id"><label for="custom-id">${copy.customId}</label><input id="custom-id" name="customId" type="text" aria-describedby="custom-id-description custom-id-error"><p id="custom-id-description">${copy.customIdDescription}</p><p id="custom-id-error" class="field-error" hidden></p></div>
-<div class="form-section" data-create-field="view-once"><label class="checkbox-label"><input id="view-once" name="viewOnce" type="checkbox" value="true" aria-describedby="view-once-description view-once-error">${copy.viewOnce}</label><p id="view-once-description">${copy.viewOnceDescription}</p><p id="view-once-error" class="field-error" hidden></p></div>
-<div class="form-actions"><button class="primary-action" type="submit">${copy.submit}</button><p id="create-status" aria-live="polite"></p></div>
+<div class="form-section" data-create-field="title"><label for="title">${translated(copy, "title")}</label><input id="title" name="title" type="text" aria-describedby="title-description title-error"><p id="title-description">${translated(copy, "titleDescription")}</p><p id="title-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="format"><label for="format">${translated(copy, "format")}</label><select id="format" name="format" aria-describedby="format-description format-error"><option value="text"${i18nAttribute("text")}>${copy.text}</option><option value="markdown"${i18nAttribute("markdown")}>${copy.markdown}</option></select><p id="format-description">${translated(copy, "formatDescription")}</p><p id="format-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="expiration"><label for="expiration">${translated(copy, "expiration")}</label><select id="expiration" name="expiration" aria-describedby="expiration-description expiration-error">${options}</select><p id="expiration-description">${translated(copy, "expirationDescription")}</p><p id="expiration-error" class="field-error" hidden></p></div>
+<div class="form-section editor-surface" data-create-field="content"><label for="content">${translated(copy, "content")}</label><textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description content-error"></textarea><p id="content-description">${translated(copy, "storedExactly")}</p><p id="content-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="password"><label for="password">${translated(copy, "password")}</label><div class="password-control"><input id="password" name="password" type="password" autocomplete="new-password" aria-describedby="password-description password-error"><button type="button" data-action="reveal-password" aria-label="${copy.reveal}" data-i18n-aria-label="reveal"${i18nAttribute("reveal")}>${copy.reveal}</button></div><p id="password-description">${translated(copy, "passwordDescription")}</p><p id="password-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="custom-id"><label for="custom-id">${translated(copy, "customId")}</label><input id="custom-id" name="customId" type="text" aria-describedby="custom-id-description custom-id-error"><p id="custom-id-description">${translated(copy, "customIdDescription")}</p><p id="custom-id-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="view-once"><label class="checkbox-label"><input id="view-once" name="viewOnce" type="checkbox" value="true" aria-describedby="view-once-description view-once-error">${translated(copy, "viewOnce")}</label><p id="view-once-description">${translated(copy, "viewOnceDescription")}</p><p id="view-once-error" class="field-error" hidden></p></div>
+<div class="form-actions"><button class="primary-action" type="submit"${i18nAttribute("submit")}>${copy.submit}</button><p id="create-status" aria-live="polite"></p></div>
 </form>
 </section>
 </main>`;
@@ -366,16 +225,16 @@ export function renderPastePage(model: PastePageModel): string {
   const title = documentTitle(model.locale, paste);
   const contentView = pasteContentView(model.content, paste.format);
   const headerActions = restricted
-    ? `<button type="button" data-action="copy">${copy.copy}</button>`
-    : `<button type="button" data-action="copy">${copy.copy}</button><a data-action="raw" href="${escapeText(paste.links.raw)}">${copy.raw}</a><a data-action="file" href="${escapeText(paste.links.file)}">${copy.file}</a>`;
-  const header = siteHeader(copy, pasteLocation(copy, paste), headerActions, restricted ? copy.create : copy.brand);
+    ? `<button type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`
+    : `<button type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button><a data-action="raw" href="${escapeText(paste.links.raw)}"${i18nAttribute("raw")}>${copy.raw}</a><a data-action="file" href="${escapeText(paste.links.file)}"${i18nAttribute("file")}>${copy.file}</a>`;
+  const header = siteHeader(copy, pasteLocation(copy, paste), headerActions, restricted ? translated(copy, "create") : translated(copy, "brand"));
   const source = `<div data-panel="source" hidden>${sourceTextarea()}</div>`;
-  const panels = `<nav class="tab-navigation" aria-label="${copy.pasteViews}"><div role="tablist" aria-label="${copy.pasteViews}"><button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view">${copy.view}</button><button id="tab-edit" type="button" role="tab" aria-selected="false" aria-controls="panel-edit" tabindex="-1" data-tab="edit">${copy.edit}</button><button id="tab-markdown" type="button" role="tab" aria-selected="false" aria-controls="panel-markdown" tabindex="-1" data-tab="markdown">${copy.markdown}</button><button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">${copy.history}</button><button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings">${copy.settings}</button></div></nav><section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">${contentView}</section><section id="panel-edit" role="tabpanel" tabindex="0" aria-labelledby="tab-edit" data-panel="edit" hidden>${source}</section><section id="panel-markdown" role="tabpanel" tabindex="0" aria-labelledby="tab-markdown" data-panel="markdown" hidden></section><section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section><section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>`;
-  const restrictedBody = `<p class="consumed-notice" role="status">${copy.consumed}</p><section data-panel="view">${contentView}</section>${source}${localActions(copy)}`;
-  const ordinaryBody = `${panels}<div class="context-actions">${localActions(copy)}<div class="representations" aria-label="${copy.representations}"><a data-action="raw" href="${escapeText(paste.links.raw)}">${copy.raw}</a><a data-action="html" href="${escapeText(paste.links.html)}">${copy.html}</a><a data-action="markdown-document" href="${escapeText(paste.links.markdown)}">${copy.markdown}</a><a data-action="file" href="${escapeText(paste.links.file)}">${copy.file}</a></div><button class="danger-action" type="button" data-action="delete">${copy.delete}</button></div><dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title"><form method="dialog"><h2 id="delete-dialog-title">${copy.delete}</h2><p>${copy.deleteDescription}</p><div class="dialog-actions"><button type="submit" data-action="cancel-delete">${copy.cancel}</button><button class="danger-action" type="button" data-action="confirm-delete">${copy.delete}</button></div></form></dialog>`;
+  const panels = `<nav class="tab-navigation" aria-label="${copy.pasteViews}" data-i18n-aria-label="pasteViews"><div role="tablist" aria-label="${copy.pasteViews}" data-i18n-aria-label="pasteViews"><button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view"${i18nAttribute("view")}>${copy.view}</button><button id="tab-edit" type="button" role="tab" aria-selected="false" aria-controls="panel-edit" tabindex="-1" data-tab="edit"${i18nAttribute("edit")}>${copy.edit}</button><button id="tab-markdown" type="button" role="tab" aria-selected="false" aria-controls="panel-markdown" tabindex="-1" data-tab="markdown"${i18nAttribute("markdown")}>${copy.markdown}</button><button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history"${i18nAttribute("history")}>${copy.history}</button><button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings"${i18nAttribute("settings")}>${copy.settings}</button></div></nav><section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">${contentView}</section><section id="panel-edit" role="tabpanel" tabindex="0" aria-labelledby="tab-edit" data-panel="edit" hidden>${source}</section><section id="panel-markdown" role="tabpanel" tabindex="0" aria-labelledby="tab-markdown" data-panel="markdown" hidden></section><section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section><section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>`;
+  const restrictedBody = `<p class="consumed-notice" role="status"${i18nAttribute("consumed")}>${copy.consumed}</p><section data-panel="view">${contentView}</section>${source}${localActions(copy)}`;
+  const ordinaryBody = `${panels}<div class="context-actions">${localActions(copy)}<div class="representations" aria-label="${copy.representations}" data-i18n-aria-label="representations"><a data-action="raw" href="${escapeText(paste.links.raw)}"${i18nAttribute("raw")}>${copy.raw}</a><a data-action="html" href="${escapeText(paste.links.html)}"${i18nAttribute("html")}>${copy.html}</a><a data-action="markdown-document" href="${escapeText(paste.links.markdown)}"${i18nAttribute("markdown")}>${copy.markdown}</a><a data-action="file" href="${escapeText(paste.links.file)}"${i18nAttribute("file")}>${copy.file}</a></div><button class="danger-action" type="button" data-action="delete"${i18nAttribute("delete")}>${copy.delete}</button></div><dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title"><form method="dialog"><h2 id="delete-dialog-title"${i18nAttribute("delete")}>${copy.delete}</h2><p${i18nAttribute("deleteDescription")}>${copy.deleteDescription}</p><div class="dialog-actions"><button type="submit" data-action="cancel-delete"${i18nAttribute("cancel")}>${copy.cancel}</button><button class="danger-action" type="button" data-action="confirm-delete"${i18nAttribute("delete")}>${copy.delete}</button></div></form></dialog>`;
   const body = `${header}
 <main class="workbench" data-workbench="paste" data-consumed="${restricted}">
-${pasteLifecycleRail(copy, paste)}
+${pasteLifecycleRail(model.locale, copy, paste)}
 <section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${escapeText(title)}</h1>${restricted ? restrictedBody : ordinaryBody}<p id="paste-status" aria-live="polite"></p></section>
 </main>`;
   const bootstrap = restricted
@@ -388,21 +247,21 @@ export function renderPasswordPage(model: PasswordPageModel): string {
   const copy = labels(model.locale);
   const message = model.error === undefined
     ? `<p id="password-error" class="field-error" hidden></p>`
-    : `<p id="password-error" class="field-error" role="alert">${escapeText(model.error)}</p>`;
-  const body = `${siteHeader(copy, copy.passwordRequired)}
+    : `<p id="password-error" class="field-error" role="alert"${model.errorCode === undefined ? "" : ` data-i18n-error="${model.errorCode}"`}>${translatedError(model.locale, model.error, model.errorCode)}</p>`;
+  const body = `${siteHeader(copy, translated(copy, "passwordRequired"))}
 <main class="workbench" data-workbench="password">
-${statusLifecycleRail(copy, copy.passwordRequired)}
-<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${copy.passwordRequired}</h1><form class="workbench-form" method="post"><div class="form-section"><label for="password">${copy.password}</label><input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error">${message}</div><div class="form-actions"><button class="primary-action" type="submit">${copy.continue}</button></div></form></section>
+${statusLifecycleRail(translated(copy, "passwordRequired"))}
+<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${translated(copy, "passwordRequired")}</h1><form class="workbench-form" method="post"><div class="form-section"><label for="password">${translated(copy, "password")}</label><input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error">${message}</div><div class="form-actions"><button class="primary-action" type="submit"${i18nAttribute("continue")}>${copy.continue}</button></div></form></section>
 </main>`;
   return pageDocument(model.locale, "password", copy.passwordRequired, body, { page: "password", locale: model.locale });
 }
 
 export function renderErrorPage(model: ErrorPageModel): string {
   const copy = labels(model.locale);
-  const body = `${siteHeader(copy, copy.error)}
+  const body = `${siteHeader(copy, translated(copy, "error"))}
 <main class="workbench" data-workbench="error">
-${statusLifecycleRail(copy, copy.error)}
-<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${copy.error}</h1><p role="alert">${escapeText(model.error)}</p><p><a href="/">${copy.create}</a></p></section>
+${statusLifecycleRail(translated(copy, "error"))}
+<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${translated(copy, "error")}</h1><p role="alert"${model.errorCode === undefined ? "" : ` data-i18n-error="${model.errorCode}"`}>${translatedError(model.locale, model.error, model.errorCode)}</p><p><a href="/"${i18nAttribute("create")}>${copy.create}</a></p></section>
 </main>`;
   return pageDocument(model.locale, "error", copy.error, body, { page: "error", locale: model.locale });
 }
@@ -413,11 +272,11 @@ export function renderMarkdownDocument(model: MarkdownDocumentModel): string {
   const restricted = paste.viewOnce;
   const title = documentTitle(model.locale, paste);
   const actions = restricted
-    ? `<button class="markdown-document-action" type="button" data-action="copy">${copy.copy}</button>`
-    : `<a class="markdown-document-action" data-action="open-source" href="${escapeText(paste.links.view)}">${copy.openSource}</a><button class="markdown-document-action" type="button" data-action="copy">${copy.copy}</button>`;
-  const body = `${siteHeader(copy, pasteLocation(copy, paste), actions, restricted ? copy.create : copy.brand)}
+    ? `<button class="markdown-document-action" type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`
+    : `<a class="markdown-document-action" data-action="open-source" href="${escapeText(paste.links.view)}"${i18nAttribute("openSource")}>${copy.openSource}</a><button class="markdown-document-action" type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`;
+  const body = `${siteHeader(copy, pasteLocation(copy, paste), actions, restricted ? translated(copy, "create") : translated(copy, "brand"))}
 <main class="workbench" data-workbench="markdown" data-consumed="${restricted}">
-${pasteLifecycleRail(copy, paste)}
+${pasteLifecycleRail(model.locale, copy, paste)}
 <section class="workbench-surface markdown-document" aria-labelledby="page-title"><article><h1 id="page-title">${escapeText(title)}</h1>${renderMarkdown(model.content)}</article></section>
 </main>`;
   const bootstrap = restricted
