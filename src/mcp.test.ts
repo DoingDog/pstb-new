@@ -203,13 +203,22 @@ describe("MCP transport boundary", () => {
     }
   });
 
-  it("lists paste_create then paste_get as its exact tool surface", async () => {
+  it("lists all eight tools in the specified order", async () => {
     const { env: toolEnvironment } = toolEnv();
     const response = await handleMcp(modernRequest("tools/list", {}), toolEnvironment, context);
 
     expect(response.status).toBe(200);
     const body = await response.json() as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools.map((tool) => tool.name)).toEqual(["paste_create", "paste_get"]);
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([
+      "paste_create",
+      "paste_get",
+      "paste_update",
+      "paste_delete",
+      "paste_history_list",
+      "paste_history_get",
+      "paste_settings_update",
+      "paste_password_update",
+    ]);
   });
 
   it("returns JSON-RPC InvalidParams for malformed modern tool calls", async () => {
@@ -222,12 +231,33 @@ describe("MCP transport boundary", () => {
       ["paste_get", {}],
       ["paste_get", { id: "missing", unexpected: true }],
       ["paste_get", { id: 1 }],
+      ["paste_update", { id: "missing" }],
+      ["paste_update", { id: "missing", content: 1 }],
+      ["paste_update", { id: "missing", content: "source", title: "unrelated" }],
+      ["paste_delete", {}],
+      ["paste_delete", { id: 1 }],
+      ["paste_delete", { id: "missing", content: "unrelated" }],
+      ["paste_history_list", { id: "missing", cursor: "not-supported" }],
+      ["paste_history_list", { id: 1 }],
+      ["paste_history_get", { id: "missing", revision: 0 }],
+      ["paste_history_get", { id: "missing", revision: 1.5 }],
+      ["paste_history_get", { id: "missing", revision: Number.MAX_SAFE_INTEGER + 1 }],
+      ["paste_history_get", { id: "missing", revision: "1" }],
+      ["paste_history_get", { id: "missing", revision: 1, limit: 1 }],
+      ["paste_settings_update", { id: "missing" }],
+      ["paste_settings_update", { id: "missing", title: 1 }],
+      ["paste_settings_update", { id: "missing", title: "settings", content: "unrelated" }],
+      ["paste_settings_update", { id: "missing", expiration: {} }],
+      ["paste_password_update", { id: "missing" }],
+      ["paste_password_update", { id: "missing", newPassword: 1 }],
+      ["paste_password_update", { id: "missing", newPassword: "next", content: "unrelated" }],
       ["unknown", {}],
     ] as const) {
       const body = await toolCallBody(toolEnvironment, name, args);
 
       expect(body).toMatchObject({ jsonrpc: "2.0", id: 1, error: { code: -32602 } });
       expect(body).not.toHaveProperty("result");
+      expect(body).not.toHaveProperty("isError");
     }
 
     const absentArguments = await toolCallBody(toolEnvironment, "paste_create");
@@ -431,5 +461,331 @@ describe("MCP transport boundary", () => {
     expect(result.structuredContent).toMatchObject({ ok: false, error: { code: "CONSUME_FAILED" } });
     expect(result.structuredContent).not.toHaveProperty("content");
     expectResultText(result);
+  });
+
+  it("updates content, returns history snapshots, and preserves settings history", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    const created = await toolCall(toolEnvironment, "paste_create", {
+      content: "v1",
+      customId: "mcp-history-mutations",
+    });
+    const initialVersion = created.structuredContent.paste.version;
+
+    const update = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-history-mutations",
+      content: "v2",
+      version: initialVersion,
+    });
+    expect(update.structuredContent).toMatchObject({
+      ok: true,
+      changed: true,
+      paste: { contentRevision: 2 },
+    });
+
+    const firstHistory = await toolCall(toolEnvironment, "paste_history_list", { id: "mcp-history-mutations" });
+    expect(firstHistory.structuredContent).toMatchObject({
+      ok: true,
+      history: {
+        id: "mcp-history-mutations",
+        currentRevision: 2,
+        revisions: [{ revision: 1, byteLength: 2 }],
+      },
+    });
+
+    const firstSnapshot = await toolCall(toolEnvironment, "paste_history_get", {
+      id: "mcp-history-mutations",
+      revision: 1,
+    });
+    const repeatedSnapshot = await toolCall(toolEnvironment, "paste_history_get", {
+      id: "mcp-history-mutations",
+      revision: 1,
+    });
+    for (const snapshot of [firstSnapshot, repeatedSnapshot]) {
+      expect(snapshot.structuredContent).toMatchObject({
+        ok: true,
+        revision: { id: "mcp-history-mutations", revision: 1, content: "v1", byteLength: 2 },
+      });
+    }
+
+    const conflict = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-history-mutations",
+      content: "stale",
+      version: initialVersion,
+    });
+    expect(conflict).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VERSION_CONFLICT" } } });
+
+    const lastWriteWins = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-history-mutations",
+      content: "v3",
+    });
+    expect(lastWriteWins.structuredContent).toMatchObject({ ok: true, changed: true, paste: { contentRevision: 3 } });
+
+    const noOp = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-history-mutations",
+      content: "v3",
+    });
+    expect(noOp.structuredContent).toMatchObject({
+      ok: true,
+      changed: false,
+      paste: { version: lastWriteWins.structuredContent.paste.version, contentRevision: 3 },
+    });
+
+    const settings = await toolCall(toolEnvironment, "paste_settings_update", {
+      id: "mcp-history-mutations",
+      title: "MCP revised",
+      format: "markdown",
+      expiration: "permanent",
+      version: lastWriteWins.structuredContent.paste.version,
+    });
+    expect(settings.structuredContent).toMatchObject({
+      ok: true,
+      changed: true,
+      paste: { title: "MCP revised", format: "markdown", contentRevision: 3, expiresAt: null },
+    });
+
+    const afterSettings = await toolCall(toolEnvironment, "paste_history_list", { id: "mcp-history-mutations" });
+    expect(afterSettings.structuredContent).toMatchObject({
+      ok: true,
+      history: {
+        currentRevision: 3,
+        currentVersion: settings.structuredContent.paste.version,
+        revisions: [{ revision: 2 }, { revision: 1 }],
+      },
+    });
+
+    for (const result of [update, firstHistory, firstSnapshot, repeatedSnapshot, conflict, lastWriteWins, noOp, settings, afterSettings]) {
+      expectResultText(result);
+    }
+  });
+
+  it("sets, changes, clears, and never returns paste passwords", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "protected v1",
+      customId: "mcp-password-mutations",
+    });
+
+    const set = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-password-mutations",
+      newPassword: "first-password",
+    });
+    expect(set.structuredContent).toMatchObject({ ok: true, changed: true, paste: { protected: true } });
+
+    const missing = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-password-mutations",
+      content: "protected v2",
+    });
+    const wrong = await toolCall(toolEnvironment, "paste_settings_update", {
+      id: "mcp-password-mutations",
+      password: "wrong-password",
+      title: "not written",
+    });
+    for (const result of [missing, wrong]) {
+      expect(result).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "FORBIDDEN" } } });
+    }
+
+    const current = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-password-mutations",
+      content: "protected v2",
+      password: "first-password",
+      version: set.structuredContent.paste.version,
+    });
+    expect(current.structuredContent).toMatchObject({ ok: true, changed: true, paste: { protected: true } });
+
+    const missingChange = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-password-mutations",
+      newPassword: "next-password",
+    });
+    const wrongChange = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-password-mutations",
+      password: "wrong-password",
+      newPassword: "next-password",
+    });
+    for (const result of [missingChange, wrongChange]) {
+      expect(result).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "FORBIDDEN" } } });
+    }
+
+    const changed = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-password-mutations",
+      password: "first-password",
+      newPassword: "next-password",
+      version: current.structuredContent.paste.version,
+    });
+    const cleared = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-password-mutations",
+      password: "next-password",
+      newPassword: "",
+      version: changed.structuredContent.paste.version,
+    });
+    expect(changed.structuredContent).toMatchObject({ ok: true, changed: true, paste: { protected: true } });
+    expect(cleared.structuredContent).toMatchObject({ ok: true, changed: true, paste: { protected: false } });
+
+    for (const result of [set, missing, wrong, current, missingChange, wrongChange, changed, cleared]) {
+      expect(JSON.stringify(result)).not.toContain("first-password");
+      expect(JSON.stringify(result)).not.toContain("next-password");
+      expectResultText(result);
+    }
+  });
+
+  it("deletes protected pastes only with the current tool password", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    const created = await toolCall(toolEnvironment, "paste_create", {
+      content: "delete me",
+      customId: "mcp-delete-mutations",
+      password: "delete-password",
+    });
+
+    const missing = await toolCall(toolEnvironment, "paste_delete", { id: "mcp-delete-mutations" });
+    const wrong = await toolCall(toolEnvironment, "paste_delete", {
+      id: "mcp-delete-mutations",
+      password: "wrong-password",
+    });
+    const deleted = await toolCall(toolEnvironment, "paste_delete", {
+      id: "mcp-delete-mutations",
+      password: "delete-password",
+      version: created.structuredContent.paste.version,
+    });
+    const absent = await toolCall(toolEnvironment, "paste_get", { id: "mcp-delete-mutations" });
+
+    for (const result of [missing, wrong]) {
+      expect(result).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "FORBIDDEN" } } });
+    }
+    expect(deleted.structuredContent).toEqual({ ok: true, id: "mcp-delete-mutations", deleted: true });
+    expect(absent).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "PASTE_NOT_FOUND" } } });
+    for (const result of [missing, wrong, deleted, absent]) {
+      expect(JSON.stringify(result)).not.toContain("delete-password");
+      expectResultText(result);
+    }
+  });
+
+  it("keeps view-once pastes active for history errors and permits pre-read mutations", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "view history",
+      customId: "mcp-view-history",
+      viewOnce: true,
+    });
+    const deniedList = await toolCall(toolEnvironment, "paste_history_list", { id: "mcp-view-history" });
+    const deniedSnapshot = await toolCall(toolEnvironment, "paste_history_get", { id: "mcp-view-history", revision: 1 });
+    const firstRead = await toolCall(toolEnvironment, "paste_get", { id: "mcp-view-history" });
+    for (const result of [deniedList, deniedSnapshot]) {
+      expect(result).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "VIEW_ONCE_HISTORY_FORBIDDEN" } } });
+    }
+    expect(firstRead.structuredContent).toMatchObject({ ok: true, content: "view history" });
+
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "view settings",
+      customId: "mcp-view-settings",
+      viewOnce: true,
+    });
+    const settings = await toolCall(toolEnvironment, "paste_settings_update", {
+      id: "mcp-view-settings",
+      title: "updated before reading",
+    });
+    const settingsRead = await toolCall(toolEnvironment, "paste_get", { id: "mcp-view-settings" });
+    expect(settings.structuredContent).toMatchObject({ ok: true, changed: true, paste: { title: "updated before reading", viewOnce: true } });
+    expect(settingsRead.structuredContent).toMatchObject({ ok: true, content: "view settings" });
+
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "view password",
+      customId: "mcp-view-password",
+      viewOnce: true,
+    });
+    const password = await toolCall(toolEnvironment, "paste_password_update", {
+      id: "mcp-view-password",
+      newPassword: "one-time-credential",
+    });
+    const passwordRead = await toolCall(toolEnvironment, "paste_get", {
+      id: "mcp-view-password",
+      password: "one-time-credential",
+    });
+    expect(password.structuredContent).toMatchObject({ ok: true, changed: true, paste: { protected: true, viewOnce: true } });
+    expect(passwordRead.structuredContent).toMatchObject({ ok: true, content: "view password" });
+
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "view content",
+      customId: "mcp-view-content",
+      viewOnce: true,
+    });
+    const content = await toolCall(toolEnvironment, "paste_update", {
+      id: "mcp-view-content",
+      content: "updated view content",
+    });
+    const contentRead = await toolCall(toolEnvironment, "paste_get", { id: "mcp-view-content" });
+    expect(content.structuredContent).toMatchObject({ ok: true, changed: true, paste: { viewOnce: true } });
+    expect(contentRead.structuredContent).toMatchObject({ ok: true, content: "updated view content" });
+
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "view delete",
+      customId: "mcp-view-delete",
+      viewOnce: true,
+    });
+    const deleted = await toolCall(toolEnvironment, "paste_delete", { id: "mcp-view-delete" });
+    const absent = await toolCall(toolEnvironment, "paste_get", { id: "mcp-view-delete" });
+    expect(deleted.structuredContent).toEqual({ ok: true, id: "mcp-view-delete", deleted: true });
+    expect(absent).toMatchObject({ isError: true, structuredContent: { ok: false, error: { code: "PASTE_NOT_FOUND" } } });
+
+    for (const result of [
+      deniedList,
+      deniedSnapshot,
+      firstRead,
+      settings,
+      settingsRead,
+      password,
+      passwordRead,
+      content,
+      contentRead,
+      deleted,
+      absent,
+    ]) {
+      expect(JSON.stringify(result)).not.toContain("one-time-credential");
+      expectResultText(result);
+    }
+  });
+
+  it("uses the same dispatcher for independent stateless legacy tool requests", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "legacy v1",
+      customId: "mcp-legacy-mutations",
+    });
+    const legacy = async (method: string, params: Record<string, unknown>): Promise<Record<string, any>> => {
+      const response = await handleMcp(request("POST", {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      }, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })), toolEnvironment, context);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("mcp-session-id")).toBeNull();
+      const message = (await response.text()).split("\n").find((line) => line.startsWith("data: "));
+      if (message === undefined) throw new Error("Legacy response did not include an SSE data message.");
+      return JSON.parse(message.slice("data: ".length)) as Record<string, any>;
+    };
+
+    const listed = await legacy("tools/list", {});
+    const updated = await legacy("tools/call", {
+      name: "paste_update",
+      arguments: { id: "mcp-legacy-mutations", content: "legacy v2" },
+    });
+    const history = await legacy("tools/call", {
+      name: "paste_history_list",
+      arguments: { id: "mcp-legacy-mutations" },
+    });
+
+    expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "paste_create",
+      "paste_get",
+      "paste_update",
+      "paste_delete",
+      "paste_history_list",
+      "paste_history_get",
+      "paste_settings_update",
+      "paste_password_update",
+    ]);
+    expect(updated.result).toMatchObject({ structuredContent: { ok: true, changed: true, paste: { contentRevision: 2 } } });
+    expect(history.result).toMatchObject({
+      structuredContent: { ok: true, history: { currentRevision: 2, revisions: [{ revision: 1 }] } },
+    });
+    expect(updated.result.content[0].text).toBe(JSON.stringify(updated.result.structuredContent));
+    expect(history.result.content[0].text).toBe(JSON.stringify(history.result.structuredContent));
   });
 });

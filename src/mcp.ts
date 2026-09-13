@@ -1,6 +1,12 @@
 import { createMcpHandler, McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { PasteService, type CreateInput } from "./pastes";
+import {
+  PasteService,
+  type CreateInput,
+  type UpdateContentInput,
+  type UpdatePasswordInput,
+  type UpdateSettingsInput,
+} from "./pastes";
 import { deriveDownloadFileName, renderMarkdown } from "./render";
 import { isPasteError, PasteError, type Env, type LoadedPaste } from "./types";
 
@@ -13,6 +19,7 @@ const expirationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("relative"), seconds: z.number().int().positive() }).strict(),
   z.object({ kind: z.literal("absolute") }).strict(),
 ]);
+const expirationInputSchema = z.union([z.number(), z.string(), z.null()]);
 const pasteSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -36,7 +43,28 @@ const pasteSummarySchema = z.object({
   }).strict(),
 }).strict();
 const errorSchema = z.object({
-  code: z.string(),
+  code: z.enum([
+    "BAD_REQUEST",
+    "AMBIGUOUS_PASSWORD",
+    "AMBIGUOUS_VERSION",
+    "FORBIDDEN",
+    "PASTE_NOT_FOUND",
+    "REVISION_NOT_FOUND",
+    "ID_CONFLICT",
+    "VERSION_CONFLICT",
+    "VIEW_ONCE_HISTORY_FORBIDDEN",
+    "CONTENT_TOO_LARGE",
+    "REQUEST_TOO_LARGE",
+    "UNSUPPORTED_MEDIA_TYPE",
+    "VALIDATION_FAILED",
+    "RENDER_FAILED",
+    "INTERNAL_ERROR",
+    "STORAGE_READ_FAILED",
+    "STORAGE_WRITE_FAILED",
+    "STORAGE_INCONSISTENT",
+    "CONSUME_FAILED",
+    "ID_GENERATION_FAILED",
+  ]),
   message: z.string(),
   details: z.record(z.string(), z.unknown()).optional(),
 }).strict();
@@ -69,6 +97,80 @@ const pasteGetOutputSchema = z.union([
   ]),
   errorResultSchema,
 ]);
+const mutationResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), changed: z.boolean(), paste: pasteSummarySchema }).strict(),
+  errorResultSchema,
+]);
+const pasteDeleteInputSchema = z.object({
+  id: z.string(),
+  password: z.string().optional(),
+  version: z.string().optional(),
+}).strict();
+const pasteDeleteOutputSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), id: z.string(), deleted: z.literal(true) }).strict(),
+  errorResultSchema,
+]);
+const pasteUpdateInputSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  password: z.string().optional(),
+  version: z.string().optional(),
+}).strict();
+const pasteHistoryListInputSchema = z.object({
+  id: z.string(),
+  password: z.string().optional(),
+}).strict();
+const historyDescriptorSchema = z.object({
+  revision: z.number().int().positive().safe(),
+  savedAt: z.string(),
+  supersededAt: z.string(),
+  byteLength: z.number().int().nonnegative().safe(),
+}).strict();
+const historyListSchema = z.object({
+  id: z.string(),
+  currentRevision: z.number().int().positive().safe(),
+  currentVersion: z.string(),
+  revisions: z.array(historyDescriptorSchema),
+}).strict();
+const pasteHistoryListOutputSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), history: historyListSchema }).strict(),
+  errorResultSchema,
+]);
+const pasteHistoryGetInputSchema = z.object({
+  id: z.string(),
+  revision: z.number().int().positive().safe(),
+  password: z.string().optional(),
+}).strict();
+const revisionResourceSchema = z.object({
+  id: z.string(),
+  revision: z.number().int().positive().safe(),
+  savedAt: z.string(),
+  supersededAt: z.string(),
+  byteLength: z.number().int().nonnegative().safe(),
+  content: z.string(),
+}).strict();
+const pasteHistoryGetOutputSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), revision: revisionResourceSchema }).strict(),
+  errorResultSchema,
+]);
+const pasteSettingsUpdateInputSchema = z.object({
+  id: z.string(),
+  password: z.string().optional(),
+  version: z.string().optional(),
+  title: z.string().optional(),
+  format: z.enum(["text", "markdown"]).optional(),
+  expiration: expirationInputSchema.optional(),
+  viewOnce: z.boolean().optional(),
+}).strict().refine(
+  (input) => input.title !== undefined || input.format !== undefined || input.expiration !== undefined || input.viewOnce !== undefined,
+  "Must include at least one setting.",
+);
+const pastePasswordUpdateInputSchema = z.object({
+  id: z.string(),
+  password: z.string().optional(),
+  newPassword: z.string(),
+  version: z.string().optional(),
+}).strict();
 
 function toCreateInput(input: z.infer<typeof pasteCreateInputSchema>): CreateInput {
   const result: CreateInput = { content: input.content };
@@ -78,6 +180,31 @@ function toCreateInput(input: z.infer<typeof pasteCreateInputSchema>): CreateInp
   if (input.password !== undefined) result.password = input.password;
   if (input.viewOnce !== undefined) result.viewOnce = input.viewOnce;
   if (input.customId !== undefined) result.customId = input.customId;
+  return result;
+}
+
+function toUpdateContentInput(input: z.infer<typeof pasteUpdateInputSchema>): UpdateContentInput {
+  const result: UpdateContentInput = { content: input.content };
+  if (input.password !== undefined) result.password = input.password;
+  if (input.version !== undefined) result.version = input.version;
+  return result;
+}
+
+function toUpdateSettingsInput(input: z.infer<typeof pasteSettingsUpdateInputSchema>): UpdateSettingsInput {
+  const result: UpdateSettingsInput = {};
+  if (input.password !== undefined) result.password = input.password;
+  if (input.version !== undefined) result.version = input.version;
+  if (input.title !== undefined) result.title = input.title;
+  if (input.format !== undefined) result.format = input.format;
+  if (input.expiration !== undefined) result.expiration = input.expiration;
+  if (input.viewOnce !== undefined) result.viewOnce = input.viewOnce;
+  return result;
+}
+
+function toUpdatePasswordInput(input: z.infer<typeof pastePasswordUpdateInputSchema>): UpdatePasswordInput {
+  const result: UpdatePasswordInput = { newPassword: input.newPassword };
+  if (input.password !== undefined) result.password = input.password;
+  if (input.version !== undefined) result.version = input.version;
   return result;
 }
 
@@ -202,6 +329,60 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
         throw error;
       }
     });
+    const pasteUpdate = defineTool(pasteUpdateInputSchema, mutationResultSchema, async (input) => {
+      try {
+        const { changed, paste } = await service.updateContent(input.id, toUpdateContentInput(input));
+        return toolResult({ ok: true, changed, paste });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
+    const pasteDelete = defineTool(pasteDeleteInputSchema, pasteDeleteOutputSchema, async (input) => {
+      try {
+        await service.delete(input.id, input.password, input.version);
+        return toolResult({ ok: true, id: input.id, deleted: true });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
+    const pasteHistoryList = defineTool(pasteHistoryListInputSchema, pasteHistoryListOutputSchema, async (input) => {
+      try {
+        const history = await service.listHistory(input.id, input.password);
+        return toolResult({ ok: true, history });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
+    const pasteHistoryGet = defineTool(pasteHistoryGetInputSchema, pasteHistoryGetOutputSchema, async (input) => {
+      try {
+        const revision = await service.getHistory(input.id, String(input.revision), input.password);
+        return toolResult({ ok: true, revision });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
+    const pasteSettingsUpdate = defineTool(pasteSettingsUpdateInputSchema, mutationResultSchema, async (input) => {
+      try {
+        const { changed, paste } = await service.updateSettings(input.id, toUpdateSettingsInput(input));
+        return toolResult({ ok: true, changed, paste });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
+    const pastePasswordUpdate = defineTool(pastePasswordUpdateInputSchema, mutationResultSchema, async (input) => {
+      try {
+        const { changed, paste } = await service.updatePassword(input.id, toUpdatePasswordInput(input));
+        return toolResult({ ok: true, changed, paste });
+      } catch (error) {
+        if (isPasteError(error)) return pasteErrorResult(error);
+        throw error;
+      }
+    });
 
     const pasteCreateRegistration = server.registerTool("paste_create", {
       description: "Create a paste.",
@@ -213,9 +394,45 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
       inputSchema: pasteGet.inputSchema,
       outputSchema: pasteGet.outputSchema,
     }, pasteGet.callback);
+    const pasteUpdateRegistration = server.registerTool("paste_update", {
+      description: "Update paste content.",
+      inputSchema: pasteUpdate.inputSchema,
+      outputSchema: pasteUpdate.outputSchema,
+    }, pasteUpdate.callback);
+    const pasteDeleteRegistration = server.registerTool("paste_delete", {
+      description: "Delete a paste.",
+      inputSchema: pasteDelete.inputSchema,
+      outputSchema: pasteDelete.outputSchema,
+    }, pasteDelete.callback);
+    const pasteHistoryListRegistration = server.registerTool("paste_history_list", {
+      description: "List paste history.",
+      inputSchema: pasteHistoryList.inputSchema,
+      outputSchema: pasteHistoryList.outputSchema,
+    }, pasteHistoryList.callback);
+    const pasteHistoryGetRegistration = server.registerTool("paste_history_get", {
+      description: "Get a paste history revision.",
+      inputSchema: pasteHistoryGet.inputSchema,
+      outputSchema: pasteHistoryGet.outputSchema,
+    }, pasteHistoryGet.callback);
+    const pasteSettingsUpdateRegistration = server.registerTool("paste_settings_update", {
+      description: "Update paste settings.",
+      inputSchema: pasteSettingsUpdate.inputSchema,
+      outputSchema: pasteSettingsUpdate.outputSchema,
+    }, pasteSettingsUpdate.callback);
+    const pastePasswordUpdateRegistration = server.registerTool("paste_password_update", {
+      description: "Update a paste password.",
+      inputSchema: pastePasswordUpdate.inputSchema,
+      outputSchema: pastePasswordUpdate.outputSchema,
+    }, pastePasswordUpdate.callback);
     const tools = new Map([
       ["paste_create", { definition: pasteCreate, registration: pasteCreateRegistration }],
       ["paste_get", { definition: pasteGet, registration: pasteGetRegistration }],
+      ["paste_update", { definition: pasteUpdate, registration: pasteUpdateRegistration }],
+      ["paste_delete", { definition: pasteDelete, registration: pasteDeleteRegistration }],
+      ["paste_history_list", { definition: pasteHistoryList, registration: pasteHistoryListRegistration }],
+      ["paste_history_get", { definition: pasteHistoryGet, registration: pasteHistoryGetRegistration }],
+      ["paste_settings_update", { definition: pasteSettingsUpdate, registration: pasteSettingsUpdateRegistration }],
+      ["paste_password_update", { definition: pastePasswordUpdate, registration: pastePasswordUpdateRegistration }],
     ]);
 
     server.server.setRequestHandler("tools/call", async (request) => {
