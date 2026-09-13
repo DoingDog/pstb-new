@@ -6,6 +6,7 @@
 
 修订记录：
 
+* 2026-09-14：同步主规格 R2-01..R2-08 修订：Use remote采用 conflict-compatible独立 guard；autosync、confirmed Reload与 consumed source choice使用不同 apply token；完整 valid retired view-once 200仍先 terminal；derived surfaces采用 offscreen/clear-before-stage与 rollback fallback；补齐 content Reconcile、Delete result UI、relative expiration rewrite和 password retry precedence。
 * 2026-09-14：同步主规格 F01-F22 修订：`/md/:id`改为 read-only React variant；OperationStatus只显示真实 event timestamp并采用 closed ActionKey；补齐 terminal consumed/source-choice、delete root feedback、credential URL exceptions与 exact pinned `use-mobile` source/pruned skeleton要求。
 * 2026-09-13：用 pinned shadcn/ui `new-york-v4/sidebar-11` 与 React 19.3.0 取代 handwritten DOM/CSS workbench；将 desktop lifecycle rail改为 Sidebar、320 px navigation改为 upstream Sheet；加入 hidden question-mark help、四类 persistent operation status和 action内联反馈；删除 visible explanatory copy、sample data、generic dashboard patterns及旧 `src/client/styles.css` ownership。
 
@@ -120,11 +121,17 @@ Lifecycle metadata只显示真实 value。每条 explanation由相邻 `?` HelpTr
 
 History在 desktop使用15rem revision list和剩余 detail区域。diff每行有 `+`、`-`或 space prefix；背景色只辅助。Settings使用连续 Field sections与 Separator，不把每组包成 card。
 
+Autosync conflict在 document surface内显示 Use remote、Keep current与 Retry sync。Use remote的 guard不受 candidate自身造成的 `conflict`阻塞；已有 edit、composition、autosave timer/coalesced source intent、mutation或 baseline变化时 action保持可解释的 rejected/failed state并不改 surface。confirmed Reload即使 Autosync inactive或 draft dirty仍可在 destructive confirmation后运行，dirty draft直到 staged commit成功才消失。preview、Crepe与 diff target先在 non-current host/value准备；无法 offscreen时先把 affected host清为不声称 current的 fallback。stage失效或 destroy抛错时恢复完整 old generation，无法恢复则保留 old exact source和明确 failure fallback，不显示 old/target混合。
+
 ### 4.3 Password、error 与 consumed
 
 Password和 application error仍使用相同 SidebarInset/header proportions，但只有实际 field、action、error和适用 status。不得用 generic illustration、empty-state slogan或 marketing copy填充空间。
 
-Consumed page是独立 local-only composition。Sidebar不实例化 ordinary server destinations；只列 View与 copy、wrap、raw/source toggle、safe preview、exact UTF-8 download、top-level Blob HTML和 create-new local actions。autosync或 explicit reload收到 `viewOnce:true`时，先移除 ordinary controls/URLs/status hooks，再呈现结果；ordering不确定时在同一 local-only composition中提供 current与 consumed response两个 exact source选择，不能恢复 server action。Consumed是允许直接显示的 document state；其 distributed limitation只在相邻 HelpTrigger。
+Consumed page是独立 local-only composition。Sidebar不实例化 ordinary server destinations；只列 View与 copy、wrap、raw/source toggle、safe preview、exact UTF-8 download、top-level Blob HTML和 create-new local actions。autosync、explicit Reload或 content Reconcile完整取得并严格验证 `viewOnce:true` 200时，即使 ordinary sync已被 edit、mutation或 active deadline retire，也先捕获 transition时的 current local exact draft，再移除 ordinary controls/URLs/status hooks并 dispose server controllers；aborted、truncated或 malformed response不显示 consumed。current definitely-newer autosync和仍有效的 confirmed Reload可在 disposal后用独立 `terminalLocalToken`选择 response source；retired或 ordering不确定的 response默认显示 current local source，并在两者不同时提供 Use consumed response与 Keep current。前者通过 offscreen/clear-before-stage transaction更新全部 derived surfaces，失败保留原 display和明确 retry fallback；后者只 dismiss。两种选择都不能恢复 server action或发送 business request。Consumed是允许直接显示的 document state；其 distributed limitation只在相邻 HelpTrigger。
+
+Content autosave、manual save或 Overwrite出现 uncertain result后，在 ordinary document内显示 inline Content Reconcile，不发 blind save。每次 action只发一个 unconditional resource GET，并保留 original target与 later draft；proved target更新 accepted markers但不覆盖 later draft，proved captured baseline允许 explicit Retry，第三 snapshot进入 non-destructive conflict，403显示 credential field，503/network继续 retryable Reconcile。relative expiration uncertain state不得因 same seconds descriptor消失；authorized Reconcile必须显示为一次新的完整 rewrite attempt，只有新 `expiresAt`及全部 physical TTL commit后才 success。password set/change/clear的403 retry field只授权 operation；successful mutation后 location和 representation links显示 intended new password对应的唯一 query，clear移除 query，wrong retry保持原 URL。
+
+Delete Dialog后的 UI严格区分 result：204切到 root并保留 clean success；403留在 ordinary page，保留 source、controls和 inline credential Retry；409保留 page并显示 Reload取得新 version，未取得前不允许 Delete retry；404进入 local-only not-found；503、dispatch后的 fetch rejection或 explicit may-have-applied进入 local-only delete-uncertain。只有后两种 terminal state移除 server controls，403/409不得伪装成 uncertain或隐藏可恢复 UI。Last action使用各 attempt的实际结果，不显示 credential、ID或 protected URL。
 
 `/md/:id`使用独立 read-only React composition和同一 pinned shell/primitives。它显示 server-produced safe article，并提供 local copy、download和 source/preview toggle；不显示 ordinary modes、representation links、Autosave/Autosync或 server controls，也不发 prefetch、API或第二次 content read。
 
@@ -188,7 +195,7 @@ ordinary paste的 OperationStatus是一个平整区域，由 Separator与四个 
 
 每个 record显示 Label、localized current state，并且只在主规格为当前 state定义的 exact event timestamp存在时显示 `<time>`。initial Autosave clean、initial Autosync waiting和 Last action idle没有 timestamp；不得以 load/current time补齐。Autosync unchanged显示 `checkedAt`，remote-applied显示 `appliedAt`，其余 transition显示本次 `stateChangedAt`，因此 success后 failure显示 failure time。Autosave remote/reload clean不生成 `confirmedAt`。没有 relative countdown、spinner-only state或每秒更新。Autosave与Autosync不能合并成一个 Sync badge。Network不把 HTTP error称为 offline。Last action不显示 password、body或 protected URL。
 
-state change通过一个 polite live region增量宣布。视觉状态使用文字加 icon，再辅以颜色。只有主规格 closed `ActionKey`中的 request或 fallible browser operation同时更新 originating Button和 Last action；结果保持到下一次同 key或明确 page transition，不在数秒后消失。HelpTrigger、Sidebar、mode/tab、locale/theme、password reveal、wrap、raw/source等 pure state toggles和无法在 origin document观察结果的 navigation不产生 pending/success/failure。delete 204在清除 sensitive references并 `history.replaceState`到 `/`后，把 query-independent success保留在 root Last action；refresh不 replay。
+state change通过一个 polite live region增量宣布。视觉状态使用文字加 icon，再辅以颜色。只有主规格 closed `ActionKey`中的 request或 fallible browser operation同时更新 originating Button和 Last action；结果保持到下一次同 key或明确 page transition，不在数秒后消失。`content-reconcile`在其 unconditional GET dispatch时 pending，在 applied/not-applied/conflict proof或 handled failure时 settle；`reload-server`、`use-remote`和 `use-consumed-response`只有 staged display commit后 success，guard rejection、invalidation、cleanup或 fallback failure使用实际 settle time。HelpTrigger、Sidebar、mode/tab、locale/theme、password reveal、wrap、raw/source、Keep current等 pure state toggles和无法在 origin document观察结果的 navigation不产生 pending/success/failure。delete 204在清除 sensitive references并 `history.replaceState`到 `/`后，把 query-independent success保留在 root Last action；403/409保留 ordinary records，404/delete-uncertain显示各自 terminal failure；refresh不 replay。
 
 ## 9．Motion
 
@@ -227,7 +234,7 @@ protected representation anchor `href`、明确复制的 representation link和 
 2. `FE04`：old `src/client/app.ts`、`src/client/styles.css`、imperative visible binders和 unintegrated tabs candidate均未保留。
 3. `FE05`：source provenance exact；Sidebar没有 sample data；320 px使用 Sheet且 editor full width；无 dashboard/card/gradient/glass/external-font pattern。
 4. `FE06`：关闭 HelpTrigger时无 explanation、warning、limitation、storage/encoding/limit prose；keyboard、pointer和 touch均可打开与关闭 help。
-5. `FE07`：Autosave、Autosync、Network、Last action各自常驻；fresh clean/waiting/idle无 fabricated timestamp，后续 state选择主规格规定的 event time，failure不显示旧 success time。
-6. `FE08`：closed ActionKey operation的 Button与 status同步显示 persistent outcome；pure toggles与不可观测 navigation不改 Last action；operation feedback没有 Dialog、toast、snackbar、`alert()`或额外 request。
+5. `FE07`：Autosave、Autosync、Network、Last action各自常驻；fresh clean/waiting/idle无 fabricated timestamp，后续 state选择主规格规定的 event time，failure不显示旧 success time；Reload/Use remote/consumed local apply直到 staged commit才显示 success，Delete各 status显示对应 transition。
+6. `FE08`：closed ActionKey operation的 Button与 status同步显示 persistent outcome；union含 `content-reconcile`与 `use-consumed-response`，guard/cleanup/fallback failure可观察；pure toggles与不可观测 navigation不改 Last action；operation feedback没有 Dialog、toast、snackbar、`alert()`或额外 status request。
 7. `FE09`：en/zh-CN、system/light/dark、reduced motion、44 px、focus、WCAG 2.2 AA、320 px和 browser matrix全部通过。
 8. `FE10`：每个实际 adapted/materialized source及 pinned `use-mobile.tsx`有 exact provenance；`SidebarMenuSkeleton`/`skeleton.tsx`不存在；`THIRD_PARTY_NOTICES.md`只枚举 resulting source set并包含主规格要求的 notices/licenses。
