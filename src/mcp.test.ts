@@ -68,17 +68,27 @@ function modernRequest(method: string, params: Record<string, unknown>, name?: s
   }));
 }
 
+async function toolCallBody(
+  toolEnv: Env,
+  name: string,
+  args?: Record<string, unknown>,
+  country?: string,
+): Promise<Record<string, any>> {
+  const toolRequest = modernRequest("tools/call", { name, ...(args === undefined ? {} : { arguments: args }) }, name);
+  if (country !== undefined) Object.defineProperty(toolRequest, "cf", { value: { country } });
+  const response = await handleMcp(toolRequest, toolEnv, context);
+  expect(response.status).toBe(200);
+  return await response.json() as Record<string, any>;
+}
+
 async function toolCall(
   toolEnv: Env,
   name: string,
   args: Record<string, unknown>,
   country?: string,
 ): Promise<Record<string, any>> {
-  const toolRequest = modernRequest("tools/call", { name, arguments: args }, name);
-  if (country !== undefined) Object.defineProperty(toolRequest, "cf", { value: { country } });
-  const response = await handleMcp(toolRequest, toolEnv, context);
-  expect(response.status).toBe(200);
-  const body = await response.json() as { result: Record<string, any> };
+  const body = await toolCallBody(toolEnv, name, args, country);
+  expect(body.error).toBeUndefined();
   return body.result;
 }
 
@@ -200,6 +210,48 @@ describe("MCP transport boundary", () => {
     expect(response.status).toBe(200);
     const body = await response.json() as { result: { tools: Array<{ name: string }> } };
     expect(body.result.tools.map((tool) => tool.name)).toEqual(["paste_create", "paste_get"]);
+  });
+
+  it("returns JSON-RPC InvalidParams for malformed modern tool calls", async () => {
+    const { env: toolEnvironment } = toolEnv();
+
+    for (const [name, args] of [
+      ["paste_create", {}],
+      ["paste_create", { content: "source", unexpected: true }],
+      ["paste_create", { content: 1 }],
+      ["paste_get", {}],
+      ["paste_get", { id: "missing", unexpected: true }],
+      ["paste_get", { id: 1 }],
+      ["unknown", {}],
+    ] as const) {
+      const body = await toolCallBody(toolEnvironment, name, args);
+
+      expect(body).toMatchObject({ jsonrpc: "2.0", id: 1, error: { code: -32602 } });
+      expect(body).not.toHaveProperty("result");
+    }
+
+    const absentArguments = await toolCallBody(toolEnvironment, "paste_create");
+    expect(absentArguments).toMatchObject({ jsonrpc: "2.0", id: 1, error: { code: -32602 } });
+    expect(absentArguments).not.toHaveProperty("result");
+  });
+
+  it("returns stateless legacy JSON-RPC errors for malformed tool calls", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    const response = await handleMcp(request("POST", {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    }, JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "paste_create", arguments: {} },
+    })), toolEnvironment, context);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain('"code":-32602');
+    expect(body).not.toContain('"result"');
   });
 
   it("creates a paste with PasteService defaults and the request country", async () => {

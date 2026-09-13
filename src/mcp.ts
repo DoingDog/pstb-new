@@ -1,4 +1,4 @@
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer, ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { PasteService, type CreateInput } from "./pastes";
 import { deriveDownloadFileName, renderMarkdown } from "./render";
@@ -109,6 +109,28 @@ function pasteErrorResult(error: PasteError): ToolResult {
   return toolResult(payload, true);
 }
 
+function defineTool<Input extends z.ZodType, Output extends z.ZodType>(
+  inputSchema: Input,
+  outputSchema: Output,
+  callback: (input: z.infer<Input>) => Promise<ToolResult>,
+) {
+  return {
+    inputSchema,
+    outputSchema,
+    callback,
+    async call(arguments_: unknown): Promise<ToolResult> {
+      const input = inputSchema.safeParse(arguments_ === undefined ? {} : arguments_);
+      if (!input.success) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Invalid tool arguments");
+
+      const result = await callback(input.data);
+      if (!outputSchema.safeParse(result.structuredContent).success) {
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Invalid tool result");
+      }
+      return result;
+    },
+  };
+}
+
 function prepareRepresentation(loaded: LoadedPaste, representation: Representation): {
   mediaType: string;
   content: string;
@@ -158,11 +180,7 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
     const service = new PasteService(env.PASTE_DB);
     const server = new McpServer({ name: "cf-pastebin", version: "2.0.0" });
 
-    server.registerTool("paste_create", {
-      description: "Create a paste.",
-      inputSchema: pasteCreateInputSchema,
-      outputSchema: pasteCreateOutputSchema,
-    }, async (input) => {
+    const pasteCreate = defineTool(pasteCreateInputSchema, pasteCreateOutputSchema, async (input) => {
       try {
         const paste = await service.create(toCreateInput(input), typeof country === "string" ? { country } : {});
         return toolResult({ ok: true, paste });
@@ -171,12 +189,7 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
         throw error;
       }
     });
-
-    server.registerTool("paste_get", {
-      description: "Get a paste representation.",
-      inputSchema: pasteGetInputSchema,
-      outputSchema: pasteGetOutputSchema,
-    }, async (input) => {
+    const pasteGet = defineTool(pasteGetInputSchema, pasteGetOutputSchema, async (input) => {
       try {
         const loaded = await service.loadContent(input.id, input.password);
         const representation = input.representation ?? "source";
@@ -188,6 +201,31 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
         if (isPasteError(error)) return pasteErrorResult(error);
         throw error;
       }
+    });
+
+    const pasteCreateRegistration = server.registerTool("paste_create", {
+      description: "Create a paste.",
+      inputSchema: pasteCreate.inputSchema,
+      outputSchema: pasteCreate.outputSchema,
+    }, pasteCreate.callback);
+    const pasteGetRegistration = server.registerTool("paste_get", {
+      description: "Get a paste representation.",
+      inputSchema: pasteGet.inputSchema,
+      outputSchema: pasteGet.outputSchema,
+    }, pasteGet.callback);
+    const tools = new Map([
+      ["paste_create", { definition: pasteCreate, registration: pasteCreateRegistration }],
+      ["paste_get", { definition: pasteGet, registration: pasteGetRegistration }],
+    ]);
+
+    server.server.setRequestHandler("tools/call", async (request) => {
+      const tool = tools.get(request.params.name);
+      if (tool === undefined) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${request.params.name} not found`);
+      if (!tool.registration.enabled) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${request.params.name} disabled`);
+      return server.server.projectCallToolResult(
+        await tool.definition.call(request.params.arguments),
+        tool.registration.outputSchemaJson,
+      );
     });
 
     return server;
