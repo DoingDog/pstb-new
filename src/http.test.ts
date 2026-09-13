@@ -677,11 +677,42 @@ describe("HTTP slice 1", () => {
 
   it("accepts Content-Type tokens, quoted-pairs, case, and HTTP OWS", async () => {
     const app = createHttpApp(env as unknown as Env);
+    const id = `http-${crypto.randomUUID()}`;
+    const boundary = "paste;boundary";
+    const body = new TextEncoder().encode([
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="content"',
+      "",
+      "multipart source",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="viewOnce"',
+      "",
+      "false",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="customId"',
+      "",
+      id,
+      `--${boundary}--`,
+      "",
+    ].join("\r\n"));
+    const multipart = await app.fetch(rawContentTypeRequest(
+      "/api/pastes",
+      "POST",
+      " \tMULTIPART/FORM-DATA \t;\tBOUNDARY \t=\t\"paste\\;boundary\"\t",
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(body);
+          controller.close();
+        },
+      }),
+    ));
+    expect(multipart.status).toBe(201);
+    await deletePaste(id);
+
     const cases = [
       ["/api/pastes", "POST", " \tAPPLICATION/JSON\t", [400, 422]],
       ["/api/pastes", "POST", " \tAPPLICATION/JSON \t;\tCHARSET \t=\t\"UTF\\-8\"\t", [400, 422]],
       ["/api/pastes/missing", "PUT", " \tTEXT/PLAIN \t;\tCHARSET \t=\t\"UTF\\-8\"\t", [422]],
-      ["/api/pastes", "POST", " \tMULTIPART/FORM-DATA \t;\tBOUNDARY \t=\t\"paste\\;boundary\"\t", [400, 422]],
     ] as const;
 
     for (const [path, method, contentType, statuses] of cases) {

@@ -130,10 +130,9 @@ function validationError(field: string, message: string): PasteError {
   return new PasteError("VALIDATION_FAILED", 422, undefined, { fields: [{ field, message }] });
 }
 
-function createMediaType(request: Request): "json" | "multipart" {
+function createMediaType(request: Request): "json" | { boundary: string } {
   if (hasJsonUtf8MediaType(request)) return "json";
-  parseMultipartBoundary(request.headers.get("content-type"));
-  return "multipart";
+  return { boundary: parseMultipartBoundary(request.headers.get("content-type")) };
 }
 
 function textMediaType(request: Request): void {
@@ -486,11 +485,12 @@ function contentUpdateInput(content: string, password: string | undefined, versi
   return input;
 }
 
-async function parseMultipartCreate(request: Request): Promise<CreateInput> {
+async function parseMultipartCreate(request: Request, boundary: string): Promise<CreateInput> {
   const bytes = await readMultipartBytes(request);
   let form: FormData;
   try {
-    form = await new Response(bytes, { headers: { "Content-Type": request.headers.get("content-type")! } }).formData();
+    const contentType = `multipart/form-data; boundary="${boundary.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+    form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
   } catch {
     throw new PasteError("BAD_REQUEST", 400);
   }
@@ -516,9 +516,10 @@ async function parseMultipartCreate(request: Request): Promise<CreateInput> {
 }
 
 async function parseCreate(request: Request): Promise<CreateInput> {
-  return createMediaType(request) === "json"
+  const mediaType = createMediaType(request);
+  return mediaType === "json"
     ? createInput(await parseStrictJsonObject(request, createFields, httpJsonPolicy))
-    : parseMultipartCreate(request);
+    : parseMultipartCreate(request, mediaType.boundary);
 }
 
 function jsonResponse(value: unknown, status = 200, headers?: HeadersInit): Response {
