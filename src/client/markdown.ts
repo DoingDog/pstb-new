@@ -38,6 +38,7 @@ export interface MarkdownModes {
 
 export function createMarkdownModes(options: MarkdownModesOptions): MarkdownModes {
   let visualEditor: Crepe | undefined;
+  let visualRootSnapshot: ReadonlySet<ChildNode> | undefined;
   let visualSerialized = "";
   let visualDirty = false;
   let transition = 0;
@@ -58,14 +59,6 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     return next;
   };
 
-  const destroyEditor = async (editor: Crepe): Promise<void> => {
-    try {
-      await editor.destroy();
-    } catch {
-      // A completed editor must not block a later mode transition after cleanup fails.
-    }
-  };
-
   const removePartialVisualRoot = (initialNodes: ReadonlySet<ChildNode>): void => {
     for (const child of Array.from(options.visualRoot.childNodes)) {
       if (initialNodes.has(child)) continue;
@@ -77,11 +70,21 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     }
   };
 
+  const destroyEditor = async (editor: Crepe, initialNodes: ReadonlySet<ChildNode> | undefined): Promise<void> => {
+    try {
+      await editor.destroy();
+    } catch {
+      if (initialNodes !== undefined) removePartialVisualRoot(initialNodes);
+    }
+  };
+
   const leaveCurrentVisual = async (): Promise<void> => {
     const editor = visualEditor;
+    const rootSnapshot = visualRootSnapshot;
     const wasDirty = visualDirty;
     const serialized = visualSerialized;
     visualEditor = undefined;
+    visualRootSnapshot = undefined;
     visualDirty = false;
     visualSerialized = "";
 
@@ -94,7 +97,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         options.onDocumentChange(markdown);
       }
     }
-    await destroyEditor(editor);
+    await destroyEditor(editor, rootSnapshot);
   };
 
   const leaveToSource = (id: number): Promise<void> =>
@@ -162,6 +165,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         const initialNodes = new Set<ChildNode>(Array.from(options.visualRoot.childNodes));
         const [{ Crepe }, { prosePluginsCtx }, { Plugin }] = modules;
         let editor: Crepe;
+        let ready = false;
         try {
           editor = new Crepe({ root: options.visualRoot, defaultValue: visualSourceSnapshot });
           editor.editor.config((ctx) => {
@@ -170,7 +174,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
                 new Plugin({
                   view: () => ({
                     update: (view, previous) => {
-                      if (view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
+                      if (!ready || !current(id) || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
                       visualDirty = true;
                       const markdown = editor.getMarkdown();
                       visualSerialized = markdown;
@@ -194,6 +198,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         }
 
         visualEditor = editor;
+        visualRootSnapshot = initialNodes;
         visualDirty = false;
         visualSerialized = visualSourceSnapshot;
         try {
@@ -202,6 +207,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           // Milkdown can remain OnCreate here, where destroy() does not settle.
           if (visualEditor === editor) {
             visualEditor = undefined;
+            visualRootSnapshot = undefined;
             visualDirty = false;
             visualSerialized = "";
           }
@@ -210,12 +216,13 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           return;
         }
 
-        if (!current(id) || options.source.value !== visualSourceSnapshot) {
+        if (!current(id) || visualEditor !== editor || options.source.value !== visualSourceSnapshot) {
           await leaveCurrentVisual();
           if (current(id)) setMode("source");
           return;
         }
 
+        ready = true;
         setMode("visual");
       });
     });

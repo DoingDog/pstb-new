@@ -31,6 +31,7 @@ const crepe = vi.hoisted(() => {
 
   const state = {
     failCreate: false,
+    failDestroy: false,
     createWait: undefined as Promise<void> | undefined,
     destroyWait: undefined as Promise<void> | undefined,
     onCreate: undefined as (() => void) | undefined,
@@ -71,15 +72,16 @@ const crepe = vi.hoisted(() => {
     }
 
     async create(): Promise<void> {
+      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
       state.onCreate?.();
       if (state.createWait !== undefined) await state.createWait;
       if (state.failCreate) throw new Error("Crepe failed to initialize");
-      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
     }
 
     async destroy(): Promise<void> {
       this.destroyed = true;
       if (state.destroyWait !== undefined) await state.destroyWait;
+      if (state.failDestroy) throw new Error("Crepe failed to clean up");
       this.root.removeChild(this.rootNode);
     }
 
@@ -163,6 +165,7 @@ function fixture() {
 
 beforeEach(() => {
   crepe.state.failCreate = false;
+  crepe.state.failDestroy = false;
   crepe.state.createWait = undefined;
   crepe.state.destroyWait = undefined;
   crepe.state.onCreate = undefined;
@@ -308,8 +311,23 @@ describe("createMarkdownModes", () => {
     expect(onModeChange).toHaveBeenLastCalledWith("visual");
   });
 
+  it("ignores document updates emitted while Crepe is creating", async () => {
+    const { source, onDocumentChange, onVisualError, modes } = fixture();
+    const exact = source.value;
+    crepe.state.failCreate = true;
+    crepe.state.onCreate = () => {
+      crepe.state.instances[0]!.documentChanged("# initialization noise\n");
+    };
+
+    await modes.enterVisual();
+
+    expect(source.value).toBe(exact);
+    expect(onDocumentChange).not.toHaveBeenCalled();
+    expect(onVisualError).toHaveBeenCalledTimes(1);
+  });
+
   it("settles a failed initialization without destroying an OnCreate editor", async () => {
-    const { source, visualRoot, onModeChange, onVisualError, modes } = fixture();
+    const { source, visualRoot, onDocumentChange, onModeChange, onVisualError, modes } = fixture();
     const preservedRootNode = {} as Node;
     const editedDuringInitialization = "# source edit during initialization\n";
     visualRoot.appendChild(preservedRootNode);
@@ -317,6 +335,7 @@ describe("createMarkdownModes", () => {
     crepe.state.destroyWait = new Promise<void>(() => {});
     crepe.state.onCreate = () => {
       source.value = editedDuringInitialization;
+      crepe.state.instances[0]!.documentChanged("# initialization noise\n");
     };
 
     const outcome = await Promise.race([
@@ -326,6 +345,7 @@ describe("createMarkdownModes", () => {
 
     expect(outcome).toBe("settled");
     expect(source.value).toBe(editedDuringInitialization);
+    expect(onDocumentChange).not.toHaveBeenCalled();
     expect(crepe.state.instances[0]!.destroyed).toBe(false);
     expect(visualRoot.childNodes).toEqual([preservedRootNode]);
     expect(onModeChange).toHaveBeenLastCalledWith("source");
@@ -391,6 +411,26 @@ describe("createMarkdownModes", () => {
     await pendingPreview;
 
     expect(onPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes only completed editor nodes after destroy rejects", async () => {
+    const { visualRoot, modes } = fixture();
+    const applicationNode = {} as Node;
+    visualRoot.appendChild(applicationNode);
+
+    await modes.enterVisual();
+    crepe.state.failDestroy = true;
+    await modes.enterSource();
+
+    expect(crepe.state.instances[0]!.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([applicationNode]);
+
+    crepe.state.failDestroy = false;
+    await modes.enterVisual();
+
+    expect(crepe.state.instances).toHaveLength(2);
+    expect(visualRoot.childNodes[0]).toBe(applicationNode);
+    expect(visualRoot.childNodes).toHaveLength(2);
   });
 
   it("waits for visual teardown before mounting a replacement editor", async () => {
