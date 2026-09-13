@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeUtf8,
+  impossibleOpaqueMatch,
   parseStrictJsonObject,
   parseStrictJsonObjectOrEmpty,
   readLimitedBytes,
@@ -30,6 +31,16 @@ const fieldBoundPolicy: StrictJsonParsePolicy = {
     : new PasteError("VALIDATION_FAILED", 422),
   onRetainedLimit: () => new PasteError("BAD_REQUEST", 400),
   topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
+};
+
+const opaqueVersionPolicy: StrictJsonParsePolicy = {
+  ...fieldBoundPolicy,
+  maxRetainedCodeUnits: 1_024,
+  topLevelOpaqueStrings: new Map([["version", {
+    maxCodeUnits: 53,
+    canContinue: () => true,
+    isComplete: () => true,
+  }]]),
 };
 
 function request(body: BodyInit, headers?: HeadersInit): Request {
@@ -107,6 +118,46 @@ function exactLengthWhitespaceBody(bytes: number): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function streamedOpaqueVersionBody(characters: number, tail = '"}', close = true): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number };
+} {
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode('{"version":"');
+  const suffix = encoder.encode(tail);
+  const chunk = new Uint8Array(65_536).fill(0x78);
+  const state = { cancels: 0 };
+  let remaining = characters;
+  let sentPrefix = false;
+  let sentSuffix = false;
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        if (!sentPrefix) {
+          sentPrefix = true;
+          controller.enqueue(prefix);
+          return;
+        }
+        if (remaining > 0) {
+          const value = remaining < chunk.byteLength ? chunk.subarray(0, remaining) : chunk;
+          remaining -= value.byteLength;
+          controller.enqueue(value);
+          return;
+        }
+        if (!sentSuffix) {
+          sentSuffix = true;
+          controller.enqueue(suffix);
+          if (close) controller.close();
+        }
+      },
+      cancel() {
+        state.cancels += 1;
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
 }
 
 function random(seed: number): () => number {
@@ -556,6 +607,58 @@ describe("strict JSON boundary", () => {
     expect(pulls).toBe(1);
     expect(cancelled).toBe(true);
   });
+
+  it("streams opaque values without retaining their wire-sized carrier", async () => {
+    const prefixBytes = new TextEncoder().encode('{"version":"').byteLength;
+    const suffixBytes = new TextEncoder().encode('"}').byteLength;
+    const exactCharacters = wireBodyLimit - prefixBytes - suffixBytes;
+    const exact = streamedOpaqueVersionBody(exactCharacters);
+    const exactRequest = streamedRequest(exact.body, { "content-length": String(wireBodyLimit) });
+
+    await expect(parseStrictJsonObject(exactRequest, new Set(["version"]), opaqueVersionPolicy)).resolves.toEqual({
+      version: impossibleOpaqueMatch,
+    });
+    expect(exact.state.cancels).toBe(0);
+
+    const overflow = streamedOpaqueVersionBody(exactCharacters + 1, '"}', false);
+    const overflowRequest = streamedRequest(overflow.body);
+    await expect(parseStrictJsonObject(overflowRequest, new Set(["version"]), opaqueVersionPolicy)).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: wireBodyLimit },
+    });
+    expect(overflow.state.cancels).toBe(1);
+    expect(overflowRequest.body?.locked).toBe(false);
+
+    const long = "x".repeat(3_300);
+    await expect(parseStrictJsonObject(
+      chunkedUtf8Request(`{"version":"${long}","version":"next"}`),
+      new Set(["version"]),
+      opaqueVersionPolicy,
+    )).rejects.toMatchObject({ code: "VALIDATION_FAILED", status: 422 });
+    await expect(parseStrictJsonObject(
+      chunkedUtf8Request(`{"version":"${long}" trailing`),
+      new Set(["version"]),
+      opaqueVersionPolicy,
+    )).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    await expect(parseStrictJsonObject(
+      chunkedUtf8Request('{"version":"\\u006c\\u0065\\u0067\\u0061\\u0063\\u0079"}'),
+      new Set(["version"]),
+      { ...opaqueVersionPolicy, topLevelOpaqueStringComparisons: new Map([["version", "legacy"]]) },
+    )).resolves.toEqual({ version: "legacy" });
+
+    const invalidUtf8 = streamedRequest(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"version":"${long}`));
+        controller.enqueue(Uint8Array.of(0xc3, 0x28));
+        controller.close();
+      },
+    }));
+    await expect(parseStrictJsonObject(invalidUtf8, new Set(["version"]), opaqueVersionPolicy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+  }, 40_000);
 
   it("discards nested keys of an unknown top-level value", async () => {
     const fields = Array.from({ length: 300_000 }, (_value, index) => `"u${index}":0`).join(",");

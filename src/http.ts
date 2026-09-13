@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
+import { impossibleOpaqueMatch, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
 import { parseMultipartBoundary } from "./multipart";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
@@ -222,6 +222,56 @@ const httpJsonKinds: ReadonlyMap<string, ReadonlySet<StrictJsonKind>> = new Map(
   ["version", new Set<StrictJsonKind>(["string"])],
 ]);
 
+function isLowerHexadecimal(character: string): boolean {
+  return (character >= "0" && character <= "9") || (character >= "a" && character <= "f");
+}
+
+function isPossibleCanonicalVersionPrefix(value: string): boolean {
+  if ("legacy".startsWith(value)) return true;
+  const uuidLength = 36;
+  const uuidCharacters = Math.min(value.length, uuidLength);
+  for (let position = 0; position < uuidCharacters; position += 1) {
+    const character = value[position]!;
+    if (position === 8 || position === 13 || position === 18 || position === 23) {
+      if (character !== "-") return false;
+    } else if (position === 14) {
+      if (character !== "4") return false;
+    } else if (position === 19) {
+      if (!"89ab".includes(character)) return false;
+    } else if (!isLowerHexadecimal(character)) {
+      return false;
+    }
+  }
+  if (value.length <= uuidLength) return true;
+  if (value[uuidLength] !== ".") return false;
+  const counter = value.slice(uuidLength + 1);
+  return (
+    counter === "" ||
+    (/^[1-9]\d*$/.test(counter) &&
+      counter.length <= "9007199254740991".length &&
+      (counter.length < "9007199254740991".length || counter <= "9007199254740991"))
+  );
+}
+
+function isCanonicalVersion(value: string): boolean {
+  if (value === "legacy") return true;
+  const match = /^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([1-9]\d*)$/.exec(value);
+  return match !== null && Number.isSafeInteger(Number(match[2]));
+}
+
+const mutationOpaqueStrings = new Map([
+  ["password", {
+    maxCodeUnits: 128,
+    canContinue: (_prefix: string, next: string) => next >= " " && next <= "~",
+    isComplete: (value: string) => value.length > 0,
+  }],
+  ["version", {
+    maxCodeUnits: 53,
+    canContinue: (prefix: string, next: string) => isPossibleCanonicalVersionPrefix(prefix + next),
+    isComplete: isCanonicalVersion,
+  }],
+]);
+
 const httpJsonPolicy: StrictJsonParsePolicy = {
   maxRetainedCodeUnits: contentBodyLimit + 4_096,
   maxTopLevelKeyCodeUnits: "expiration".length,
@@ -241,6 +291,14 @@ const httpJsonPolicy: StrictJsonParsePolicy = {
   topLevelNumberMaxCodeUnits: new Map([["expiration", 64]]),
   topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
 };
+
+function mutationJsonPolicy(ifMatch: string | undefined): StrictJsonParsePolicy {
+  return {
+    ...httpJsonPolicy,
+    topLevelOpaqueStrings: mutationOpaqueStrings,
+    ...(ifMatch === undefined ? {} : { topLevelOpaqueStringComparisons: new Map([["version", ifMatch]]) }),
+  };
+}
 
 async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
   try {
@@ -426,7 +484,8 @@ async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuf
   return bytes;
 }
 
-type MutationCredentials = { password?: string; version?: string };
+type OpaqueMutationValue = string | typeof impossibleOpaqueMatch;
+type MutationCredentials = { password?: OpaqueMutationValue; version?: OpaqueMutationValue };
 type ContentPatch = MutationCredentials & { content: string };
 
 function jsonMediaType(request: Request): void {
@@ -438,47 +497,50 @@ function jsonMediaType(request: Request): void {
 function parseMutationCredentials(value: Record<string, unknown>): MutationCredentials {
   const result: MutationCredentials = {};
   if (Object.hasOwn(value, "password")) {
-    if (typeof value.password !== "string") throw validationError("password", "Must be a string.");
+    if (typeof value.password !== "string" && value.password !== impossibleOpaqueMatch) {
+      throw validationError("password", "Must be a string.");
+    }
     result.password = value.password;
   }
   if (Object.hasOwn(value, "version")) {
-    if (typeof value.version !== "string") throw validationError("version", "Must be a string.");
+    if (typeof value.version !== "string" && value.version !== impossibleOpaqueMatch) {
+      throw validationError("version", "Must be a string.");
+    }
     result.version = value.version;
   }
   return result;
 }
 
-async function parseContentPatch(request: Request): Promise<ContentPatch> {
+async function parseContentPatch(request: Request, ifMatch: string | undefined): Promise<ContentPatch> {
   jsonMediaType(request);
-  const value = await parseStrictJsonObject(request, new Set(["content", "password", "version"]), httpJsonPolicy);
+  const value = await parseStrictJsonObject(request, new Set(["content", "password", "version"]), mutationJsonPolicy(ifMatch));
   if (typeof value.content !== "string") throw validationError("content", "Must be a string.");
   return { content: value.content, ...parseMutationCredentials(value) };
 }
 
-async function parseDeleteBody(request: Request): Promise<MutationCredentials> {
+async function parseDeleteBody(request: Request, ifMatch: string | undefined): Promise<MutationCredentials> {
   const value = await parseStrictJsonObjectOrEmpty(
     request,
     new Set(["password", "version"]),
     () => jsonMediaType(request),
-    httpJsonPolicy,
+    mutationJsonPolicy(ifMatch),
   );
   return value === undefined ? {} : parseMutationCredentials(value);
 }
 
-function passwordForBodyMutation(request: Request, body: { password?: string }): string | undefined {
+function passwordForBodyMutation(request: Request, body: MutationCredentials): OpaqueMutationValue | undefined {
   const queryOrHeader = queryOrHeaderPassword(request);
   return body.password ?? queryOrHeader;
 }
 
-function mutationVersion(request: Request, body: { version?: string }): string | undefined {
-  const headerVersion = ifMatchVersion(request);
+function mutationVersion(body: MutationCredentials, headerVersion: string | undefined): OpaqueMutationValue | undefined {
   if (body.version !== undefined && headerVersion !== undefined && body.version !== headerVersion) {
     throw new PasteError("AMBIGUOUS_VERSION", 400);
   }
   return body.version ?? headerVersion;
 }
 
-function contentUpdateInput(content: string, password: string | undefined, version: string | undefined): UpdateContentInput {
+function contentUpdateInput(content: string, password: OpaqueMutationValue | undefined, version: OpaqueMutationValue | undefined): UpdateContentInput {
   const input: UpdateContentInput = { content };
   if (password !== undefined) input.password = password;
   if (version !== undefined) input.version = version;
@@ -610,30 +672,33 @@ export function createHttpApp(env: Env): Hono {
 
   app.put("/api/pastes/:id", async (context) => {
     const request = context.req.raw;
+    const version = ifMatchVersion(request);
     const result = await new PasteService(env.PASTE_DB).updateContent(
       context.req.param("id"),
-      contentUpdateInput(await parseTextContent(request), queryOrHeaderPassword(request), ifMatchVersion(request)),
+      contentUpdateInput(await parseTextContent(request), queryOrHeaderPassword(request), version),
     );
     return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
   });
 
   app.patch("/api/pastes/:id", async (context) => {
     const request = context.req.raw;
-    const body = await parseContentPatch(request);
+    const headerVersion = ifMatchVersion(request);
+    const body = await parseContentPatch(request, headerVersion);
     const result = await new PasteService(env.PASTE_DB).updateContent(
       context.req.param("id"),
-      contentUpdateInput(body.content, passwordForBodyMutation(request, body), mutationVersion(request, body)),
+      contentUpdateInput(body.content, passwordForBodyMutation(request, body), mutationVersion(body, headerVersion)),
     );
     return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
   });
 
   app.delete("/api/pastes/:id", async (context) => {
     const request = context.req.raw;
-    const body = await parseDeleteBody(request);
+    const headerVersion = ifMatchVersion(request);
+    const body = await parseDeleteBody(request, headerVersion);
     await new PasteService(env.PASTE_DB).delete(
       context.req.param("id"),
       passwordForBodyMutation(request, body),
-      mutationVersion(request, body),
+      mutationVersion(body, headerVersion),
     );
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   });

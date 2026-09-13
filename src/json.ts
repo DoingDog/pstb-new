@@ -44,10 +44,18 @@ class FlatTextBuffer {
   }
 }
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export const impossibleOpaqueMatch: unique symbol = Symbol("impossible opaque match");
+
+type JsonValue = null | boolean | number | string | typeof impossibleOpaqueMatch | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
 
 export type StrictJsonKind = "array" | "boolean" | "null" | "number" | "object" | "string";
+
+export type StrictJsonOpaqueStringPolicy = {
+  maxCodeUnits: number;
+  canContinue: (prefix: string, next: string) => boolean;
+  isComplete: (value: string) => boolean;
+};
 
 export type StrictJsonParsePolicy = {
   maxRetainedCodeUnits: number;
@@ -59,6 +67,8 @@ export type StrictJsonParsePolicy = {
   onUnexpectedTopLevelKind?: (field: string) => PasteError;
   topLevelNumberMaxCodeUnits?: ReadonlyMap<string, number>;
   topLevelUtf8ByteMax?: ReadonlyMap<string, number>;
+  topLevelOpaqueStrings?: ReadonlyMap<string, StrictJsonOpaqueStringPolicy>;
+  topLevelOpaqueStringComparisons?: ReadonlyMap<string, string>;
 };
 
 type ParserState = "normal" | "string" | "escape" | "unicode" | "number" | "literal";
@@ -209,6 +219,11 @@ class StrictJsonParser {
   #stringTopLevelKeyCandidates: Set<string> | undefined;
   #stringLimit: number | undefined;
   #stringLimitField: string | undefined;
+  #stringOpaque: StrictJsonOpaqueStringPolicy | undefined;
+  #stringOpaqueComparison: string | undefined;
+  #stringOpaqueComparisonMatches = true;
+  #stringOpaqueImpossible = false;
+  #stringOpaquePrefix = "";
   #stringPendingHighSurrogate = false;
   #stringStoredLength = 0;
   #stringUtf8Bytes = 0;
@@ -314,7 +329,8 @@ class StrictJsonParser {
     if (character === '"') {
       const value = this.finishString();
       this.#state = "normal";
-      this.acceptString(value);
+      if (typeof value === "string") this.acceptString(value);
+      else this.acceptValue(value);
     } else if (character === "\\") {
       this.#state = "escape";
     } else {
@@ -638,6 +654,11 @@ class StrictJsonParser {
     this.#stringTopLevelKeyCandidates = undefined;
     this.#stringLimit = undefined;
     this.#stringLimitField = undefined;
+    this.#stringOpaque = undefined;
+    this.#stringOpaqueComparison = undefined;
+    this.#stringOpaqueComparisonMatches = true;
+    this.#stringOpaqueImpossible = false;
+    this.#stringOpaquePrefix = "";
     this.#stringPendingHighSurrogate = false;
     this.#stringStoredLength = 0;
     this.#stringUtf8Bytes = 0;
@@ -659,8 +680,10 @@ class StrictJsonParser {
     }
     if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1 && !this.#stringIsKey && frame.key !== undefined && this.#allowedTopLevelKeys?.has(frame.key)) {
       this.#stringField = frame.key;
-      this.#stringByteLimit = policy.topLevelUtf8ByteMax?.get(frame.key);
-      const limit = policy.topLevelStringMaxCodeUnits.get(frame.key);
+      this.#stringOpaque = policy.topLevelOpaqueStrings?.get(frame.key);
+      this.#stringOpaqueComparison = policy.topLevelOpaqueStringComparisons?.get(frame.key);
+      this.#stringByteLimit = this.#stringOpaque === undefined ? policy.topLevelUtf8ByteMax?.get(frame.key) : undefined;
+      const limit = this.#stringOpaque === undefined ? policy.topLevelStringMaxCodeUnits.get(frame.key) : undefined;
       if (this.#stringByteLimit === undefined && limit !== undefined) {
         this.#stringLimit = limit;
         this.#stringLimitField = frame.key;
@@ -675,6 +698,14 @@ class StrictJsonParser {
       throw this.#policy!.onStringLimit(this.#stringLimitField!);
     }
     if (this.#stringByteLimit !== undefined) this.countStringUtf8Bytes(source, start, end);
+    if (this.#stringOpaqueComparison !== undefined && this.#stringOpaqueComparisonMatches) {
+      for (let position = start; position < end; position += 1) {
+        if (source.charCodeAt(position) !== this.#stringOpaqueComparison.charCodeAt(this.#stringLength + position - start)) {
+          this.#stringOpaqueComparisonMatches = false;
+          break;
+        }
+      }
+    }
     for (const candidate of this.#stringTopLevelKeyCandidates ?? []) {
       for (let position = start; position < end; position += 1) {
         if (source.charCodeAt(position) !== candidate.charCodeAt(this.#stringLength + position - start)) {
@@ -698,6 +729,10 @@ class StrictJsonParser {
       }
     }
     this.#stringLength += length;
+    if (this.#stringOpaque !== undefined) {
+      this.appendOpaqueString(source, start, end);
+      return;
+    }
     if (this.#stringDiscarded) return;
 
     let capturedEnd = end;
@@ -716,9 +751,35 @@ class StrictJsonParser {
     this.#stringStoredLength += capturedEnd - start;
   }
 
-  private finishString(): string {
+  private appendOpaqueString(source: string, start: number, end: number): void {
+    const opaque = this.#stringOpaque!;
+    for (let position = start; position < end; position += 1) {
+      if (this.#stringOpaqueImpossible) return;
+      const next = source[position]!;
+      if (
+        this.#stringOpaquePrefix.length === opaque.maxCodeUnits ||
+        !opaque.canContinue(this.#stringOpaquePrefix, next)
+      ) {
+        this.#stringOpaqueImpossible = true;
+        return;
+      }
+      this.retain(1);
+      this.#stringOpaquePrefix += next;
+    }
+  }
+
+  private finishString(): string | typeof impossibleOpaqueMatch {
     if (this.#stringByteLimit !== undefined && this.#stringPendingHighSurrogate) {
       throw validationError(this.#stringField!, "Must contain only Unicode scalar values.");
+    }
+    if (this.#stringOpaque !== undefined) {
+      const value = this.#stringOpaquePrefix;
+      this.#string.reset();
+      if (this.#stringOpaqueComparison !== undefined) {
+        if (this.#stringLength !== this.#stringOpaqueComparison.length) this.#stringOpaqueComparisonMatches = false;
+        if (this.#stringOpaqueComparisonMatches) return this.#stringOpaqueComparison;
+      }
+      return this.#stringOpaqueImpossible || !this.#stringOpaque.isComplete(value) ? impossibleOpaqueMatch : value;
     }
     const value = this.#string.finish();
     return this.#stringIsKey && this.#stringKeyTooLong

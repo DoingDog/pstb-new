@@ -393,28 +393,59 @@ describe("HTTP slice 1", () => {
     await deletePaste(id);
   });
 
-  it("rejects an overlong PATCH password before loading the paste", async () => {
-    let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(new TextEncoder().encode(`{"content":"new","password":"${"x".repeat(65_536)}"}`));
-      },
-      cancel() {
-        cancelled = true;
-        return Promise.reject(new Error("cancel failed"));
-      },
-    }, { highWaterMark: 0 });
-    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body,
-    }));
+  it("treats impossible current-password JSON values as opaque credentials", async () => {
+    for (const password of [String.fromCharCode(0x1f), "x".repeat(3_300)]) {
+      const protectedId = `http-${crypto.randomUUID()}`;
+      const unprotectedId = `http-${crypto.randomUUID()}`;
+      const createProtected = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "old", password: "right", customId: protectedId, expiration: "permanent" }),
+      });
+      const createUnprotected = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "old", customId: unprotectedId, expiration: "permanent" }),
+      });
+      expect(createProtected.status).toBe(201);
+      expect(createUnprotected.status).toBe(201);
 
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "password" }] } },
-    });
-    expect(cancelled).toBe(true);
+      try {
+        const patchPayload = JSON.stringify({ content: "new", password });
+        expect((await request("/api/pastes/missing", {
+          method: "PATCH", headers: { "content-type": "application/json" }, body: patchPayload,
+        })).status).toBe(404);
+        expect((await request(`/api/pastes/${protectedId}`, {
+          method: "PATCH", headers: { "content-type": "application/json" }, body: patchPayload,
+        })).status).toBe(403);
+        expect((await request(`/api/pastes/${unprotectedId}`, {
+          method: "PATCH", headers: { "content-type": "application/json" }, body: patchPayload,
+        })).status).toBe(200);
+
+        const deletePayload = JSON.stringify({ password });
+        expect((await request("/api/pastes/missing", {
+          method: "DELETE", headers: { "content-type": "application/json" }, body: deletePayload,
+        })).status).toBe(404);
+        expect((await request(`/api/pastes/${protectedId}`, {
+          method: "DELETE", headers: { "content-type": "application/json" }, body: deletePayload,
+        })).status).toBe(403);
+        expect((await request(`/api/pastes/${unprotectedId}`, {
+          method: "DELETE", headers: { "content-type": "application/json" }, body: deletePayload,
+        })).status).toBe(204);
+      } finally {
+        await deletePaste(protectedId);
+        await deletePaste(unprotectedId);
+      }
+    }
+
+    for (const password of [String.fromCharCode(0x1f), "x".repeat(3_300)]) {
+      const response = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "new", password }),
+      });
+      expect(response.status).toBe(422);
+    }
   });
 
   it("rejects noncanonical PATCH payloads and version carriers before mutation", async () => {
@@ -568,30 +599,6 @@ describe("HTTP slice 1", () => {
     await expect(repeated.json()).resolves.toEqual({
       error: { code: "PASTE_NOT_FOUND", message: "The paste was not found." },
     });
-  });
-
-  it("rejects an overlong DELETE password before loading the paste", async () => {
-    let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(new TextEncoder().encode(`{"password":"${"x".repeat(65_536)}"}`));
-      },
-      cancel() {
-        cancelled = true;
-        return Promise.reject(new Error("cancel failed"));
-      },
-    }, { highWaterMark: 0 });
-    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body,
-    }));
-
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "password" }] } },
-    });
-    expect(cancelled).toBe(true);
   });
 
   it("exposes only the canonical mutation method contract for a paste resource", async () => {
@@ -1373,6 +1380,96 @@ describe("HTTP slice 1", () => {
       await expect(correctPassword.json()).resolves.toMatchObject({
         error: { code: "VERSION_CONFLICT", details: { currentVersion: expect.any(String), updatedAt: expect.any(String) } },
       });
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("keeps exact max content bounded while long opaque versions preserve mutation precedence", async () => {
+    const protectedId = `http-${crypto.randomUUID()}`;
+    const unprotectedId = `http-${crypto.randomUUID()}`;
+    const protectedCreate = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", password: "right", customId: protectedId, expiration: "permanent" }),
+    });
+    const unprotectedCreate = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", customId: unprotectedId, expiration: "permanent" }),
+    });
+    expect(protectedCreate.status).toBe(201);
+    expect(unprotectedCreate.status).toBe(201);
+
+    const content = "x".repeat(10_485_760);
+    const version = "x".repeat(3_300);
+    const patch = (id: string, password?: string) => request(`/api/pastes/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content, version, ...(password === undefined ? {} : { password }) }),
+    });
+
+    try {
+      expect((await patch("missing")).status).toBe(404);
+      expect((await patch(unprotectedId)).status).toBe(409);
+      expect((await patch(protectedId, "wrong")).status).toBe(403);
+      expect((await patch(protectedId, "right")).status).toBe(409);
+    } finally {
+      await deletePaste(protectedId);
+      await deletePaste(unprotectedId);
+    }
+  }, 40_000);
+
+  it("compares long body versions to If-Match while streaming decoded JSON", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const created = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", customId: id, expiration: "permanent" }),
+    });
+    expect(created.status).toBe(201);
+
+    const value = "a".repeat(3_300);
+    try {
+      const equal = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "if-match": `"${value}"` },
+        body: JSON.stringify({ content: "new", version: value }),
+      });
+      expect(equal.status).toBe(409);
+
+      const escaped = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "if-match": '"legacy"' },
+        body: '{"content":"new","version":"\\u006c\\u0065\\u0067\\u0061\\u0063\\u0079"}',
+      });
+      expect(escaped.status).toBe(409);
+
+      for (const bodyVersion of [`b${value.slice(1)}`, `${value.slice(0, -1)}b`]) {
+        const response = await request(`/api/pastes/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "if-match": `"${value}"` },
+          body: JSON.stringify({ content: "new", version: bodyVersion }),
+        });
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_VERSION" } });
+      }
+
+      const malformedTail = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "if-match": `"${value}"` },
+        body: `{"content":"new","version":"${value}" trailing`,
+      });
+      expect(malformedTail.status).toBe(400);
+      await expect(malformedTail.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+
+      const malformedHeader = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "if-match": "*" },
+        body: '{"content":',
+      });
+      expect(malformedHeader.status).toBe(400);
+      await expect(malformedHeader.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_VERSION" } });
     } finally {
       await deletePaste(id);
     }

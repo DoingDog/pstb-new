@@ -11,7 +11,7 @@ import type {
   RevisionResource,
 } from "./types";
 import { PasteError } from "./types";
-import { parseStrictJsonObject } from "./json";
+import { impossibleOpaqueMatch, parseStrictJsonObject } from "./json";
 
 const MAX_CONTENT_BYTES = 10_485_760;
 const MAX_RELATIVE_EXPIRATION = Date.parse("9999-12-31T23:59:59.999Z");
@@ -49,15 +49,18 @@ export type CreateInput = {
 
 export type RequestMeta = { country?: string | null };
 
+type OpaqueMatch = string | typeof impossibleOpaqueMatch;
+type CurrentCredential = string | null | typeof impossibleOpaqueMatch;
+
 export type UpdateContentInput = {
   content: string;
-  password?: string | null;
-  version?: string;
+  password?: CurrentCredential;
+  version?: OpaqueMatch;
 };
 
 export type UpdateSettingsInput = {
-  password?: string | null;
-  version?: string;
+  password?: CurrentCredential;
+  version?: OpaqueMatch;
   title?: string;
   format?: "text" | "markdown";
   expiration?: ExpirationInput;
@@ -65,8 +68,8 @@ export type UpdateSettingsInput = {
 };
 
 export type UpdatePasswordInput = {
-  password?: string | null;
-  version?: string;
+  password?: CurrentCredential;
+  version?: OpaqueMatch;
   newPassword: string;
 };
 
@@ -698,7 +701,7 @@ export class PasteService {
     return summary(metadata);
   }
 
-  async loadContent(id: string, password?: string | null): Promise<LoadedPaste> {
+  async loadContent(id: string, password?: CurrentCredential): Promise<LoadedPaste> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) {
       throw validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
     }
@@ -993,7 +996,7 @@ export class PasteService {
     return { changed: true, paste: summary(metadata) };
   }
 
-  async delete(id: string, password?: string | null, version?: string): Promise<void> {
+  async delete(id: string, password?: CurrentCredential, version?: OpaqueMatch): Promise<void> {
     const loaded = await this.loadContent(id, password);
     if (!loaded.legacy) this.assertVersion(loaded.metadata, version);
     else if (version !== undefined && version !== "legacy") {
@@ -1052,7 +1055,7 @@ export class PasteService {
     await this.deleteFive(loaded.summary.id, "consume");
   }
 
-  private assertLegacyVersion(summary: PasteSummary, version: string | undefined): void {
+  private assertLegacyVersion(summary: PasteSummary, version: OpaqueMatch | undefined): void {
     if (version !== undefined && version !== "legacy") {
       throw new PasteError("VERSION_CONFLICT", 409, undefined, { currentVersion: "legacy", updatedAt: summary.updatedAt });
     }
@@ -1152,7 +1155,7 @@ export class PasteService {
     return now;
   }
 
-  private assertVersion(metadata: PasteMetadataV2, version: string | undefined): void {
+  private assertVersion(metadata: PasteMetadataV2, version: OpaqueMatch | undefined): void {
     const currentVersion = `${metadata.generation}.${metadata.versionCounter}`;
     if (version !== undefined && version !== currentVersion) {
       throw new PasteError("VERSION_CONFLICT", 409, undefined, { currentVersion, updatedAt: metadata.updatedAt });
@@ -1267,7 +1270,7 @@ export class PasteService {
     return reconciled;
   }
 
-  private authorize(expected: string | null, supplied: string | null | undefined): void {
+  private authorize(expected: string | null, supplied: CurrentCredential | undefined): void {
     if (expected !== null && supplied !== expected) throw new PasteError("FORBIDDEN", 403);
   }
 
