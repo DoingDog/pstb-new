@@ -6,6 +6,7 @@
 
 修订记录：
 
+* 2026-09-14：同步主规格 F01-F22 修订：`/md/:id`改为 read-only React variant；OperationStatus只显示真实 event timestamp并采用 closed ActionKey；补齐 terminal consumed/source-choice、delete root feedback、credential URL exceptions与 exact pinned `use-mobile` source/pruned skeleton要求。
 * 2026-09-13：用 pinned shadcn/ui `new-york-v4/sidebar-11` 与 React 19.3.0 取代 handwritten DOM/CSS workbench；将 desktop lifecycle rail改为 Sidebar、320 px navigation改为 upstream Sheet；加入 hidden question-mark help、四类 persistent operation status和 action内联反馈；删除 visible explanatory copy、sample data、generic dashboard patterns及旧 `src/client/styles.css` ownership。
 
 ## 1．设计概念：Document Workbench
@@ -22,7 +23,7 @@
 * `shadcn@4.21.0`只 materialize source；
 * React `19.3.0`、React DOM `19.3.0`、Vite `8.3.0`。
 
-保留 block的 SidebarProvider、SidebarInset、SidebarTrigger、SidebarRail、Breadcrumb、Separator、Collapsible与 mobile Sheet composition。所有 sample paths、files、change badges和 links必须删除。只使用主规格第4.2节列出的官方 primitives。
+保留 block的 SidebarProvider、SidebarInset、SidebarTrigger、SidebarRail、Breadcrumb、Separator、Collapsible与 mobile Sheet composition。`sidebar.tsx`只依赖 pinned `apps/v4/registry/new-york-v4/hooks/use-mobile.tsx`；删除未使用的 `SidebarMenuSkeleton`及其 `Skeleton` import/export，不 materialize `skeleton.tsx`。所有 sample paths、files、change badges和 links必须删除。只使用主规格第4.2节列出的 official source set，并对每个实际 copied/adapted file执行同节 provenance与 notice checks。
 
 ## 2．Visual tokens
 
@@ -123,7 +124,9 @@ History在 desktop使用15rem revision list和剩余 detail区域。diff每行�
 
 Password和 application error仍使用相同 SidebarInset/header proportions，但只有实际 field、action、error和适用 status。不得用 generic illustration、empty-state slogan或 marketing copy填充空间。
 
-Consumed page是独立 local-only composition。Sidebar不实例化 ordinary server destinations；只列 View与可用 local actions。Consumed是允许直接显示的 document state；其 distributed limitation只在相邻 HelpTrigger。
+Consumed page是独立 local-only composition。Sidebar不实例化 ordinary server destinations；只列 View与 copy、wrap、raw/source toggle、safe preview、exact UTF-8 download、top-level Blob HTML和 create-new local actions。autosync或 explicit reload收到 `viewOnce:true`时，先移除 ordinary controls/URLs/status hooks，再呈现结果；ordering不确定时在同一 local-only composition中提供 current与 consumed response两个 exact source选择，不能恢复 server action。Consumed是允许直接显示的 document state；其 distributed limitation只在相邻 HelpTrigger。
+
+`/md/:id`使用独立 read-only React composition和同一 pinned shell/primitives。它显示 server-produced safe article，并提供 local copy、download和 source/preview toggle；不显示 ordinary modes、representation links、Autosave/Autosync或 server controls，也不发 prefetch、API或第二次 content read。
 
 ## 5．Mobile and 320 CSS px
 
@@ -152,7 +155,7 @@ Tabs可以在自己的 list内横向滚动，但 page不能横向滚动。action
 
 | Need | Official source | Product adaptation |
 |---|---|---|
-| Workbench shell | Sidebar、Sheet、Breadcrumb、Separator、Collapsible | real modes、metadata、actions；mobile off-canvas |
+| Workbench shell | Sidebar、Sheet、Breadcrumb、Separator、Collapsible | real modes、metadata、actions；mobile off-canvas；`/md`只使用 read-only subset |
 | Modes与 history detail | Tabs | automatic activation、roving focus、single React state owner |
 | Forms | Field、Label、Input、Textarea、Button | visible labels、inline validation、no explanatory paragraph |
 | Context help | Tooltip + Button | controlled hover/focus/click/touch `HelpTrigger`，`?` glyph |
@@ -183,9 +186,9 @@ validation/error直接靠近 control显示，并提供明确 recovery action。�
 
 ordinary paste的 OperationStatus是一个平整区域，由 Separator与四个 records构成：Autosave、Autosync、Network、Last action。desktop单行四列；中等宽度2×2；320 px可2×2或单列，以不截断 state/action为准。
 
-每个 record显示 Label、localized current state和主规格定义的 event timestamp。没有 relative countdown、spinner-only state或每秒更新。Autosave与Autosync不能合并成一个 Sync badge。Network不把 HTTP error称为 offline。Last action不显示 password、body或 protected URL。
+每个 record显示 Label、localized current state，并且只在主规格为当前 state定义的 exact event timestamp存在时显示 `<time>`。initial Autosave clean、initial Autosync waiting和 Last action idle没有 timestamp；不得以 load/current time补齐。Autosync unchanged显示 `checkedAt`，remote-applied显示 `appliedAt`，其余 transition显示本次 `stateChangedAt`，因此 success后 failure显示 failure time。Autosave remote/reload clean不生成 `confirmedAt`。没有 relative countdown、spinner-only state或每秒更新。Autosave与Autosync不能合并成一个 Sync badge。Network不把 HTTP error称为 offline。Last action不显示 password、body或 protected URL。
 
-state change通过一个 polite live region增量宣布。视觉状态使用文字加 icon，再辅以颜色。pending/success/failure同时更新 originating Button和 Last action；结果保持到下一次同 action或明确 page transition，不在数秒后消失。
+state change通过一个 polite live region增量宣布。视觉状态使用文字加 icon，再辅以颜色。只有主规格 closed `ActionKey`中的 request或 fallible browser operation同时更新 originating Button和 Last action；结果保持到下一次同 key或明确 page transition，不在数秒后消失。HelpTrigger、Sidebar、mode/tab、locale/theme、password reveal、wrap、raw/source等 pure state toggles和无法在 origin document观察结果的 navigation不产生 pending/success/failure。delete 204在清除 sensitive references并 `history.replaceState`到 `/`后，把 query-independent success保留在 root Last action；refresh不 replay。
 
 ## 9．Motion
 
@@ -203,7 +206,9 @@ state change通过一个 polite live region增量宣布。视觉状态使用文�
 
 Theme只有 system、light和dark document-local状态，不写 storage。系统变更与 override规则按主规格17.12。theme不得改变 user `/html/:id` representation。
 
-React以 normal text children或 controlled value显示 source、title、snapshot和 diff。只有 fixed micromark renderer output进入 trusted safe-Markdown boundary。active HTML只通过 direct route或 consumed page Blob navigation，不 iframe、不 preview card、不 sanitizer替代。
+React以 normal text children或 controlled value显示 source、title、snapshot和 diff。只有 fixed micromark renderer output进入 trusted safe-Markdown boundary；`/md/:id`的 wrapper也由 read-only React branch生成，server只提供 inert exact source与 safe fragment。active HTML只通过 direct route或 consumed page Blob navigation，不 iframe、不 preview card、不 sanitizer替代。
+
+protected representation anchor `href`、明确复制的 representation link和 current location是 plaintext query password的仅有 URL-transport exceptions。bootstrap links始终 credential-free；visible text、status、inert data、unrelated attributes、application-authored logs和 errors不得包含 password或 protected URL。允许的 URL request仍可能进入主规格第9.3节所列 infrastructure logs。
 
 ## 11．Accessibility and browser acceptance
 
@@ -218,11 +223,11 @@ React以 normal text children或 controlled value显示 source、title、snapsho
 
 ## 12．Visual acceptance gates
 
-1. `FE01`：create、paste、password和 application error的 visible DOM均由 React `createRoot`产生；server shell没有旧 workbench markup。
+1. `FE01`：create、paste、password、application error和 read-only `/md`的 visible DOM均由 React `createRoot`产生；server shell没有旧 workbench或 Markdown wrapper markup；`/md`没有 ordinary controllers。
 2. `FE04`：old `src/client/app.ts`、`src/client/styles.css`、imperative visible binders和 unintegrated tabs candidate均未保留。
 3. `FE05`：source provenance exact；Sidebar没有 sample data；320 px使用 Sheet且 editor full width；无 dashboard/card/gradient/glass/external-font pattern。
 4. `FE06`：关闭 HelpTrigger时无 explanation、warning、limitation、storage/encoding/limit prose；keyboard、pointer和 touch均可打开与关闭 help。
-5. `FE07`：Autosave、Autosync、Network、Last action各自常驻，state与 timestamp semantics和主规格一致。
-6. `FE08`：Button与 status同步显示 persistent outcome；operation feedback没有 Dialog、toast、snackbar、`alert()`或额外 request。
+5. `FE07`：Autosave、Autosync、Network、Last action各自常驻；fresh clean/waiting/idle无 fabricated timestamp，后续 state选择主规格规定的 event time，failure不显示旧 success time。
+6. `FE08`：closed ActionKey operation的 Button与 status同步显示 persistent outcome；pure toggles与不可观测 navigation不改 Last action；operation feedback没有 Dialog、toast、snackbar、`alert()`或额外 request。
 7. `FE09`：en/zh-CN、system/light/dark、reduced motion、44 px、focus、WCAG 2.2 AA、320 px和 browser matrix全部通过。
-8. `FE10`：每个 adapted/materialized source有 provenance comment，`THIRD_PARTY_NOTICES.md`包含主规格要求的 notices和 licenses。
+8. `FE10`：每个实际 adapted/materialized source及 pinned `use-mobile.tsx`有 exact provenance；`SidebarMenuSkeleton`/`skeleton.tsx`不存在；`THIRD_PARTY_NOTICES.md`只枚举 resulting source set并包含主规格要求的 notices/licenses。

@@ -6,6 +6,7 @@
 
 修订记录：
 
+* 2026-09-14：落实 React/sync spec review round 1 的 F01-F22：删除 repeated-candidate 自动应用；补齐 terminal view-once、exact active deadline、local mutation failure、page-level mutation arbitration、history request invalidation、staged derived-surface apply、credential replacement、status timestamp、delete handoff与 `/md/:id` React ownership；补齐 `/read` ETag、bootstrap shape、pinned `use-mobile` source及 requirement traceability。既定 shadcn commit、Cloudflare non-push结论和所有未受影响的冻结 contract不变。
 * 2026-09-13：根据用户补充要求和四份 2026-09-13 研究报告，将可见 application UI 全部改为 React 19.3.0 与固定的 shadcn/ui `new-york-v4/sidebar-11` 来源，改用 Vite 8.3.0 静态 client build；加入普通 paste 受控页的顺序轮询、strong response ETag、eventual-consistency rollback guard、常驻 operation status、hidden help 和相应 release gates；明确废止原 handwritten DOM/CSS workbench 与未集成 tabs candidate。未在本记录点名的 backend、KV、password、view-once、active HTML、MCP 和 `/ip-trace` 冻结决定保持不变。
 
 ## 1．决策优先级与术语
@@ -48,9 +49,9 @@
 
 Worker 使用一个 ES module entry，导出 `export default { fetch }`。binding 只通过 `env.PASTE_DB` 取得。Cloudflare 对 module Worker、compatibility date、bundle 和运行限制的依据见[基础研究](../../research/2026-09-12-cloudflare-pastebin-foundations.md#1-cloudflare-worker-runtime-and-deployment)。
 
-HTTP 路由继续使用 `hono@4`。`hono/html` 只负责最小 application document shell、inert bootstrap/source nodes 和 `/md/:id` 的 safe Markdown document wrapper，不再生成 create、paste、password 或 application error 的可见 workbench markup。Markdown 服务端渲染继续使用 `micromark@4.0.2` 和 `micromark-extension-gfm@3`；visual editor 固定使用 `@milkdown/crepe@7.22.1`；unified line diff 使用 `diff@8.0.2` 的 `diffLines`；MCP 使用稳定的 `@modelcontextprotocol/server@2`。这些 backend 和 content dependencies 的既有 lockfile 解析结果保持不变，只有下列明确列出的 frontend pins 和共享 `zod` pin 可以变更。
+HTTP 路由继续使用 `hono@4`。`hono/html` 只负责最小 application document shell与 inert bootstrap/source/preview nodes，不再生成 create、paste、password、application error或 `/md/:id` wrapper的可见 markup。Markdown 服务端渲染继续使用 `micromark@4.0.2` 和 `micromark-extension-gfm@3`；visual editor 固定使用 `@milkdown/crepe@7.22.1`；unified line diff 使用 `diff@8.0.2` 的 `diffLines`；MCP 使用稳定的 `@modelcontextprotocol/server@2`。这些 backend 和 content dependencies 的既有 lockfile 解析结果保持不变，只有下列明确列出的 frontend pins 和共享 `zod` pin 可以变更。
 
-可见 application UI使用 React `createRoot`，server不提供可 hydrate的 visible controls。Vite 8.3.0 产生 external hashed ESM/CSS assets 和 manifest，Wrangler static assets 只承载这些构建产物，不是业务存储，也不改变唯一业务 binding `PASTE_DB`。初始 application bundle 包含 React shell 和所需 shadcn primitives；Crepe、browser micromark/GFM renderer 和 diff worker 继续分别 lazy load。`/raw`、`/html`、`/md`、`/file` 和 `/ip-trace` 不加载 React autosync controller。
+可见 application UI使用 React `createRoot`，server不提供可 hydrate的 visible controls。Vite 8.3.0 产生 external hashed ESM/CSS assets 和 manifest，Wrangler static assets 只承载这些构建产物，不是业务存储，也不改变唯一业务 binding `PASTE_DB`。初始 application bundle 包含 React shell 和所需 shadcn primitives；Crepe、browser micromark/GFM renderer 和 diff worker 继续分别 lazy load。`/md/:id`加载 read-only React shell，但不 import或启动 autosync、autosave、history、settings或 mutation controller；`/raw`、`/html`、`/file` 和 `/ip-trace`保持 non-React representation。
 
 shadcn/ui source identity 固定如下，不能用 live registry output 替换 pin：
 
@@ -98,15 +99,16 @@ shadcn/ui source identity 固定如下，不能用 live registry output 替换 p
 | `src/index.ts` | ES module entry；先分流 `/mcp`，其余交给 Hono；注入 `env`。 |
 | `src/http.ts` | 注册 canonical HTTP routes、解析 media type 与 conditional headers、调用 paste service、映射 HTTP response 和 error。 |
 | `src/pastes.ts` | ID、password、expiration、version、KV key grammar、legacy migration、history ring、read、mutation 和 delete 的全部领域规则。不得从其他模块直接访问 `PASTE_DB`。 |
-| `src/render.ts` | 只拥有 application shell、React mount node、safe bootstrap/source serialization、optional inert initial safe-Markdown template、application headers、safe `/md` wrapper与 representation helpers；不拥有 React页面 controls。 |
+| `src/render.ts` | 只拥有 application shell、React mount node、safe bootstrap/source serialization、optional inert initial safe-Markdown template、application headers与 representation helpers；`/md/:id`也只由它生成 inert transport，不拥有任何可见 wrapper或 control。 |
 | `src/mcp.ts` | 每个请求创建 `McpServer`，注册八个 tools，并把 paste service 结果映射为 MCP result。 |
 | `index.html` | Vite build entry，只含 root和 `src/client/main.tsx` module reference，不含 product copy或 bootstrap。production build完成后不部署或提供 emitted `index.html`；runtime document只能由 `src/render.ts`生成，`/index.html`仍不成为 route。 |
 | `components.json` | shadcn materialization配置，style固定 `new-york-v4`、TSX和本地 aliases；它不替代 commit provenance pin，也不在 build时访问 registry。 |
 | `src/i18n.ts`、`src/source-data.ts` | 分别保留 dictionary/locale/date helpers与 exact UTF-8/base64 codec；React imports它们，不复制实现。 |
-| `src/client/main.tsx` | 在 mount前一次性解析 validated discriminated bootstrap、提取 exact source与 optional server-produced safe preview、读取当前 URL password，然后调用 `createRoot`；page identity变化依赖 full navigation。 |
-| `src/client/App.tsx` | 按 `create`、`paste`、`password`、`error` bootstrap variant选择唯一可见 React page tree；ordinary与 consumed paste是结构不同的 branch。 |
+| `src/client/main.tsx` | 在 mount前一次性解析 validated discriminated bootstrap、提取 exact source与 optional server-produced safe preview、读取当前 URL password，然后调用 `createRoot`；除 delete成功的 root handoff外，page identity变化依赖 full navigation。 |
+| `src/client/App.tsx` | 按 `create`、`paste`、`markdown`、`password`、`error` bootstrap variant选择唯一可见 React page tree；ordinary、consumed与 read-only `/md`是结构不同的 branch。 |
 | `src/client/components/app-sidebar.tsx` | 从 pinned `sidebar-11` 改造的 Document Workbench sidebar；只呈现真实 document modes、metadata 与操作，不保留 sample file tree。 |
-| `src/client/components/ui/{sidebar,sheet,breadcrumb,collapsible,dialog,tooltip,tabs,field,label,input,textarea,button,separator}.tsx` | 从同一 pinned registry materialize 的唯一官方 primitive source。未列出的 shadcn block/component 不得加入；内部 Radix composition 可保留这些 source 必需的 helper。 |
+| `src/client/components/ui/{sidebar,sheet,breadcrumb,collapsible,dialog,tooltip,tabs,field,label,input,textarea,button,separator}.tsx` | 从同一 pinned registry materialize 的唯一官方 primitive source。`sidebar.tsx`删除未使用的 `SidebarMenuSkeleton` export及其 `Skeleton` import，因此不 materialize `skeleton.tsx`。未列出的 shadcn block/component 不得加入；内部 Radix composition 可保留这些 source 必需的 helper。 |
+| `src/client/hooks/use-mobile.tsx` | `sidebar.tsx`唯一允许的 product hook dependency，exact source为 pinned commit中的 `apps/v4/registry/new-york-v4/hooks/use-mobile.tsx`；只负责 mobile media query。 |
 | `src/client/components/{HelpTrigger,OperationStatus}.tsx` | 分别实现统一 question-mark help interaction，以及 autosave、autosync、network、last-action 四栏常驻状态。 |
 | `src/client/api.ts` | same-origin fetch、password carrier、response/error decoding、AbortSignal 和 response ETag 的薄 adapter；不复制 server validation 或 domain rules。 |
 | `src/client/autosave.ts` | 从旧 `src/client/app.ts` 抽出的已验证 autosave controller 与 Markdown autosave adapter，不含 DOM 查询或可见 markup。 |
@@ -120,7 +122,7 @@ shadcn/ui source identity 固定如下，不能用 live registry output 替换 p
 | `scripts/build.mjs`、`src/generated/assets.ts` | build orchestration 和 server-consumed Vite manifest projection；只暴露实际 hashed application JS/CSS/worker assets，不重新 bundle client。 |
 | `THIRD_PARTY_NOTICES.md` | 包含 copied shadcn/ui 的 MIT copyright/permission notice、direct MIT/ISC notices，以及 Apache-2.0 licenses和 dependency 自带 NOTICE。无需 in-product credit。 |
 
-每个由 block直接改造的 source file顶部保留一行 provenance comment，格式固定为 `Derived from shadcn-ui/ui new-york-v4/sidebar-11 at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.`。未修改的 registry primitive可用同格式把 `sidebar-11`替换成其 exact registry component name。`THIRD_PARTY_NOTICES.md`还必须列出两个 original block paths、materialized component names、`shadcn@4.21.0`、pin commit，以及以 `Copyright (c) 2023 shadcn`开头的完整 shadcn MIT text；随后包含 direct MIT/ISC notices、Apache-2.0 texts和 distributed package自带 NOTICE。build不读取 network验证 provenance。
+每个由 block直接改造的 source file顶部保留一行 provenance comment，格式固定为 `Derived from shadcn-ui/ui new-york-v4/sidebar-11 at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.`。未修改的 registry primitive用同格式把 `sidebar-11`替换成其 exact registry component name。`src/client/hooks/use-mobile.tsx`的 comment固定为 `Derived from shadcn-ui/ui apps/v4/registry/new-york-v4/hooks/use-mobile.tsx at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.`。`THIRD_PARTY_NOTICES.md`必须枚举两个 original block paths、每个实际 materialized primitive path、该 hook path、`shadcn@4.21.0`和 pin commit，并明确不把已 pruning的 `skeleton.tsx`列入 copied source set；随后包含以 `Copyright (c) 2023 shadcn`开头的完整 shadcn MIT text、direct MIT/ISC notices、Apache-2.0 texts和 distributed package自带 NOTICE。source-integrity test按这组 exact paths与本地 bytes检查，不联网验证 provenance。
 
 `src/client/app.ts`中已验证的 headless logic必须按上表抽出；之后删除该旧 entry及其中 handwritten visible markup、document-wide selector binding、duplicate locale/theme ownership和 placeholder panel handlers。`src/client/styles.css`删除，由 `index.css`和 component utilities完全取代。Vite emitted `index.html`在 manifest projection完成后从 deploy tree移除，Wrangler assets目录只含 hashed assets。未集成的 `98ed2d1` -> `2da846c` -> `bfaac29` imperative tabs candidate 明确 superseded，不得 merge、cherry-pick 或移植 controller；只把它的 user-observable keyboard cases改写成 React Tabs tests。
 
@@ -467,15 +469,17 @@ percent encoding 只是 URL wire representation，不是 password encryption。�
 * `GET /:id` 发现 protected paste 且 query 中完全没有 `password` 时，返回 200 password input page，不返回 title、format、expiry、content 或 protected 状态之外的信息。
 * input form `POST /:id` 使用 `application/x-www-form-urlencoded`，server 校验 body password。成功返回 HTTP 302，`Location` 是同一路径，仅带一个由 `URLSearchParams` 生成的 `?password=...`。该 POST 不消费 view-once。
 * form password missing/wrong 返回 403 并重新渲染带 inline error 的 input page。
-* `GET /:id?password=`、duplicate query 或 wrong query 返回 403，不退回无错误 input page。
-* protected `/raw/:id`、`/html/:id`、`/md/:id`、`/file/:id` 只接受唯一 query password。缺失或 wrong 都直接返回 403 plaintext error，不渲染 shell，不接受 header 替代。
-* unprotected paste 在确认 query 中至多有一个 `password` 后忽略其值；duplicate query 仍返回 400。
+* `GET /:id?password=`或一个 present wrong query返回403，不退回无错误 input page。任何 duplicate `password` query在既定 route、ID、coherent-read与 logical-expiry顺序后、credential comparison前统一返回 `400 AMBIGUOUS_PASSWORD`，无论 paste是否 protected，也不把其中任一值当作 credential。
+* protected `/raw/:id`、`/html/:id`、`/md/:id`、`/file/:id` 只接受唯一 query password。缺失或一个 present wrong/empty credential都直接返回403 plaintext error，不接受 header替代；`/md/:id`成功时仍返回 React shell。
+* unprotected paste 在确认 query 中至多有一个 `password` 后忽略其值；duplicate query同样返回 `400 AMBIGUOUS_PASSWORD`。API和所有 direct representation使用完全相同的 duplicate-query rule。
 
 query password 有意进入 address bar、browser history、复制 URL、Cloudflare/request log，并可能进入 `Referer`。`/html/:id` 不发送 `Referrer-Policy` 来改变用户已接受的顶层 HTML 行为。
 
-### 9.4 Password 修改后的 document 状态
+### 9.4 Password 修改与 credential replacement后的 document 状态
 
-password set/change成功后，page-scoped `pastePassword`立即改为新值，并用 `history.replaceState`将当前 application page的唯一 password query更新为新值。clear成功后 state设为 null并移除该 query。不得 reload。其他 representation links每次从当前 state/closure新建，不缓存旧 URL。
+password set/change的 mutation 200已同时证明旧 credential完成授权和新 credential已提交，因此 page-scoped `pastePassword`立即改为新值，并用共享的 unique-query helper执行 `history.replaceState`。clear成功后 state设为 null并移除 query。helper先删除当前 URL中的全部 `password` entries，再在值非 null时用 `URLSearchParams.set`写入恰好一个 encoded value，同时保留其他 query与 fragment；不得 reload。其他 representation links每次从 committed state/closure新建，不缓存旧 URL。
+
+任何 browser request因403要求 replacement credential时，输入值先只保存在 `pendingCredential`，不得修改 `pastePassword`、当前 URL或已渲染 links。Retry只对该次 request使用 pending value。只有同一 pending value随后得到经过完整 authorization的200或304，才把它 commit为 `pastePassword`并调用上述 helper；server authorization先于304 validator comparison，因此304也是有效证明。再次403或其他未授权结果不改变 URL。该规则统一适用于 autosync、autosave、explicit reload、history、settings、password、delete和其他 mutation recovery。literal `+`、`%`、`&`、`#`、`?`及 leading/trailing U+0020都只经 URL/URLSearchParams编码，不做手工拼接。
 
 ## 10．View-once 状态序列
 
@@ -565,7 +569,7 @@ KV read-then-delete 不建立全球 ownership。两个 region 可能都读到 st
 | `/:id` | `POST` | `application/x-www-form-urlencoded`，唯一 `password` | 302 到同路径的 encoded query | 否 | 403 missing/wrong；404；415；422 duplicate/invalid form |
 | `/raw/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 exact source，`text/plain; charset=utf-8` | GET | 400、403、404、503 |
 | `/html/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 exact source，`text/html; charset=utf-8` | GET | 400、403、404、503；错误 body 是 `text/plain` |
-| `/md/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 server-produced safe Markdown document，`text/html; charset=utf-8`；不 mount React controlled sync | GET | 400、403、404、500 render failure、503 |
+| `/md/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 minimal read-only React shell，内含 server-produced inert safe Markdown fragment与 exact source；`text/html; charset=utf-8`；不 mount controlled sync或发第二次 content read | GET | 400、403、404、500 render failure、503 |
 | `/file/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 exact UTF-8 bytes，`application/octet-stream` | GET | 400、403、404、503 |
 | `/assets/<hash>.*` | `GET`,`HEAD` | 无 | 200 Vite static asset | 否 | 404、405 |
 | `/api` | 无 | 任意 | 无 | 否 | 404，确认 legacy create 已删除 |
@@ -660,10 +664,10 @@ JSON body：
 | `/api/pastes/:id/password` | `DELETE` JSON | 200 `MutationResult` | 否 | clear；已 unprotected 时 no-op |
 | `/api/pastes/:id/history` | `GET`,`HEAD` | 200 `HistoryList` | 否 | view-once 返回 409 |
 | `/api/pastes/:id/history/:revision` | `GET`,`HEAD` | 200 `RevisionResource` | 否 | view-once 返回 409 |
-| `/api/pastes/:id/read` | `GET`,`HEAD` | 200 `PasteResource` | GET 是 | GET credential 取 query/header；等价于 resource GET |
-| `/api/pastes/:id/read` | `POST` JSON `{password?}` | 200 `PasteResource` | 是 | body credential；view-once 会消费 |
+| `/api/pastes/:id/read` | `GET`,`HEAD` | 200 `PasteResource`，`ETag: "<version>"`；HEAD无 body | GET 是 | GET credential取 query/header；读取语义等价于 resource GET，但不接受 conditional sync validator |
+| `/api/pastes/:id/read` | `POST` JSON `{password?}` | 200 `PasteResource`，`ETag: "<version>"` | 是 | body credential；view-once会消费 |
 
-API OPTIONS 返回 204 和准确 `Allow`，不发送 `Access-Control-Allow-Origin`。`/api/pastes/:id` 的 `Allow` 为 `GET,HEAD,PUT,PATCH,DELETE,OPTIONS`；OPTIONS 无 body、无 ETag，带 `Cache-Control: no-store`。create、mutation、settings 和 history success resource继续带 `ETag: "<version>"`；resource GET/HEAD 改用 12.1 的 strong response ETag。mutation 的普通失败状态为 400、403、404、409、413、415、422、503。
+API OPTIONS 返回 204 和准确 `Allow`，不发送 `Access-Control-Allow-Origin`。`/api/pastes/:id` 的 `Allow` 为 `GET,HEAD,PUT,PATCH,DELETE,OPTIONS`；OPTIONS 无 body、无 ETag，带 `Cache-Control: no-store`。create、mutation、settings、history和 `GET|HEAD|POST /api/pastes/:id/read`的每个成功 resource response都带当前 `ETag: "<version>"`。只有 `GET|HEAD /api/pastes/:id`使用12.1的 strong representation validator并处理 `If-None-Match`；`/read`不得复用该 validator或返回304。mutation 的普通失败状态为 400、403、404、409、413、415、422、503。
 
 ### 12.6 Settings 与 password API body
 
@@ -773,12 +777,12 @@ password DELETE strict schema 为 `{password?,version?}`，语义等同 `newPass
 
 | 响应类别 | 必须 headers |
 |---|---|
-| API JSON | `Content-Type: application/json; charset=utf-8`、`Cache-Control: no-store`；create/mutation/settings/history resource 使用 version ETag，`GET|HEAD /api/pastes/:id` 使用 strong response ETag |
+| API JSON | `Content-Type: application/json; charset=utf-8`、`Cache-Control: no-store`；create/mutation/settings/history及 `GET|HEAD|POST /api/pastes/:id/read`使用 current-version ETag，只有 `GET|HEAD /api/pastes/:id`使用 strong response ETag |
 | API 304 | `ETag`、`Cache-Control: no-store`；无 body、`Content-Type`、`Content-Length` 或 trailers |
 | React application shell | `Content-Type: text/html; charset=utf-8`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、本规格 16.5 的 CSP |
 | raw | `Content-Type: text/plain; charset=utf-8`、`Cache-Control: no-store` |
 | user HTML | `Content-Type: text/html; charset=utf-8`、`Cache-Control: no-store`；不得发送 CSP、sandbox header 或 application `Referrer-Policy` |
-| Markdown HTML | 与 React application shell 相同的安全 headers，但 body 为 server-produced safe document且不 mount autosync |
+| Markdown React shell | 与 React application shell相同的安全 headers；body含 read-only `/md` bootstrap、exact source和 server-produced inert safe fragment，不 mount autosync或其他 server controller |
 | file | `Content-Type: application/octet-stream`、`Content-Disposition`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff` |
 | 302 password redirect | `Location`、`Cache-Control: no-store` |
 | 405 | 对应 media type、`Allow`、`Cache-Control: no-store` |
@@ -1019,7 +1023,7 @@ micromark(source, {
 
 只有该固定 renderer 的 output 可传给 `hono/html` 的 `raw()`，或进入 React 中专门接收该 renderer output 的 trusted safe-Markdown boundary。stored source、title、error、history、diff 和 bootstrap data 绝不能进入该 boundary。client preview 使用相同版本、相同 options 和 extensions，server response 仍是最终 canonical preview。
 
-`/md/:id` 是 server-produced application-owned wrapper，不是 user HTML。它包含 semantic article、title、copy/open source actions和 safe rendered fragment，不执行 source 内的 HTML/script，不 mount React workbench或 controlled sync。
+`/md/:id` 是 direct server route，不是 client-router route，也不是 user HTML。server在 view-once delete前的一次 coherent content read中准备 exact source、title和 fixed-renderer safe fragment，并把三者作为 inert transport放入最小 shell；React read-only `markdown` branch使用 pinned shell/primitives渲染 semantic article、title和 local copy、UTF-8 download、source/preview toggle。它不执行 source内 HTML/script，不 prefetch，不调用 API或 representation route，不启动 autosave、autosync、history、settings、delete或第二次 content read。view-once与 ordinary `/md` response使用同一 local-only client能力。
 
 ### 16.4 Milkdown canonical source rule
 
@@ -1040,13 +1044,13 @@ Markdown source 是唯一 canonical content。Crepe 的 Markdown -> AST/ProseMir
 default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
 ```
 
-`'unsafe-inline'` 只为 Milkdown runtime style attributes，不允许 inline script。React shell只含 mount node、`application/json` bootstrap node、paste page的 `application/octet-stream` exact-source node，以及 `format=markdown` paste可选的 inert `<template id="initial-markdown-preview">`；该 template内容只可来自第16.3节固定 server renderer。bootstrap把 `<`、`>`、`&`、U+2028、U+2029 escape。source和 preview在 mount前按第4.2节提取并移除 inert nodes；password永不进入 bootstrap。所有 executable script和CSS来自 Vite生成的 hashed same-origin assets。该 CSP不应用于 `/html/:id`。
+`'unsafe-inline'` 只为 Milkdown runtime style attributes，不允许 inline script。React shell只含 mount node、`application/json` bootstrap node，以及需要 source的 `paste`或`markdown` page的一个 `application/octet-stream` exact-source node。ordinary `paste`的 `paste.format="markdown"`、`consumed:true`的 `hasInitialMarkdownPreview=true`和 `markdown` branch的 literal `hasInitialMarkdownPreview=true`各要求恰好一个 inert `<template id="initial-markdown-preview">`；对应 false/text值要求零个，其他 page也要求零个。template内容只可来自第16.3节固定 server renderer。bootstrap把 `<`、`>`、`&`、U+2028、U+2029 escape。source和 preview在 mount前按第4.2节提取、验证 cardinality并移除 inert nodes；password永不进入 bootstrap。所有 executable script和CSS来自 Vite生成的 hashed same-origin assets。该 CSP不应用于 `/html/:id`。
 
 ## 17．React frontend、autosave 与 autosync
 
 ### 17.1 Application shell、bootstrap 与 React ownership
 
-`/` 和 `/:id` 的 create、ordinary paste、consumed paste、password 与 application error response只返回第 16.5 节的最小 shell。React 19.3.0 在唯一 mount node 上调用一次 `createRoot`，拥有全部可见 application UI；server 不预先生成可见 form、tabs、rail、dialog、error panel 或 workbench。`/raw`、`/html`、`/md`、`/file` 和 `/ip-trace` 仍按各自 representation contract直接返回，不进入这个 root。
+`/`、`/:id`和 `/md/:id`的 create、ordinary paste、consumed paste、read-only Markdown、password与 application error response只返回第16.5节的最小 shell。React 19.3.0在唯一 mount node上调用一次 `createRoot`，拥有这些 routes的全部可见 application UI；server不预先生成可见 form、article wrapper、tabs、rail、dialog、error panel或 workbench。`/raw`、`/html`、`/file`和 `/ip-trace`仍按各自 representation contract直接返回，不进入这个 root。
 
 bootstrap 是下列 validated discriminated union，不允许 unknown field。protected password不得出现在任何 variant：
 
@@ -1054,12 +1058,26 @@ bootstrap 是下列 validated discriminated union，不允许 unknown field。pr
 type AppBootstrap =
   | { page: "create"; locale: "en" | "zh-CN" }
   | { page: "paste"; locale: "en" | "zh-CN"; paste: PasteSummary; consumed: false }
-  | { page: "paste"; locale: "en" | "zh-CN"; consumed: true }
+  | {
+      page: "paste"
+      locale: "en" | "zh-CN"
+      consumed: true
+      hasInitialMarkdownPreview: boolean
+    }
+  | {
+      page: "markdown"
+      locale: "en" | "zh-CN"
+      id: string
+      title: string
+      hasInitialMarkdownPreview: true
+    }
   | { page: "password"; locale: "en" | "zh-CN"; errorCode: null | "FORBIDDEN" }
   | { page: "error"; locale: "en" | "zh-CN"; status: number; errorCode: string }
 ```
 
-ordinary 和 consumed paste各有且仅有一个 inert exact-source node；`format=markdown`时另有一个由 fixed server renderer产生的 inert initial preview template，其他 page不得有。`main.tsx`必须先读取、验证和移除 bootstrap/source/preview nodes，再创建 React root；decoded exact source直接成为 page-scoped canonical state，不能先经过 textarea DOM value，以免 CR/CRLF normalization。React只把 extracted preview交给第16.3节 trusted boundary，因此 Markdown default view不 eager-load browser renderer。bootstrap、source或 preview shape失败时，React只渲染本地化 application error，不猜测 source。full navigation是 page identity boundary；不使用 React Router、history route interception、link prefetch或 StrictMode side effect作为 production行为。controller setup必须可被 test中的 mount -> unmount -> mount安全重复，不产生重复 timer、listener或 request。
+ordinary、consumed和 `markdown` page各有且仅有一个 inert exact-source node。ordinary page仅在 `paste.format="markdown"`时要求恰好一个 fixed-renderer preview；consumed page仅在 `hasInitialMarkdownPreview=true`时要求恰好一个；`markdown` page的 literal true要求恰好一个。对应 false/text值以及 create/password/error都要求零个。missing、duplicate或 unexpected source/preview node均为 shape failure。`main.tsx`必须先读取、验证 cardinality并移除 bootstrap/source/preview nodes，再创建 React root；decoded exact source直接成为 page-scoped canonical state，不能先经过 textarea DOM value，以免 CR/CRLF normalization。React只把 extracted preview交给第16.3节 trusted boundary，因此初始 Markdown preview不 eager-load browser renderer。bootstrap、source或 preview shape失败时，React只渲染本地化 application error，不猜测 source。
+
+full navigation通常是 page identity boundary；唯一例外是第17.5节 delete成功后在同一 React root内切换到 create branch并用 `history.replaceState`清理地址。不得引入 React Router、通用 history route interception、link prefetch或 StrictMode side effect作为 production行为。controller setup必须可被 test中的 mount -> unmount -> mount安全重复，不产生重复 timer、listener或 request。`markdown` branch不 import或构造任何 ordinary page controller。
 
 ### 17.2 Pinned template adaptation
 
@@ -1096,39 +1114,43 @@ submit 使用 `POST /api/pastes` JSON；接近 wire envelope或大量 JSON escap
 
 Password page由 React渲染一个 labeled password Input、reveal Button、Submit和 inline error；bootstrap不包含 title、format、expiry、content或其他 protected summary。form仍按 9.3 POST，成功302 full navigation。Application error page由 safe `status`和 normalized `errorCode`在本地 dictionary中渲染，不显示 stack或未清理 server message。
 
-`consumed:true` 使用独立 React branch，不先构造 ordinary tree再隐藏。它只持有已返回 exact source和 local copy、wrap、raw text toggle、safe Markdown preview、UTF-8 download、top-level Blob HTML navigation及 create-new action；不创建 network hook、server representation URL、Edit、History、Settings、delete或 autosync controller。已消费状态可以作为 document metadata直接显示，distributed semantics只在 HelpTrigger。
+`consumed:true` 使用独立 React branch，不先构造 ordinary tree再隐藏。它只持有已返回 exact source和 local copy、wrap、raw/source toggle、按 `hasInitialMarkdownPreview`验证的 safe Markdown preview、exact UTF-8 download、top-level `text/html` Blob navigation及 create-new action。copy、wrap、toggle、download和 Blob navigation全部从同一 exact in-memory source派生。它不创建 API/network hook、server representation URL、Edit、History、Settings、delete、page mutation coordinator、autosave或 autosync controller；ordinary branch若转入 consumed，必须先 dispose这些对象并从 DOM移除所有 server controls/URLs。除已经请求或新请求的 hashed browser renderer chunk外，进入 consumed后 business request计数必须保持为零。已消费状态可以作为 document metadata直接显示，distributed semantics只在 HelpTrigger。
 
 ### 17.5 Ordinary paste modes 与 canonical state
 
 `format=text`默认 plain read view；`format=markdown`默认使用 server shell的 inert safe preview template，不因 default mode eager-load browser micromark。template缺失或 shape无效是 application error，不以 eager import掩盖。ordinary paste提供 View、Edit、Markdown、History、Settings，以及 raw、HTML、md、file、copy、wrap、create new和 delete actions。任意 format都能进入 plaintext edit、Markdown visual/source/preview和全部 representations；format只选择 default view。
 
-plaintext editor使用 system monospace、保留 whitespace、默认 `spellcheck=false`，read和 editor都支持 Wrap/Unwrap。copy优先使用 `navigator.clipboard.writeText`，失败后使用隐藏 textarea selection fallback；成功或失败更新 action button和 OperationStatus，不移除 action。delete由官方 Dialog确认后调用 canonical DELETE；成功后清除 React state、controller、source、candidate和 password reference，再 full navigate `/`。
+plaintext editor使用 system monospace、保留 whitespace、默认 `spellcheck=false`，read和 editor都支持 Wrap/Unwrap。copy优先使用 `navigator.clipboard.writeText`，失败后使用隐藏 textarea selection fallback；成功或失败更新 action button和 OperationStatus，不移除 action。delete由官方 Dialog确认后调用 canonical DELETE。204后先使 mutation/history/sync tokens失效并 dispose controllers与 editor，再清除 accepted/draft/source/candidate/history/password及所有派生 URL reference；随后在同一 React root切换到 create branch，执行 `history.replaceState(null, "", "/")`，并把 Last action设为不含 ID、password或原 query的 localized delete success。该 in-memory feedback保持到下一次 action或 document refresh；不写 query、history state payload或 storage，因此 hard refresh不会 replay。不得用 full navigation丢失该反馈。
 
-protected page启动时从唯一 query读取 password到 page-scoped closure/state。所有 request显式携带当前值，所有 representation URL在 render/click时重新生成；不得写 cookie、`localStorage`、`sessionStorage`、IndexedDB或 `window.name`，也不得缓存含旧 password的 URL。
+protected page启动时从唯一 query读取 password到 page-scoped closure/state。所有 request显式携带当前 committed值，所有 representation URL在 render/click时重新生成；不得写 cookie、`localStorage`、`sessionStorage`、IndexedDB或 `window.name`，也不得缓存含旧 password的 URL。password-bearing representation anchor `href`、用户明确复制出的 representation link和当前 browser location是仅有的 URL-transport exceptions。bootstrap links保持 credential-free；visible text、status、inert bootstrap/source、其他 attributes、application-authored diagnostic logs和 errors不得包含 password或 protected URL。允许的 URL request仍可能按第9.3节进入 Cloudflare/request log，这是冻结的 transport风险，不得由 client另行复制记录。literal metacharacter password仍按第9.2与9.4节序列化。
 
-React canonical state至少包含 `acceptedSource`、`draft`、`PasteSummary`、`version`、`contentRevision`、`updatedAt`、latest accepted response ETag和 `localGeneration`。remote apply是一个 batched state transition，必须同时：
+React canonical state至少包含 `acceptedSource`、`draft`、`PasteSummary`、`version`、`contentRevision`、`updatedAt`、latest accepted response ETag、`acceptedApplyGeneration`和 `localGeneration`。autosave controller中的 `lastSavedContent`是同一 canonical `acceptedSource`的别名，不允许成为独立 baseline；每次 accepted source变化必须在一个 reducer transition中同时改变两者。
 
-* 更新 `acceptedSource`、summary、version/contentRevision/updatedAt markers、accepted read ETag、read view与 plaintext editor baseline，并通过 controller的 non-input reload path同步 `draft=lastSavedContent`、清除 save timer/in-flight、设 autosave=`clean`而不更新 confirmedAt；
-* 更新 Markdown exact source snapshot、source mode、visual document与 preview；若 Crepe已 mount，使用不会发出 user document-change callback的 programmatic reset，无法可靠 suppress时先 destroy再以新 source创建，并以 `remoteApplying` guard阻止 autosave；
-* 更新已选择 diff的 current side并按 size policy重新计算；
-* 同 generation但 `contentRevision`改变时把 history list标为 stale，保留仍可识别的 selected immutable snapshot并在下一次 History access重新 fetch descriptors；不同 generation时清空全部 history snapshot/list/diff；仅 settings marker变化时保留 history；
-* 不调用 `AutosaveController.input`，不建立 history，不发送 save，不改变 `localGeneration`。
+remote apply使用 staged protocol，canonical exact source和每个当前 mounted derived surface必须形成一个 observable generation：
+
+1. 先把 validated `RemoteSnapshot`放入非公开 staging state，分配新的 `targetApplyGeneration`，保持旧 accepted markers、version与 read ETag未发布。若 request token、baseline、clean predicate或 active predicate在 commit前失效，丢弃 staging state。
+2. 为 read view、plaintext editor、Markdown source snapshot和 draft准备同一 exact target source。对每个 mounted derived surface，只允许两种同步结果：已经切换到 target，或在同一 commit中清空旧内容并放入绑定 `targetApplyGeneration`的 localized retryable fallback。旧 preview、Crepe document或 diff不得在新 canonical markers旁继续显示为 current。
+3. Markdown renderer lazy import或 recompute失败时清空 preview host，显示 source仍可用的 Preview retry；retry只可写入仍等于当前 `acceptedApplyGeneration`的结果。Crepe programmatic reset失败时立即 destroy；同 source recreate也失败时清空 visual host并显示 exact source Textarea与 Retry visual，所有 callback携带 generation且 `remoteApplying`阻止 input/autosave。diff worker失败时立即清空旧 diff，只保留 immutable selected snapshot和新 current source，显示 Retry diff；late worker result按 generation丢弃。
+4. 只有第2步对全部 mounted surfaces得到 updated或 synchronously-invalidated结果后，才用一个 React commit发布 `acceptedSource`、`lastSavedContent`、summary、version/contentRevision/updatedAt、accepted read ETag、read/plain baseline和 `acceptedApplyGeneration`，并令 `draft=acceptedSource`、清除 save timer/in-flight、设 autosave=`clean`。remote transition不调用 `AutosaveController.input`，不建立 history、不发送 save、不改变 `localGeneration`，也不更新 local-save `confirmedAt`。
+5. 同 generation但 `contentRevision`改变时把 history list标为 stale，保留仍可识别的 selected immutable snapshot并在下一次 History access重新 fetch descriptors；不同 generation时清空全部 history snapshot/list/diff；仅 settings marker变化时保留 settled history data。无论哪种情况，第17.10节都会先 invalidate仍 in-flight的 history responses。
+
+如果连 synchronous invalidation都无法建立，保持旧 observable generation、accepted markers和 ETag不变，进入 sync `error`并提供 Retry apply；不得部分发布 target。
 
 ### 17.6 Autosave state machine
 
-状态为 `clean`、`waiting`、`saving`、`saved`、`error`、`conflict`。`clean` 只表示初始加载后尚无本地修改，`saved` 表示最近一次 save 已确认且当前 draft 与确认内容相同；两者都没有 pending timer。数据至少包括 `draft`、`lastSavedContent`、`version`、`lastInputAt`、`dueAt`、`inFlightContent`、`dirtyWhileSaving`。
+状态为 `clean`、`waiting`、`saving`、`saved`、`error`、`conflict`。`clean`表示当前 source是任一 server-loaded或 accepted baseline且没有 pending local source work，包括 initial load、explicit reload、remote apply及用户把未发送 draft改回 accepted source；`saved`只表示最近一次 local source save的200已确认且当前 draft与该 acknowledged source相同。两者都没有 pending timer。remote transition不得生成或修改 local-save `confirmedAt`。数据至少包括 `draft`、作为 `acceptedSource`别名的 `lastSavedContent`、`version`、`lastInputAt`、`dueAt`、`inFlightContent`、`dirtyWhileSaving`。
 
-1. 初始 state 为 `clean`，`draft=lastSavedContent=server content`，`version=server version`，`inFlightContent=null`，`dirtyWhileSaving=false`。
-2. 普通 `input` 更新 draft，并设置 `lastInputAt=now`、`dueAt=now+1000`。无 in-flight 时进入 `waiting`，并用一个指向该 `dueAt` 的 timer 替换旧 timer；有 in-flight 时保持 `saving`，按第 5 步处理。
-3. `compositionstart` 取消 pending timer 但保留 draft；composition 期间的 intermediate input 更新 textarea 与 draft，但不更新 autosave的 `lastInputAt`、`dueAt` 或发送 request。`compositionend` 把最终 value当作一次普通 input，并从该时刻完整等待 1,000 ms。
-4. timer到 `dueAt`时先清除自身。若 draft等于 `lastSavedContent`，不发送并进入 `saved`。否则仅当 `inFlightContent=null`且 state不是 `conflict`时，先记录一次 local mutation dispatch：增加 `localGeneration`、设置 `activeUntil=dispatchAt+300_000`并 abort/invalidate任何 sync；再 capture该 generation，设置 `inFlightContent=draft`、`dirtyWhileSaving=false`、state=`saving`，然后发一个 `PATCH /api/pastes/:id`。body固定含 `{content:inFlightContent,version}`；仅当 `pastePassword !== null`时再加入 `password:pastePassword`。
+1. 初始 state 为 `clean`，`draft=lastSavedContent=acceptedSource=server content`，`version=server version`，`inFlightContent=null`，`dirtyWhileSaving=false`。initial clean没有 `confirmedAt`或 fabricated status timestamp。
+2. 非 composition中的真实 user `input`以该 DOM event的 monotonic timestamp调用第17.7节 `recordUserActivity`，更新 draft，并设置 `lastInputAt=eventAt`、`dueAt=eventAt+1000`。无 in-flight 时进入 `waiting`，并用一个指向该 `dueAt` 的 timer替换旧 timer；有 in-flight时保持 `saving`，按第5步处理。programmatic reset不得走此路径。
+3. `compositionstart`取消 pending autosave timer但保留 draft，并增加用于失效 sync的 `localGeneration`，但不移动 `activeUntil`。composition期间的 intermediate input更新 textarea与 draft并失效 sync，不更新 autosave的 `lastInputAt`、`dueAt`或 active deadline，也不发送 request。`compositionend`仅在提交最终 value时以该 event timestamp记录一次 user activity，并从该时刻完整等待1,000 ms。
+4. timer到 `dueAt`时先清除自身。若 draft等于 `acceptedSource`，不发送并进入 `clean`。否则仅当 page-level mutation slot为空且 state不是 `conflict`时，增加 `localGeneration`、abort/invalidate sync，再 capture coordinator token与当前 accepted baseline，设置 `inFlightContent=draft`、`dirtyWhileSaving=false`、state=`saving`，然后发一个 `PATCH /api/pastes/:id`。dispatch、Retry和 network retry本身都不得修改 `activeUntil`。body固定含 `{content:inFlightContent,version}`；仅当本次 request使用的 committed或 pending credential非 null时再加入 `password`。slot非空时只标记第17.10节的一个 coalesced source intent，不并发 dispatch。
 5. 任一时刻最多一个 autosave request。saving时的新 input仍按第 2 步更新 draft、`lastInputAt`与 `dueAt`，设置 `dirtyWhileSaving=true`，但不启动可在 in-flight完成前发送的第二个 request。
-6. 收到 200 changed或 no-op时，先把 `lastSavedContent`设为该 request的 `inFlightContent`，把 `version`、summary、`contentRevision`和 `updatedAt`设为 response值，再清空 in-flight标记。若 `localGeneration`仍等于 request capture且 draft等于 `lastSavedContent`，清除 timer并进入 `saved`；否则进入 `waiting`，在 `max(0, dueAt-now)` 后发送唯一一次 coalesced latest draft。mutation response的 version ETag不是 read response ETag，因此成功后清除 cached response ETag，下一次 autosync发送 unconditional GET。
-7. network、413、422、500或503清空 autosave in-flight与 timer，但保留 draft、`lastSavedContent`和 version，进入 `error`，不自动 retry。用户可 Retry、copy或download draft；下一次新 input按第 2 步重新进入 `waiting`。
-8. 403同样保留全部 draft state，OperationStatus显示 `password-required`，并提供 inline password re-entry。新 password只改 page state；用户显式 Retry后才立即发送 latest draft。
-9. 404保留 draft，停止 autosave和 autosync，提供 copy/download，不尝试重建同 ID。
-10. 409 version conflict保留 draft并进入 `conflict`，同时暂停 autosync。显示 Reload server、Overwrite with draft、Copy draft。Reload必须经 destructive Dialog确认后调用同一 resource GET；成功用 server content和 markers替换全部 canonical surfaces。Overwrite立即发送 latest draft并明确省略 version执行 last-write-wins。没有自动 merge。
-11. `error`或403状态的显式 Retry仅在无 in-flight且 draft与 `lastSavedContent`不同时立即发送 latest draft，使用当前 password与 version。Retry失败仍按对应规则。
+6. 收到 validated changed或 no-op 200且 coordinator token仍 authoritative时，在一个 transition中把 `acceptedSource`及其 `lastSavedContent`别名设为该 request的 `inFlightContent`，把 accepted generation/version、summary、`contentRevision`和 `updatedAt`设为 response值，再清空 in-flight标记并更新 `confirmedAt`。request期间发生的新 edit只留在独立 `draft`中。若 draft等于新的 `acceptedSource`，清除 timer并进入 `saved`；否则进入 `waiting`，在 page-level slot释放后按 `max(0, dueAt-now)`发送唯一一次 coalesced latest draft。mutation response的 version ETag不是 read response ETag，因此成功后清除 cached response ETag，下一次 autosync发送 unconditional GET。changed、no-op和 edit-during-save三种 acknowledgement后，equal poll都必须以新的 accepted source和 markers比较，不能读取旧 baseline。
+7. network、413、422、500或503释放 autosave对 page-level slot的占用并清除 autosave timer，但保留 draft、accepted source和 version，进入 `error`，不自动 retry。明确未应用的结果可由用户 Retry、copy或download draft；network rejection、503及任何 `mutationMayHaveApplied=true`按第17.10节先 reconciliation，不能 blind retry。下一次真实 user input仍按第2步更新 draft、`lastInputAt`和 `dueAt`，但 `reconciliation-required`解除前不得 dispatch。
+8. 403同样保留全部 draft state，OperationStatus显示 `password-required`，并提供 inline password re-entry。输入只写 `pendingCredential`；显式 Retry使用它，但只有该 retry获得 authorized 200时才按第9.4节更新 committed credential、当前 URL及所有新建 links。wrong replacement不改变三者。
+9. 404/expired保留 exact draft，进入 terminal local-only missing state，dispose autosave、autosync、history和 mutation coordinator，移除所有 server controls与 representation URLs，只提供 local copy/download、full refresh和 create new；不尝试重建同 ID。
+10. 409 version conflict保留 draft并进入 `conflict`，同时暂停 autosync。显示 Reload server、Overwrite with draft、Copy draft。Reload必须经 destructive Dialog确认，并只能在 mutation slot为空时调用同一 resource GET；ordinary成功通过第17.5节 staged protocol替换 canonical surfaces。若 response含 `viewOnce:true`，先按第17.8节进入 terminal consumed local-only state，再处理本地 source choice，绝不恢复 mutation。Overwrite占用同一 slot，发送 latest draft并明确省略 version执行 last-write-wins。没有自动 merge。
+11. `error`或403状态的显式 Retry仅在 mutation slot为空且 draft与 accepted source不同时立即发送 latest draft，使用本次 committed或 pending credential与当前 version；它增加 ordering generation但不延长 active deadline。Retry失败仍按对应规则。
 12. draft与 `lastSavedContent`不同或 mutation in-flight时注册 `beforeunload` warning；相同且无 in-flight时移除。
 13. server exact no-op detection是最终依据，client comparison只用于避免 request。React只实例化一个 controller并在 unmount dispose，不在 reducer/effect中实现第二套 transitions。
 
@@ -1138,20 +1160,22 @@ React canonical state至少包含 `acceptedSource`、`draft`、`PasteSummary`、
 
 clock使用可注入的 monotonic milliseconds；production用 `performance.now()`计算 deadline和 due time，用 `Date`只生成显示时间。定义：
 
-* `activeUntil`：application完成初始 load/refresh时设为 `loadAt + 300_000`；之后每个真实 local edit event和每次 local mutation dispatch都直接设为该 activity time `+ 300_000`；不 round、不加 grace period；
-* `localGeneration`：初始为0；每个 source input、Crepe document-change、`compositionstart`、IME intermediate input，以及每个 API mutation dispatch都在 capture request前各加1。API mutation包括 automatic autosave、Retry/Overwrite、settings/password/viewOnce/delete。programmatic remote apply、copy/download和 sync request不增加；
-* `locallyClean`：draft exact等于最后一次 acknowledged source，且没有 composition、autosave timer、autosave/mutation request、queued coalesced save、sync conflict或 remote apply；
-* `syncDueAt`：每次进入 eligible状态或前一次 sync settle时的 monotonic time `+ 3_000`。
+* `activeUntil`：application完成初始 load/refresh时设为 `loadAt + 300_000`。此后只有 `recordUserActivity(activityAt)`可把它设为该真实 event timestamp `+ 300_000`，不 round、不加 grace period；
+* `recordUserActivity`只由非 composition的 source `input`、committed `compositionend`/Crepe user document-change，以及 title、format、expiration、viewOnce、password或其他 settings field的 user `input`/`change` event调用。compositionstart/intermediate IME、programmatic value change、Button click、mutation dispatch、autosave due、Retry/Overwrite/Reload、response settle和 network retry都不得移动 deadline；
+* `localGeneration`：初始为0；每个 source input、Crepe document-change、`compositionstart`、IME intermediate input、settings field change，以及每个 API mutation dispatch都在 capture request前增加。它只失效旧 response，增加它本身不代表 activity也不移动 deadline。programmatic remote apply、copy/download和 sync request不增加；
+* `locallyClean`：draft exact等于 accepted source，且没有 composition、autosave timer、page-level mutation request、queued coalesced source save、unresolved mutation failure、sync conflict或 remote apply；
+* `syncDueAt`：下一次允许检查的 monotonic due time；initial为 `loadAt+3_000`，每次重新进入 eligible或前一次 sync settle时设为对应 instant `+3_000`，无待检查时为 null。
 
-只有 ordinary、未 consumed paste page且 `now < activeUntil`、`locallyClean=true`、browser未 offline时才 eligible。load后不发额外 immediate GET；在初始 clean state安排一次 `loadAt + 3_000`的 timer。initial load或从 local pause、online event、explicit Retry恢复后，普通 timer pending时 autosync state=`waiting`；settle后的3,000 ms timer保留最近 outcome state，candidate verification timer保留 `candidate-observed`；fetch in-flight时=`checking`。local work使其不 eligible时=`paused-local`，offline时=`paused-offline`，deadline到达时=`inactive`。response outcome使用第17.8至17.9节 states。规则固定如下：
+只有 ordinary、未 consumed paste page且 `now < activeUntil`、`locallyClean=true`、browser未 offline时才 eligible。load后不发额外 immediate GET。initial load或从 local pause、online event、Keep current、Retry恢复后，普通 due pending时 autosync state=`waiting`；settle后的 timer保留最近 outcome state；fetch in-flight时=`checking`。local work使其不 eligible时=`paused-local`，offline时=`paused-offline`，deadline到达时=`inactive`。response outcome使用第17.8至17.9节 states。规则固定如下：
 
-1. 每次只存在一个 sync timer和最多一个 sync fetch。timer以 `max(0, syncDueAt-now)`安排，callback先清除自身并重新检查全部 predicate；callback运行晚且 `now >= activeUntil`时不得发 request。
-2. 任一 edit、`compositionstart`、IME input、autosave wait/save、显式 mutation dispatch或 remote apply开始都取消 sync timer。若 sync fetch已开始，调用其 `AbortController.abort()`并立即使 captured request token失效；即使 transport仍 resolve，也不得读取或应用结果。
-3. request capture `{requestToken, localGeneration, accepted marker, activeUntil}`。只有 token仍 current、generation与 baseline未变、仍 locally clean且 active时，response才可进入第 17.8 节比较。
-4. composition、dirty draft、autosave wait/in-flight/coalesced、settings/password/viewOnce/delete mutation、remote apply或 conflict期间不安排 sync。对应工作完成后，仅当再次 eligible才从该 completion time开始新的完整 3,000 ms等待。
-5. sync fetch settle后不在同一 callback立即再发。只有仍 eligible时才设 `syncDueAt=settledAt+3_000`并安排一次。network retry也走这一条，不建立额外 retry/backoff loop。
-6. 到 `activeUntil`时取消 waiting timer；in-flight response在 settle时若 `now >= activeUntil`只可更新 network outcome，不得应用 content或安排下一次。新的 local edit或 mutation activity建立新的 exact 300,000 ms window，待 clean后再完整等待3,000 ms。
-7. polling只调用 `GET /api/pastes/:id`，fetch设 `cache:"no-store"`；有 accepted read ETag时显式发送 `If-None-Match`，无 ETag或需要验证 quarantined candidate时省略。password仍使用现有 unique query carrier。不得调用 status-only、settings-only或新 sync request。
+1. 每个 ordinary page至多有一个 autosync timer和一个 sync fetch。scheduler在 `now < activeUntil`时把唯一 timer设到 `min(syncDueAt ?? activeUntil, activeUntil)`；因此没有 due、处于 local pause/offline/conflict或 fetch in-flight时，仍用同一个 timer守住 exact active deadline。每次 `activeUntil`或 `syncDueAt`改变都替换该 timer。
+2. timer callback先清除自身。若 `now >= activeUntil`，立即设 `inactive`并记录 `stateChangedAt`，清除 ordinary-paste candidate与 conflict/source-choice state，abort并 invalidate in-flight sync，且不发 request、不安排新 timer。若尚未到 deadline但尚未到 `syncDueAt`或不 eligible，只重新 arm同一个 deadline timer；只有 due已到且全部 predicate成立时才 dispatch。
+3. 任一 edit、composition event、autosave wait/save、显式 mutation dispatch或 remote apply开始都取消当前 timer并 abort/invalidate已开始的 sync fetch；随后若仍是 ordinary page且 active，重新 arm仅用于 deadline的同一 timer。即使 transport仍 resolve，retired token也不得读取或应用结果。
+4. request capture `{requestToken, localGeneration, accepted generation/version/contentRevision/source, activeUntil}`，把 `syncDueAt`清为 null，并立即 arm `activeUntil` deadline timer。只有 token仍 current、capture baseline未变、仍 locally clean且 `now < activeUntil`时，response才可进入第17.8节比较。
+5. composition、dirty draft、autosave wait/in-flight/coalesced、settings/password/viewOnce/delete mutation、unresolved mutation outcome、remote apply或 sync conflict期间没有 check due；只保留 deadline timer。对应工作完成后，仅当再次 eligible才从该 completion time建立新的完整3,000 ms due。
+6. sync fetch在 deadline前 settle后不立即再发。仍 eligible时设 `syncDueAt=settledAt+3_000`，然后把唯一 timer设到 `min(syncDueAt,activeUntil)`；due晚于 deadline时，deadline callback只转 inactive。slow settle、online recovery、candidate/conflict action和 Retry都走同一规则，不建立额外 retry/backoff loop。若 settle时已 inactive，retired response不能改变任何 surface或 accepted marker。
+7. 新的真实 user activity可建立新的 exact 300,000 ms window，并按当前 local/online状态重新安排；request dispatch或 Retry不能 reopen已 expired window。
+8. polling只调用 `GET /api/pastes/:id`，fetch设 `cache:"no-store"`；有 accepted read ETag时显式发送 `If-None-Match`，candidate被 dismiss后 Retry的下一次 request明确省略一次 validator。password仍使用现有 unique query carrier。不得调用 status-only、settings-only或新 sync request。
 
 ### 17.8 Remote ordering 与 deterministic candidate rule
 
@@ -1159,59 +1183,136 @@ clock使用可注入的 monotonic milliseconds；production用 `performance.now(
 
 对两个 schema 2 snapshot，只有 generation相同才比较三维 marker `(versionCounter, contentRevision, updatedAt instant)`：
 
-* remote三项都小于等于 baseline且至少一项严格小于，为 `definitely-older`；记录 valid check并把 autosync state设为 `unchanged`，但忽略 response，不替换 accepted ETag、summary或任一 surface；
+* remote三项都小于等于 baseline且至少一项严格小于，为 `definitely-older`；
 * remote三项都大于等于 baseline且至少一项严格大于，为 `definitely-newer`；
 * 三项全相等为 `marker-equal`；
 * 一部分增加而另一部分减少，为 `incomparable`。
 
-不同 generation，以及 legacy snapshot与 baseline不能 exact equality时，均为 `incomparable`。`marker-equal`且 exact source和所有 public summary fields相等时为 unchanged，并把该200 strong ETag保存为 accepted read ETag；source相同的 `definitely-newer`仍应用 summary/marker和 ETag但不重建 editor。source或 public summary有 divergence的 `marker-equal`，以及所有 `incomparable`，执行下列稳定候选规则，不静默 overwrite：
+不同 generation，以及 legacy snapshot与 baseline不能 exact equality时，均为 `incomparable`。自动 source/summary apply的唯一允许分类是 `definitely-newer`；每个 capture仍有效、页面仍 active且 clean的 `definitely-newer` response都必须清除旧 candidate并按第17.5节 staged apply。source相同时仍一次性发布较新的 summary/markers/ETag，但可跳过无变化 editor的 rebuild。`marker-equal`且 exact source和所有 public summary fields相等时为 unchanged，并保存该200 strong ETag。
 
-1. 第一次看到 divergent snapshot时，把完整 identity `{etag,version,contentRevision,updatedAt,source,summary}`保存在 memory quarantine，保持当前 UI，不更新 accepted ETag，把 autosync state设为 `candidate-observed`并更新 checkedAt，然后在 settle后按正常规则等待3,000 ms。
-2. candidate verification request明确省略 `If-None-Match`。只有下一次 eligible、完整等待后的成功200与 quarantined identity逐字段和逐 code unit完全相同，并且 baseline、`localGeneration`和 clean状态均未变，candidate才是 stable repeated remote candidate；此时按第17.5节一次性 remote apply并在 status记录 `remote-applied`。
-3. 第二个成功200若回到 accepted baseline，清除 candidate并记录 unchanged；若是 definitely-newer，清除 candidate并正常 apply；若仍 divergent但 identity不同，进入 non-destructive `sync-conflict`，保留本地 UI和最新 remote candidate，停止自动 sync。
-4. error、abort、local activity、baseline变化或 offline清除 quarantine，之后重新从第一次 observation开始；304不能确认 candidate，因为 verification request不发送 validator。
-5. `sync-conflict`提供 inline Use remote、Keep current和 Retry sync。Use remote只在仍 clean且 generation/baseline未变时应用 retained candidate；Keep current丢弃 candidate并保持 autosync停止，直到下一次 local mutation成功或 full refresh；Retry sync清除 candidate/conflict，只有仍 active和 clean时才从 action时刻完整等待3,000 ms，本身不延长 active window。三个 action都更新 last-action state，不发 status-only request。
-6. 若200 snapshot显示 `viewOnce=true`，该 GET已按第10节在 server consume。`definitely-newer`时立即 remote apply并切到 consumed local-only branch；equal/incomparable divergence不能再次读取确认，立即进入 non-destructive `sync-conflict`并保留 candidate供 Use remote。两种情况都永久 dispose当前 autosync，绝不安排 verification或后续 request。
+对 `definitely-older`、有任一 source/public-summary divergence的 `marker-equal`、所有 `incomparable`和 legacy-divergent response，规则如下：
 
-`definitely-newer`只在 request capture仍有效且页面仍 clean时应用；否则丢弃并等 local work结束后的新 request。304保持全部 canonical state，只更新 check timestamp。该规则不声称提供 CAS、global ordering或绕过 KV最多60秒以上的 cross-location staleness。
+1. 把完整 identity `{etag,version,contentRevision,updatedAt,source,summary}`作为 non-destructive candidate保存在 document memory，保持全部 accepted surface和 accepted ETag不变，记录本次 `checkedAt`，把 autosync设为 `conflict`并停止 check due。candidate相同或重复任意次数都不是 freshness证据，永不自动 apply；candidate变化也只替换 retained candidate，不改变 current surface。
+2. conflict显示 inline Use remote、Keep current和 Retry sync。Use remote是唯一可选择未证明较新 candidate的路径；它只在 candidate仍存在、accepted baseline与 capture相同、页面 active且 locally clean时按第17.5节 staged apply。Keep current只 dismiss该 candidate和 conflict，不修改 accepted baseline、source、markers或 ETag；若仍 eligible，从 action时刻建立普通 conditional check的完整3,000 ms due。Retry sync也 dismiss candidate/conflict，但下一次 due request省略一次 `If-None-Match`；它不移动 `activeUntil`，due不早于 action后3,000 ms。
+3. abort、local source/settings activity、accepted baseline变化、offline或 terminal transition清除 candidate。即使页面一直处于 conflict，第17.7节的唯一 deadline timer也必须在 `activeUntil`精确清除 candidate并转 `inactive`。inactive后 Use remote不可用，Retry不能 reopen window。
+4. Use remote和 Retry sync使用第17.11节 closed `ActionKey`更新 Last action；Keep current是不可失败的 pure state dismissal，不改 Last action。三者都不发 status-only request。304只证明当前 accepted ETag，保持全部 canonical state并更新 `checkedAt`。
+
+任何 content-bearing200一旦验证出 `viewOnce=true`，该 GET已经按第10节删除 server paste。response handler必须先执行 terminal capability transition，再显示任何 ordering/source-choice结果：
+
+1. 立即 invalidate page mutation与 history tokens，abort/dispose autosave、autosync、settings/history/delete和所有 server request hooks，清除 timer/candidate/server URL objects，并从 React tree移除 Edit、History、Settings、Delete及 raw/HTML/md/file等 representation URLs。此 terminal state不可恢复 server mutation能力。
+2. exact-equal response直接保留 current source；`definitely-newer` response仍必须完成 staged remote apply并以它作为 consumed source。`definitely-older`、marker-equal divergent、incomparable或 legacy-divergent response不得自动替换 current source：同时保留 current accepted exact source和本次已消费 response的 exact source于 document memory，默认继续显示 current，并提供纯 local的 Use consumed response与 Keep current选择。选择只切换 local canonical display和派生 surfaces，不发送 request、不重建 server controls。
+3. 该规则同样适用于 autosync和 explicit Reload server的 content-bearing response。ordering不确定、derived-surface retry或 credential状态都不能安排 verification、autosave、autosync、representation navigation或任何后续 business request；允许的唯一网络例外是已缓存或新加载的 hashed renderer asset。
+
+其他 `definitely-newer` response只在 request capture仍有效且页面仍 clean、active时应用；否则丢弃并等真实 user activity建立或维持的 eligible window。该规则不声称提供 CAS、global ordering或绕过 KV最多60秒以上的 cross-location staleness。
 
 ### 17.9 HTTP、offline 与 conflict recovery
 
-sync和其他 browser request共享薄 API adapter及 OperationStatus，不共享 in-flight slot；但任何 content/settings/password mutation pending都会让 sync不 eligible，因此同一 page不会让 sync read与 local mutation重叠。
+sync和其他 browser request共享薄 API adapter及 OperationStatus。所有 local mutation共享第17.10节的唯一 page-level slot；sync read、explicit reload和 history read不占该 slot，但在 slot pending时均禁止 dispatch。任何 mutation dispatch前先 abort/invalidate sync，任何 sync response在 mutation开始后都因 token失效而不能进入 ordering。
 
-* 200：按第17.8节处理；ordinary remote apply或 unchanged后，从 settle重新等待3,000 ms；response为 `viewOnce=true`时按专用规则停止，不能继续 polling。
-* 304：记录 `unchanged`和 check time，从 settle重新等待3,000 ms。
-* 403：清除 timer/candidate，状态为 `forbidden`，停止自动 sync；在现有 inline password Field修正 current page password后，用户选择 Retry sync。若 `now < activeUntil`且 clean，从 action时刻完整等待3,000 ms；Retry sync本身不延长 active window，已经 inactive时须等下一次 local edit/mutation activity。不得弹 password modal。
-* 404：状态为 `not-found`，永久停止当前 page的 autosave和 autosync，保留已加载 source/draft供 copy/download；只允许 full refresh或 create new，不重建 ID。
-* 409：无论 code，状态为 `conflict`，保留本地与已取得 remote data，停止自动 sync；autosave `VERSION_CONFLICT`继续使用第17.6节 actions。resource GET正常不应返回409，测试仍须验证 fail-closed presentation。
-* 503或其他 5xx：状态为 `error`，保留 state和 ETag；在线、active且 clean时没有立即 retry，只按 settle后3,000 ms的唯一 normal timer再试。若已 inactive则停止；Retry sync只重建同样3,000 ms timer。
-* fetch rejection且 `navigator.onLine !== false`：network为 `degraded`，sync为 `error`，规则同503。AbortError且 token已因 local activity失效不是 error，不改变 network状态。
-* `offline` event或 `navigator.onLine === false`：立即 abort/invalidate sync、取消 timer、清除 candidate，network=`offline`、sync=`paused-offline`。`online` event只把 network设为 `online`；仍 active和 clean时从 event time完整等待3,000 ms，否则保持对应 paused/inactive状态。不得在 online event立即 fetch。
+* 200：按第17.8节处理；ordinary definitely-newer apply或 exact unchanged后，从 settle重新等待3,000 ms，但 scheduler仍以 `min(syncDueAt,activeUntil)`守 deadline；任何 `viewOnce=true` response先进入 terminal capability transition，不能继续 polling。
+* 304：记录 `unchanged`和 `checkedAt`，从 settle建立3,000 ms due，但 due晚于 active deadline时只在 deadline转 inactive，不发 request。
+* 403：清除 timer/candidate，状态为 `forbidden`并记录 `stateChangedAt`，停止自动 sync；inline password Field只写 `pendingCredential`。用户选择 Retry sync后，若 `now < activeUntil`且 clean，从 action时刻完整等待3,000 ms，并只对该 request使用 pending value；Retry本身不延长 active window。该 request得到 authorized 200或304后才按第9.4节 commit credential和 URL；再次403不改 URL。已经 inactive时，Retry不得 reopen window。不得弹 password modal。
+* 404：状态为 `not-found`并记录 `stateChangedAt`，永久停止当前 page的 autosave和 autosync，invalidate mutation/history requests，移除 server controls/URLs并保留已加载 source/draft供 copy/download；只允许 full refresh或 create new，不重建 ID。
+* 409：无论 code，状态为 `conflict`并记录 `stateChangedAt`，保留本地与已取得 remote data，停止自动 sync；autosave `VERSION_CONFLICT`继续使用第17.6节 actions。resource GET正常不应返回409，测试仍须验证 fail-closed presentation。
+* 503或其他5xx：状态为 `error`并记录本次 transition的 `stateChangedAt`，保留 state和 ETag；在线、active且 clean时没有立即 retry，只设 settle后3,000 ms due，再由唯一 timer在 `min(syncDueAt,activeUntil)`唤醒。若 due不早于 deadline则只转 inactive；Retry sync同样不能越过或延长 deadline。
+* fetch rejection且 `navigator.onLine !== false`：network为 `degraded`，sync为 `error`，各自记录实际 state change time，规则同503。AbortError且 token已失效不是 error，不改变 network状态。
+* `offline` event或 `navigator.onLine === false`：立即 abort/invalidate sync、清除 candidate和 check due，network=`offline`、sync=`paused-offline`，但保留唯一 active-deadline timer。`online` event只把 network设为 `online`；仍 active和 clean时从 event time建立完整3,000 ms due，否则保持对应 paused/inactive状态。不得在 online event立即 fetch。
 
-local mutation的403、404、409、503和 network行为继续遵守第17.6及对应 Settings规则。所有 retry由现有 operation或一个 Retry action触发，不增加 endpoint，也不通过 modal/toast报告。
+local mutation的所有 outcome统一遵守第17.10节，不再依赖未定义的 Settings规则。所有 retry由现有 operation或一个 inline Retry/Reconcile action触发，不增加 endpoint，也不通过 modal/toast报告。
 
-### 17.10 History、Settings 与 view-once transition
+### 17.10 Page-level mutation、History、local failure 与 view-once transition
+
+#### 17.10.1 唯一 page-level mutation coordinator
+
+ordinary page只有一个 mutation slot，覆盖 content autosave、Retry save、Overwrite、任何 manual source save、title、format、expiration、viewOnce、password set/change/clear和 delete。每个 request在真正 dispatch时取得递增 `mutationToken`，并 capture `{acceptedApplyGeneration,generation,version,contentRevision,acceptedSource}`；每次最多一个 slot为 occupied。explicit mutation Button在 slot occupied时 disabled但保留 field draft；autosave due只保留一个 coalesced latest-source intent，slot释放后仅在 `draft !== acceptedSource`时 dispatch。summary/version/ETag或 `localGeneration`变化而 source未变化绝不能建立 content PATCH。
+
+mutation request不互相 preempt。dispatch前增加 `localGeneration`并 abort/invalidate sync和 affected history request，但不移动 `activeUntil`。只有 unmount、404、terminal consumption、armed view-once或 delete terminal transition可以 abort并 retire occupied token；AbortSignal后仍 resolve的 response按 retired token丢弃。只有 token仍 current、captured baseline未被其他 authoritative transition替换且 strict response已验证时，response才可更新 accepted version/summary/ETag。content 200按第17.6节同时更新 accepted source；metadata-only 200要求 generation/contentRevision与 captured source baseline一致，只更新 summary/version并清除 read ETag。任何 mismatch进入 reconciliation，不能把 new summary markers与 old source拼成 baseline。
+
+slot settle后先处理 authoritative response，再释放 slot。若仍是 ordinary、无 unresolved failure且 source dirty，才 dispatch一个 coalesced source intent；否则在 active且 clean时从 settle建立3,000 ms sync due。controllable-promise tests必须证明 autosave未 settle时 settings/password request不 dispatch，settings/password pending时 autosave最多只 coalesce一次，并且人为 late callback或 retired token即使按反序 settle也不能回退 accepted version、summary、ETag或触发 duplicate PATCH。
+
+#### 17.10.2 History request baseline
 
 History desktop为左 revision list、右 detail；mobile先 list，选择后进入 detail并提供 Back。detail用官方 Tabs显示 Unified diff和 Full snapshot，默认 selected revision -> current diff。list和 snapshot按第11节 lazy load；diff worker返回结构化 lines，React用 text children渲染。loading、empty、403、404、409、503和 corruption有独立 visible operation/error state，但空态 explanation放入 History HelpTrigger，不显示教学段落；失败不清空 current draft。
 
-Settings包含 title、default format、expiration、view-once、password change/clear和 immutable ID。每组单独 mutation，不与 content合并。relative expiration、password transport、view-once后果等解释只在 HelpTrigger。mutation dispatch增加 `localGeneration`、扩展 `activeUntil`、abort/invalidate sync并在 pending期间暂停它；成功更新 summary/version，清除 read ETag，并在 clean时重新等待3,000 ms，不创建 history。
+每个 history list与 snapshot request分别 capture递增 request token及 `{acceptedApplyGeneration,generation,version,contentRevision,acceptedSource}`。remote apply、explicit reload、任何 authoritative mutation acknowledgement、terminal consumption、armed view-once和 delete都 increment history epoch并 abort/invalidate对应 request。response只有 token、epoch和全部 captured baseline仍 exact相等时才可写入；late list不能替换或清空现有 list，late snapshot不能改变 selected revision、snapshot或 diff current side。settled immutable snapshot是否保留仍按第17.5节 generation/contentRevision规则决定；request invalidation不把 stale response当成 empty/error UI。
 
-把 viewOnce开启成功后，立即 dispose autosave和 autosync，清除 sync timer/candidate，结构上切换为独立的 `armed-view-once` local-only branch，移除 Edit、History、Settings和 server delete action；它显示 `viewOnce` metadata但不得标成 consumed，下一次 server content read才 consume的事实只在 HelpTrigger。初始 view-once的 `/:id` GET已经按第10节 consume，直接以 `consumed:true` branch渲染。不得在这两个 branch上启动 sync。
+#### 17.10.3 Content-independent mutation outcome table
+
+Settings包含 title、default format、expiration、view-once、password change/clear和 immutable ID。title、format、expiration、viewOnce及 password各保留独立 field draft并单独 mutation，不与 content合并。user修改这些 field时按第17.7节记录 activity；稍后的 submit、dispatch、Retry或 Reconcile不移动 deadline。relative expiration、password transport和 view-once后果等 explanation只在 HelpTrigger。
+
+| Outcome | Draft 与 accepted state | Version、summary、ETag authority | Sync 与 recovery |
+|---|---|---|---|
+| validated authoritative 200 | commit对应 field；其他 field draft和 source draft不变 | metadata-only response仅在 source markers匹配时更新 summary/version；清除 strong read ETag | 释放 slot；ordinary且 active/clean时从 settle完整等待3,000 ms |
+| client validation、413或422 | 保留 field draft并显示 inline field error；accepted state不变 | 不推进任何 marker或 ETag | unresolved field draft期间 paused-local；修正后可 Retry，Discard draft后可恢复 |
+| 403 | 保留 field draft、source和 committed credential；记录 password-required | 不推进；replacement只进入 `pendingCredential` | pause；Retry使用 pending value，只有 authorized 200/304才按9.4 commit credential与 URL |
+| 404或 logical expired | 保留 exact source和 field drafts供 local copy/download | 不推进；invalidate所有 request token | terminal not-found；移除 server controls/URLs，无同 ID retry，只允许 full refresh或 create new |
+| 409 | 保留 field draft和 source，记录 server conflict details但不应用它们 | 不推进 summary/version/ETag | pause；提供 Reload server与 Discard/Retry。Reload是 content-bearing GET，按17.5、17.8 staged apply；若返回 viewOnce立即 terminal consumed |
+| 503且明确 `mutationMayHaveApplied=false` | 保留 field draft和 source | 不推进 | pause；inline Retry可安全重发 latest intent，dispatch不延长 active window |
+| 503且 `mutationMayHaveApplied=true`、flag缺失的 write failure、500或 fetch rejection | 保留 field draft、source及 request target，状态为 `reconciliation-required` | 不推测 success，不推进；立即清除 read ETag | pause且不 blind retry；只允许下述 explicit Reconcile、local copy/download或 Discard |
+
+对 title、format、viewOnce和 expiration的 Reconcile使用已有 authorized `GET /api/pastes/:id/settings`，不增加 endpoint。response generation/contentRevision与 accepted source baseline相同时，target field已出现则把该 response作为 authoritative acknowledgement；target未出现则保留 draft并允许重新提交。content markers改变时不能只采用 summary，必须先执行 explicit full resource Reload。expiration target未提交时，Retry重新执行第7.4节完整 rewrite，以统一可能部分改变的 physical expiration；target已提交时接受 server summary。Reconcile的403、404、503/network分别继续走上表，不自动循环。
+
+uncertain password set/change/clear不能从 `protected` boolean判断实际 credential。Reconcile按以下顺序执行 authorized settings read：先尝试 intended new credential，clear时先尝试无 credential；若403，再尝试 request dispatch时的 old credential；两个值相同则只试一次。new credential得到200或304时才 commit它并更新 URL；old credential得到200或304时保留 old credential并把 mutation标为未确认应用，允许 user Retry；两者403时保留 inline输入，不改变 URL。每次只发送一个 credential，值不进入 visible text、Last action、application-authored logs或 error；允许的 request transport仍承担第9.3节所列 infrastructure log风险。任何 attempt遇到404进入 terminal not-found，遇到503/network保持 reconciliation-required。
+
+#### 17.10.4 Delete 与 view-once terminal transitions
+
+Delete 204只执行第17.5节的 root handoff。任何 delete rejection或 network loss都按 server contract视为 `mutationMayHaveApplied=true`：立即进入 `delete-uncertain` terminal state，invalidate/abort mutation、sync和 history，移除全部 server mutation controls与 representation URLs，保留 exact local source供 copy/download。旧 document不得 Retry delete或重新启用 autosave/sync；唯一 existence recovery是 user触发 full Reload当前 application URL，让新 document独立得到 ordinary/password/404/503结果，或 create new。该 terminal page不根据 stale inline GET宣称已删除或仍存在。
+
+把 viewOnce开启的 authoritative200或 Reconcile-confirmed response处理前，先 dispose autosave和 autosync，清除 sync timer/candidate，invalidate history和 mutation slot，再结构上切换为独立 `armed-view-once` local-only branch，移除 Edit、History、Settings、server representation URL和 server delete action；它显示 `viewOnce` metadata但不得标成 consumed，下一次 server content read才 consume的事实只在 HelpTrigger。初始 view-once的 `/:id` GET及任何 later content-bearing `viewOnce:true` response已经按第10节 consume，直接按17.8进入 `consumed:true` terminal branch。不得在 armed或 consumed branch上启动任何 server controller。
 
 ### 17.11 Persistent operation status
 
 每个 React application page有一个 compact、persistent、non-interruptive `OperationStatus`。ordinary editor同时显示四个独立 record；不适用的页面仍显示 Network和Last action，不伪造 autosave/autosync activity。
 
-| Record | Exact state names | Timestamp meaning |
+| Record | Exact state names | Timestamp storage 与 displayed timestamp |
 |---|---|---|
-| Autosave | `clean`、`waiting`、`saving`、`saved`、`error`、`password-required`、`not-found`、`conflict` | `confirmedAt`只在 latest local source的200 response完成验证时更新；failure state另存 `failedAt`为该 attempt settle的实际 UTC instant。waiting/saving保留上一次 confirmedAt，不把 dispatch time称为 saved time。 |
-| Autosync | `waiting`、`checking`、`unchanged`、`candidate-observed`、`remote-applied`、`paused-local`、`paused-offline`、`error`、`forbidden`、`not-found`、`conflict`、`inactive` | `checkedAt`在有效200或304完成验证时更新；`appliedAt`只在 remote state完成 batched apply时更新。candidate observation算 checked，不算 applied。 |
-| Network | `online`、`offline`、`degraded` | initial state取 `navigator.onLine`并以 application init instant作为 `changedAt`；之后它是最近一次 browser online/offline event或 fetch network outcome让 state实际改变的 UTC instant。HTTP 4xx/5xx不把 network标成 degraded；degraded后的成功 fetch改回 online并更新 time。 |
-| Last action | `idle`、`pending`、`succeeded`、`failed`，另带固定 action key | `idle`没有 action key或 timestamp；pending的 `startedAt`是 click/submit dispatch instant；success/failure的 `settledAt`是现有 request或 browser API完成 instant。不得记录或显示 password、request body或 protected URL。 |
+| Autosave | `clean`、`waiting`、`saving`、`saved`、`error`、`password-required`、`not-found`、`conflict` | `confirmedAt`只在 latest local source的authoritative200完成验证时更新；failure state的 `failedAt`是该 attempt settle instant。`saved`显示 confirmedAt；error/password-required/not-found/conflict显示 failedAt；waiting/saving只在既有 confirmedAt存在时显示它；clean不显示 timestamp。initial、reload或 remote apply的 clean不生成 confirmedAt。 |
+| Autosync | `waiting`、`checking`、`unchanged`、`remote-applied`、`paused-local`、`paused-offline`、`error`、`forbidden`、`not-found`、`conflict`、`inactive` | 每次实际 state transition记录 `stateChangedAt`；initial waiting不是 transition，值为 null。`checkedAt`只在完整验证的200或304记录，`appliedAt`只在 accepted remote source完成 staged apply后记录。unchanged显示 checkedAt，remote-applied显示 appliedAt，其余 state显示本次 stateChangedAt；不存在对应 instant时不渲染 `<time>`。failure-after-success必须显示 failure的 stateChangedAt，不得继续显示旧 checkedAt。 |
+| Network | `online`、`offline`、`degraded` | initial state取 `navigator.onLine`并以 application init instant作为 `changedAt`；之后它是最近一次 browser online/offline event或 fetch network outcome让 state实际改变的 UTC instant。HTTP 4xx/5xx不把 network标成 degraded；degraded后的成功 fetch改回 online并更新时间。 |
+| Last action | `idle`、`pending`、`succeeded`、`failed`，另带 closed `ActionKey` | `idle`没有 action key或 timestamp；pending的 `startedAt`是实际 operation invocation/dispatch instant；success/failure的 `settledAt`是已有 request、browser API或 staged apply完成 instant。不存在 timestamp时不渲染 `<time>`。不得记录或显示 password、request body或 protected URL。 |
 
-这些 records只从既有 create/read/mutation/browser API request、autosave/autosync controller transition、Button action及 browser `online`/`offline` events派生；没有 heartbeat、status-only request或 status timer。全部 state label和 timestamp用当前 locale，timestamp以 `<time datetime="RFC3339">`和 `Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"medium"})`显示，不做每秒 relative-time更新。四个 record共享一个 `aria-live="polite"` status boundary，并对未改变的 record保持 DOM稳定，避免一次事件重复朗读整区；validation blocking error可以另用 `role="alert"`。
+initial Autosave clean、initial Autosync waiting和 Last action idle都没有 event timestamp，不能用 `Date.now()`、load time、checkedAt或其他 instant填充。所有 later autosync transitions，包括 checking、pause、error、forbidden、not-found、conflict和 inactive，都记录自己的 `stateChangedAt`。
 
-每个 action Button在 pending时显示动作本身的 pending icon/label，settle后原位显示对应 success或failure icon/label，直到下一次同 action或 page state使其重置；同时更新 Last action。icon永远有可见文字或 accessible name，不能单独表达结果。该反馈不发额外 request，不自动消失，不用 Dialog、toast、snackbar或 popup。
+closed union固定为：
+
+```ts
+type ActionKey =
+  | "create"
+  | "autosave"
+  | "manual-save"
+  | "save-retry"
+  | "overwrite"
+  | "reload-server"
+  | "use-remote"
+  | "retry-sync"
+  | "copy"
+  | "download"
+  | "history-list"
+  | "history-snapshot"
+  | "settings-title"
+  | "settings-format"
+  | "settings-expiration"
+  | "settings-view-once"
+  | "settings-reconcile"
+  | "password-set"
+  | "password-clear"
+  | "password-reconcile"
+  | "delete"
+```
+
+| Operation family | pending | success/failure settle | reset |
+|---|---|---|---|
+| create、autosave/manual/retry/overwrite、reload、history fetch、settings/password/reconcile、delete | authoritative request真正 dispatch时；排队或 disabled click不算 | strict validated success或最终 handled failure；403 replacement的第一次403是 failure，后续Retry是同 key的新 attempt | 下一次相同 key dispatch，或明确 page transition；delete success按17.5带到 root后由下一 action/refresh清除 |
+| copy | 调用 Clipboard API或 fallback开始时 | Clipboard Promise fulfilled/rejected，或 fallback copy command返回结果时 | 下一次 copy或 page transition |
+| download | Blob/object URL准备开始时 | exact UTF-8 payload与download click成功构造/dispatch或 browser API抛错；不声称已写入磁盘 | 下一次 download或 page transition |
+| use-remote | staged apply开始时 | target generation publish或 Retry apply fallback失败时 | 下一次 use-remote或 page transition |
+| retry-sync | action接受并建立合法 due时 | timer成功 armed即 succeeded；inactive、terminal或 predicate拒绝时 failed且不发 request | 下一次 retry-sync或 page transition |
+
+HelpTrigger、Sidebar open/close、mode/tab selection、locale、theme、password reveal、Wrap/Unwrap、raw/source toggle、local source-choice的 Keep current和其他 pure React state toggle不进入 ActionKey，也不改 Last action。direct raw/HTML/md/file/create-new anchor navigation和 top-level Blob HTML navigation在 origin document内没有可观察 completion，因此不声明 success/failure，也不进入 ActionKey；representation link copy仍使用 `copy`。background autosync只更新 Autosync/Network，不占 Last action。
+
+这些 records只从既有 create/read/mutation/browser API request、autosave/autosync controller transition、上述 fallible operation及 browser `online`/`offline` events派生；没有 heartbeat、status-only request或 status timer。全部 state label和实际存在的 timestamp用当前 locale，timestamp以 `<time datetime="RFC3339">`和 `Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"medium"})`显示，不做每秒 relative-time更新。四个 record共享一个 `aria-live="polite"` status boundary，并对未改变的 record保持 DOM稳定，避免一次事件重复朗读整区；validation blocking error可以另用 `role="alert"`。
+
+只有 union中的 operation拥有 Button outcome。originating Button在 pending时显示动作本身的 pending icon/label，settle后原位显示对应 success或failure icon/label，直到同 key reset；没有 Button的 autosave/history trigger只更新 Last action与其专属 record。icon永远有可见文字或 accessible name，不能单独表达结果。该反馈不发额外 request，不自动消失，不用 Dialog、toast、snackbar或 popup。
 
 ### 17.12 i18n 与 theme
 
@@ -1249,9 +1350,9 @@ theme control的 exact preference states为 `system`、`light`、`dark`，初始
 | API/MCP wire body | 64 MiB |
 | API history list | 最多 3，无 pagination |
 | autosave | input/compositionend 后 exact 1,000 ms due time，最多 1 in-flight |
-| autosync active window | load/refresh或最近 local edit/mutation activity后 exact 300,000 ms；deadline本身不发 request |
-| autosync cadence | eligible开始或前次 settle后 exact 3,000 ms due time，最多1个 timer和1个 in-flight；无 overlap或 immediate retry |
-| autosync request ceiling | 无 edit且 request瞬时完成的单个300,000 ms window最多99次 GET，即 due time 3,000至297,000 ms；真实 request duration只会降低次数 |
+| autosync active window | load/refresh或最近真实 source/committed IME/settings/password/expiry/title/format/viewOnce user change event后 exact 300,000 ms；dispatch、Retry和 response settle不延长；deadline callback不发 request |
+| autosync cadence | eligible开始或前次 settle后 exact 3,000 ms due time；唯一 timer deadline始终为 `min(syncDueAt ?? activeUntil,activeUntil)`，最多1个 timer和1个 in-flight；无 overlap或 immediate retry |
+| autosync request ceiling | 无 user activity且 request瞬时完成的单个300,000 ms window最多99次 GET，即 due time 3,000至297,000 ms；真实 request duration只会降低次数，due等于或晚于 deadline不发 request |
 | initial React JavaScript | production build的 entry及其静态 imports合计不超过250 KiB gzip level 9；不得含 Crepe、browser micromark/GFM或 diff worker code |
 | initial CSS | application initial CSS合计不超过80 KiB gzip level 9；无 external font/image request |
 | lazy browser Markdown | initial server-produced preview不请求；首次 client-side preview/recompute才请求，相关新 chunks合计不超过150 KiB gzip level 9 |
@@ -1272,13 +1373,13 @@ Worker upload 必须低于64 MiB uncompressed，top-level startup低于1秒，is
 ### 19.1 测试层次
 
 1. `src/pastes.test.ts`继续使用最小 in-memory KV fake，先写 failing tests，再实现 ID、password、expiration、version、key grammar、legacy projection、ring rotation、no-op与每一个 injected read/write/delete failure ordering。
-2. `src/render.test.ts`覆盖最小 React shell、bootstrap discriminated union、exact inert source、Markdown-only inert safe preview template、HTML/bootstrap escaping、full GFM、raw HTML、dangerous protocol、DOM clobber prefix、title/filename，以及 password不进入 bootstrap。删除旧 handwritten workbench exact-string assertions。
+2. `src/render.test.ts`覆盖最小 React shell、全部 bootstrap discriminated variants、每个 variant的 exact inert source/preview cardinality、HTML/bootstrap escaping、full GFM、raw HTML、dangerous protocol、DOM clobber prefix、title/filename，以及 password不进入 bootstrap。ordinary text/Markdown、consumed preview true/false和 read-only `/md`分别覆盖 missing、duplicate与 unexpected preview/source nodes。删除旧 handwritten workbench exact-string assertions。
 3. `src/http.test.ts`使用 `@cloudflare/vitest-plugin`与 `exports.default.fetch()`，通过 public routes验证真实 KV binding、status、headers、media types、migration、consumption和 conditional GET。Cloudflare test依据仍是[Vitest integration](https://developers.cloudflare.com/workers/testing/vitest-integration/)与[Vitest 4 migration](https://developers.cloudflare.com/workers/testing/vitest-integration/migration-guides/migrate-from-vitest-3-to-vitest-4/)。
 4. `src/mcp.test.ts`以 modern client pinned `2026-07-28`覆盖 discover、meta/header validation、八 tools、tool error和 SDK stateless legacy fallback。MCP行为不因 React或 browser sync改变。
-5. `src/client/autosave.test.ts`保留现有完整 fake-clock autosave suite；`src/client/paste-sync.test.ts`用同一可注入 fake monotonic clock、controllable promises、fake AbortController和 explicit online/offline events验证第17.7至17.9节每个 transition。不得依赖真实3秒或5分钟 sleep。
-6. React component tests直接 mount `App`各 bootstrap variant，验证 semantic roles、Tabs keyboard、Sheet/Dialog focus、HelpTrigger hover/focus/click/Escape/outside、OperationStatus、controller cleanup、remote batched apply和 consumed branch无 network hook。mount -> unmount -> mount模拟 StrictMode lifecycle但 production不依赖 StrictMode。
-7. `src/build.test.ts`读取 Vite manifest和 production bytes，验证第18节 gzip/raw budgets、initial/lazy reachability、hashed filenames、无 sourcemap、没有 eager Crepe/micromark/diff、无 banned package和 duplicate browser copy；同时检查 pinned provenance comments、`THIRD_PARTY_NOTICES.md`及 package exact pins。
-8. Playwright必须连接真实 `wrangler dev --local`进程，而不是 mocked page server。Chromium、Firefox、WebKit运行 create、password redirect、ordinary read/edit、所有 React mode refresh、Crepe、history/diff、settings/password、copy/wrap/download、delete、view-once local-only、autosync、i18n/theme、keyboard/help和320 px journeys。active HTML test只写 same-origin marker并确认 query visibility，不外发数据。
+5. `src/client/autosave.test.ts`保留现有完整 fake-clock suite并加入 acceptedSource acknowledgement；`src/client/paste-sync.test.ts`用同一可注入 fake monotonic clock、controllable promises、fake AbortController和 explicit online/offline events验证第17.7至17.9节每个 transition；mutation coordinator和 history request token另以 controllable responses覆盖第17.10节。不得依赖真实3秒或5分钟 sleep。
+6. React component tests直接 mount `App`全部 bootstrap variants，验证 semantic roles、Tabs keyboard、Sheet/Dialog focus、HelpTrigger hover/focus/click/Escape/outside、OperationStatus、closed ActionKey、controller cleanup、staged remote apply fallback、read-only `/md`和 consumed branch exact local capabilities及零 business hooks。mount -> unmount -> mount模拟 StrictMode lifecycle但 production不依赖 StrictMode。
+7. `src/build.test.ts`读取 Vite manifest和 production bytes，验证第18节 gzip/raw budgets、initial/lazy reachability、hashed filenames、无 sourcemap、没有 eager Crepe/micromark/diff、无 banned package和 duplicate browser copy；同时按 exact materialized source set检查 pinned provenance comments、`use-mobile.tsx`、pruned `SidebarMenuSkeleton`/`skeleton.tsx`、`THIRD_PARTY_NOTICES.md`及 package exact pins。
+8. Playwright必须连接真实 `wrangler dev --local`进程，而不是 mocked page server。Chromium、Firefox、WebKit运行 create、password redirect、ordinary read/edit、所有 React mode refresh、read-only `/md` hard refresh、Crepe、history/diff、settings/password、copy/wrap/download、delete root handoff、view-once local-only、autosync、i18n/theme、keyboard/help和320 px journeys。active HTML test只写 same-origin marker并确认 query visibility，不外发数据。
 9. current-two-major matrix指 release时 Chrome、Edge、Firefox、Safari各最近两个 major。CI自动跑对应可获得的 Playwright engine versions；actual current stable Edge与Safari做 manual smoke并记录 exact version。机器不存在的 actual Safari是唯一允许 skip的 manual row，仍必须有 WebKit覆盖。
 
 ### 19.2 必测边界与 race
@@ -1287,21 +1388,29 @@ Worker upload 必须低于64 MiB uncompressed，top-level startup低于1秒，is
 
 新增 release gates如下：
 
-* strong response ETag exact SHA-256/base64url格式、200 bytes变化必变、matching strong/weak/list/`*`得到304、nonmatch 200、malformed ordinary validator 400、304 no body/content headers且 `no-store`；view-once对 valid/malformed validator都忽略并保持 GET consume、HEAD不 consume；
-* fake clock在 load+2,999 ms无 sync、3,000 ms恰好一个；completion+2,999无 next、+3,000一个；299,999 ms可按 predicate发，300,000 ms不得新发；每次 local edit/mutation将 deadline精确改为 activity+300,000；
-* edit取消 waiting timer；compositionstart与每个 IME intermediate input延长 active window但不 save/sync；compositionend重新走1,000 ms autosave，save settle后再完整等待3,000 ms sync；
+* strong response ETag exact SHA-256/base64url格式、200 bytes变化必变、matching strong/weak/list/`*`得到304、nonmatch 200、malformed ordinary validator 400、304 no body/content headers且 `no-store`；view-once对 valid/malformed validator都忽略并保持 GET consume、HEAD不 consume；`GET|HEAD|POST /api/pastes/:id/read`每个200都带 current-version ETag且不使用 strong validator/304；
+* fake clock在 load+2,999 ms无 sync、3,000 ms恰好一个；completion+2,999无 next、+3,000一个；299,999 ms可按 predicate发，300,000 ms精确转 inactive且不得新发。source input、committed composition和每个 settings/password/expiry/title/format/viewOnce user change把 deadline设为其 eventAt+300,000；dispatch、Retry、slow settle不改变 deadline；
+* edit取消 waiting timer；compositionstart与 IME intermediate input失效 sync但不延长 active window、不 save/sync，compositionend提交时延长并重新走1,000 ms autosave。slow poll、online recovery、candidate conflict和 Retry的 due晚于 deadline时，唯一 `min(syncDueAt,activeUntil)` timer只执行 inactive transition并清 candidate；
 * dirty draft、autosave timer/in-flight/coalesced、settings/password/viewOnce/delete mutation和 remote apply期间零 sync；clean transition后只建立一个3,000 ms timer；
 * edit/mutation在 sync in-flight时调用 abort并 invalidates token；即使 old promise随后200 resolve也不能更改 source、summary、ETag、history、status applied time或再 schedule duplicate；并发计数始终最多1；
-* 304、200 unchanged、definitely older、definitely newer、marker-equal divergent、mixed-marker incomparable、different generation和 legacy divergent的逐项比较；older永不回滚，newer只在同 generation capture且 clean时一次性 apply；
-* divergent candidate第一次 quarantine、第二次 identical unconditional200 apply、candidate变化进入 non-destructive conflict、error/abort/activity清除 candidate；Use remote、Keep current、Retry sync按精确 stop/resume规则；
-* remote apply同时更新 canonical source、summary、read、plain baseline、Markdown source/visual/preview和 selected diff current side，标记或清除 history metadata，且 autosave call count和 server history count不增加；
-* sync和 autosave各自的200/304/403/404/409/503、network rejection、AbortError、offline -> online路径；验证 stop、normal 3,000 ms retry或 explicit retry，不出现第二 retry loop；
-* `/`、ordinary text default、ordinary Markdown default、password、application error和 consumed branch可直接 hard refresh并由 React重建；从 Edit、Markdown source/visual/preview、History或 Settings发起 hard refresh时，按 `format`回到 server-defined default，使用 latest acknowledged source且无 stale state或 duplicate controller；direct `/raw`、`/html`、`/md`、`/file`不 mount sync；
+* 304、200 exact unchanged、definitely older、definitely newer、marker-equal divergent、mixed-marker incomparable、different generation和 legacy divergent逐项比较；只有 definitely-newer自动 apply，其他 divergent response无论重复多少次都只能保留 candidate且任何 surface不变；
+* stale G1在已接受G2后连续返回多次仍不能改变 source、summary、markers、ETag或 derived surface；Use remote是未证明 newer candidate的唯一 apply路径，Keep current只 dismiss candidate并恢复普通 conditional cadence，Retry下一次省略 validator；activity/offline/baseline/terminal与 exact active deadline清 candidate；
+* staged remote apply在发布 markers/ETag前，同时更新 canonical source、summary、read/plain baseline，并将每个 mounted Markdown preview、Crepe visual和 diff更新或同步清空为 target-generation retry fallback；注入 renderer import、Crepe reset/destroy/recreate和 diff worker failure时无 old-derived/new-marker混合，late retry result被 generation丢弃，autosave与 server history count保持0；
+* sync和 autosave各自的200/304/403/404/409/503、network rejection、AbortError、offline -> online路径；验证 stop、normal 3,000 ms retry或 explicit retry，不出现第二 retry loop；changed/no-op autosave acknowledgement都把 acceptedSource设为 inFlightContent，edit-during-save保留独立 draft，随后 equal poll不引用旧 source；
+* autosync或 explicit Reload收到任一 content-bearing `viewOnce:true` 200时，在 source-choice UI前移除/disable所有 server control、URL、mutation/sync/autosave/history hook并 invalidate requests；definitely newer自动成为 consumed source，older/equal-divergent/incomparable保留两个 exact sources供纯 local选择，之后 business request数为0；
+* consumed text与Markdown branch逐项操作 copy、wrap、raw/source toggle、safe preview、exact UTF-8 download和 top-level Blob HTML navigation；只有 hashed renderer chunk可请求，DOM中无 Edit/History/Settings/Delete/representation URL，所有 server controllers均 disposed；
+* page mutation coordinator以 controllable promises覆盖 autosave versus title/format/expiry/viewOnce/password/delete serialization、single slot、one coalesced source intent和 retired-token反序 response；metadata-only generation/version变化但 source相同不产生 PATCH；
+* title/format/viewOnce、expiration、password和 delete逐 family覆盖200、403、404、409、503/network、`mutationMayHaveApplied` true/false及 partial application；field draft保留、summary/version/ETag不猜测推进、Reconcile顺序、sync pause/resume和 terminal delete/not-found行为与17.10 table一致；
+* uncertain password change按 new/cleared credential后 old credential顺序授权，无 credential进入 DOM/status/application log；允许的 request transport仍保留 infrastructure log风险。uncertain expiration target未 commit时重试完整 mutation修复 physical expiration；uncertain delete只保留 local能力并要求 full reload；
+* history list和 snapshot request分别在 remote apply、explicit reload、mutation acknowledgement、consumption和 delete后反序 settle，均因 token/baseline失配被丢弃，不能清空 settled state、替换 selection或对错误 current side计算 diff；
+* 403 replacement credential在 autosync 304及各 read/mutation 200成功前不改变 URL/state；错误 replacement不变。proof后 unique-query helper去重或移除 query，hard refresh和 raw/HTML/md/file links对 literal metacharacters仍授权；
+* `/`、ordinary text default、ordinary Markdown default、password、application error、consumed和 read-only `/md` branch可直接 hard refresh并由 React重建；从 Edit、Markdown source/visual/preview、History或 Settings发起 hard refresh时，按 `format`回到 server-defined default，使用 latest acknowledged source且无 stale state或 duplicate controller；direct `/raw`、`/html`、`/file`不 mount React，`/md` mount React但无 sync/prefetch/API/second content read；
 * initial network graph含 React/shadcn shell但不含 Crepe、browser micromark/GFM或 diff；首次对应 action只加载自己的 lazy graph；所有第18节 bundle budget逐项 gate；
 * provenance为 exact repository/commit/style/block/CLI，copied/adapted source comment与 `THIRD_PARTY_NOTICES.md`齐全；dependency scan无 Next.js、Vercel runtime、React Router、RSC、auth/query/chart/admin package和第二 backend；
 * DOM visible-text scan允许 label/value/metadata/action/validation/error/live state，拒绝 dictionary和 fixture中列出的 explanation、warning、limitation、storage/encoding/size prose及 sample boilerplate；每条此类 copy只能在关闭的 HelpTrigger content中，触发后 keyboard/touch均可达；
-* OperationStatus四个 records状态名、`confirmedAt`、`failedAt`、`checkedAt`、`appliedAt`、`changedAt`、`startedAt`和 `settledAt`含义准确；locale切换重排显示但 `<time datetime>`不变；password和 protected URL不在 DOM/status；
-* button pending/success/failure原位 label/icon与 polite live update；copy/save/sync/network/action feedback无 Dialog、`alert()`、toast、snackbar或 transient popup；只对 destructive confirmation使用 Dialog；
+* credential scan只豁免 password-bearing representation anchor `href`、明确 clipboard link output和当前 location；bootstrap links、visible text、status、inert data、其他 attributes、application-authored logs和 errors均无 credential，同时不否认允许的 request URL可进入 infrastructure logs。protected/unprotected main、API、raw/html/md/file的 duplicate password query统一400 `AMBIGUOUS_PASSWORD`，一个 wrong/empty protected credential才403；
+* OperationStatus四个 records状态名与 timestamp selection准确；initial clean/waiting/idle无 `<time>`，autosync每次后续 transition有 `stateChangedAt`，200/304才有 `checkedAt`，accepted apply才有 `appliedAt`，failure-after-success显示 failure time；remote clean不改变 `confirmedAt`；locale切换只重排显示且 `<time datetime>`不变；
+* closed ActionKey只覆盖17.11列出的 request或 fallible browser operation；对应 Button pending/success/failure原位 label/icon与 polite live update。Help/Sidebar/tab/mode/locale/theme/reveal/wrap/raw-source等 pure toggles及不可观测 navigation不改 Last action；copy/save/sync/network/action feedback无 Dialog、`alert()`、toast、snackbar或 transient popup；只对 destructive confirmation使用 Dialog；
 * 320 px Sheet关闭后 document宽度等于 available viewport、page `scrollWidth===clientWidth`，44 px target、focus order、reduced motion、WCAG 2.2 AA contrast和 non-color diff prefixes通过。
 
 ### 19.3 完成门槛
@@ -1391,12 +1500,12 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | C01 | 只用一个 `PASTE_DB` KV，无其他协调存储 | 3、4、6、20 | Wrangler 仅一个 KV binding；dependency/config scan 无 DO、D1、R2、Queue；KV stale-read test明确允许 duplicate |
 | C02 | 第一个授权 content-bearing read 消费；HEAD/OPTIONS/错误不消费 | 10.1、12 | 10.1 所列八个 HTTP content-bearing 操作各测 first 200含 exact content、second 404；MCP `paste_get` 测 first success含 exact content、second `PASTE_NOT_FOUND` tool error；HEAD/OPTIONS/403 后仍可成功读取 |
 | C03 | render/validate 后 delete，response 前完成 | 10.2 | injected render failure不 delete；delete rejection不含 content；成功事件顺序断言 render < delete < response |
-| C04 | view-once React branch无 edit/history/settings/sync；API/MCP mutation允许，history禁止 | 10.3、17.4、17.10、15 | branch不构造对应 controls/hooks/URLs；settings/update/password/delete成功；history 409/tool error |
+| C04 | view-once content response立即进入不可恢复的 local-only React能力边界 | 10.3、17.4、17.8、17.10 | copy/wrap/raw-source/safe preview/UTF-8 download/Blob HTML逐项通过；autosync与 explicit reload的 newer/incomparable response race均先移除全部 server controls/URLs/hooks，之后除 hashed renderer asset外零 business request；API/MCP在首次 read前仍允许 mutation，history禁止 |
 | C05 | custom ID 只做 KV checks，接受 race | 7.2 | fake concurrent negative checks可产生两个 success/last write wins，文案不声称 atomic |
 | C06 | delete/expiry 后 custom ID 可复用 | 5.1、7.2 | cleanup 后同 case ID create 201；stale orphan可暂时 409 |
 | C07 | legacy main+attached metadata可读，首次 mutation迁移 | 8 | seeded old entry各 representation 200；read不写；mutation生成 sibling/markers且不批量 list |
-| C08 | password只在当前 document的 page-scoped memory和 URL | 9、17.1、17.5 | storage APIs无写入；same document操作复用；unmount清理；新 tab/hard reload从 URL或重新输入取得，不靠 storage |
-| C09 | protected direct raw/html/md/file无 query直接 403 | 9.3、12.2 | 四 route missing query均 403 plaintext；wrong 403；correct 200 |
+| C08 | password只在当前 document的 committed/pending page-scoped memory和允许的 URL transport | 9、17.1、17.5、17.10 | storage APIs无写入；403 replacement在 authorized 200/304前不改 state/URL，proof后 unique-query replace；hard reload及 literal metacharacter links通过；unmount清理 |
+| C09 | protected direct raw/html/md/file无 query直接403，duplicate query统一400 | 9.3、12.2、19.2 | 四 route missing或单一 wrong/empty query均403；correct 200；protected/unprotected main、API及四 representations的 duplicate都为 `AMBIGUOUS_PASSWORD` 400 |
 | C10 | visible ASCII 1..128，empty set/clear语义 | 5.4、9 | U+0020/U+007E与128通过，control/129失败；new empty清除 |
 | C11 | unprotected可 set；protected change/clear需 current password | 5.4、12.6、15.10 | API与 MCP 的 set/change/clear正反测试 |
 | C12 | `/html/:id` 顶层同源可执行、不 sandbox | 16.2 | response exact stored source；script写 marker；window origin等于 Worker origin；无 wrapper |
@@ -1422,36 +1531,40 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | C32 | protected main GET无 password呈 React input；form POST校验并302到 query | 9.3、17.1、17.4 | GET 200 shell无 content；wrong POST 403 React inline error；correct POST 302 Location exact encoded target |
 | C33 | HTML JavaScript可读取和外传 query password，用户接受 | 9.3、16.2、22 | browser test确认 `location.search` 可读；无 CSP/sandbox阻止 fetch；风险文档存在 |
 | C34 | redirect后 password同时在 URL与 page-scoped memory，请求继续附带 | 9.4、17.1、17.5 | URL query存在；React actions无需再输入；API carrier含 decoded exact password |
+| C35 | `/api/pastes/:id/read`全部成功 method保留 current-version ETag，strong validator只属于 resource GET | 12.1、12.5、13.2 | GET、HEAD、POST `/read`均断言 `ETag: "<version>"`且无304；只有 `GET|HEAD /api/pastes/:id`产生/比较 SHA-256 response ETag |
 | T01 | 主正文 exact plaintext `key=id`，business metadata sibling | 6 | direct KV断言 main value等于 source，business fields只在 `__cfpb:meta` |
 | T02 | 三个 fixed sibling ring slots且同 physical expiry | 6、11 | keys仅 slot 0/1/2；四次 save轮换；list metadata expiration全部相同 |
 | T03 | plaintext editor等宽、1秒 autosave、IME、单 in-flight、coalescing | 17.5、17.6 | existing fake-clock suite、React adapter lifecycle与 browser computed font/network concurrency通过 |
-| T04 | error/conflict保留 draft与 exact no-op | 7.3、17.6、17.9 | 403/404/409/413/503/offline后 React draft不变；same content无 KV write/history/version |
-| T05 | 标题、drag/drop、copy、wrap、file和delete功能保留 | 12、17.4、17.5、17.10 | real Wrangler browser actions逐项通过；delete只发 DELETE |
+| T04 | error/conflict保留 draft，autosave acknowledgement与 exact no-op共用 accepted source | 7.3、17.5、17.6、17.9 | 403/404/409/413/503/offline后 React draft不变；changed/no-op/edit-during-save 200后 acceptedSource exact且 equal poll不回看旧值；same content无 KV write/history/version |
+| T05 | 标题、drag/drop、copy、wrap、file和delete功能保留 | 12、17.4、17.5、17.10 | real Wrangler browser actions逐项通过；delete只发 DELETE；204先清 sensitive references，再 `replaceState`到 `/`并显示 query-independent root success，refresh不 replay |
 | T06 | password覆盖每个 representation/API/history/update/settings/delete/MCP | 5.4、9、12、15 | protected route/tool matrix对 missing/wrong全为403或 tool error，正确值通过 |
 | T07 | create不自动打开 | 7.2、17.4 | 201后 location仍为 `/`，无 prefetch/click；view-once main仍存在直到用户选择 link |
 | T08 | 修改 expiry使全部 related keys采用同 physical expiration | 6.5、7.4 | active history 0..3情况下 extension/shorten/permanent的 key expiration深相等 |
-| T09 | UI与 API 不返回 stored plaintext password | 12.3、17.1、17.5、17.11 | bootstrap/DOM/status/response scan无 metadata password；URL/body transport例外按规格可见 |
+| T09 | UI与 API不返回 stored plaintext password，只保留冻结的 explicit transport例外 | 9.2、9.3、12.3、17.1、17.5、17.11 | scan只豁免 representation anchor `href`、explicit clipboard link和 current location；bootstrap links、visible text、status、inert data、unrelated attributes、application logs/errors无 password；允许的 request URL仍可能进入 infrastructure logs；literal metacharacters正确编码 |
 | T10 | local smoke 与 TDD | 19、20 | 所列 commands、real Wrangler conditional smoke和 browser journeys全部通过 |
+| T11 | content-independent mutation failure与 partial application有 deterministic recovery | 7.4、7.5、9.4、17.10 | title/format/viewOnce、expiry、password、delete各覆盖403/404/409/503/network/may-have-applied；field draft、credential顺序、reconciliation、version/summary/ETag、sync pause/resume和 delete terminal reload逐项断言 |
 | SY01 | 单 KV约束下无 true non-polling equivalent，明确使用 direct browser polling | 3、17.7、22 | dependency/route/runtime scan无 SSE、WebSocket、long poll、Web Push、Event Subscription、service binding/RPC、Cache sync；requests由 browser timer直接发起 |
-| SY02 | sync只在 ordinary controlled `/:id` page运行 | 17.1、17.4、17.7、17.10 | `/`、password/error、consumed view-once及 `/raw`、`/html`、`/md`、`/file`、API/MCP caller均为零 sync request |
-| SY03 | active window exact 300,000 ms，eligible idle cadence exact 3,000 ms | 17.7、18、19.2 | fake clock覆盖2,999/3,000和299,999/300,000边界、activity deadline reset、completion-based next due及99-request ceiling |
+| SY02 | sync只在 ordinary controlled `/:id` page运行 | 17.1、17.4、17.7、17.10 | `/`、password/error、consumed view-once及 `/raw`、`/html`、`/file`、API/MCP caller均零 sync；`/md`由React渲染但无 autosync/autosave/prefetch/API/second content read |
+| SY03 | active window只由 load或真实 user activity确定，exact deadline和 eligible cadence各自受一个 timer控制 | 17.7、18、19.2 | fake clock覆盖2,999/3,000、299,999/300,000、slow settle/online/candidate/Retry due越界；dispatch/retry不延长，deadline清 candidate且不发 request，99-request ceiling保持 |
 | SY04 | edit/IME/draft/autosave/mutation suspend sync；in-flight abort/invalidates；无 overlap | 17.7、19.2 | controllable promise race证明 abort被调用、old response零 state effect、timer/fetch concurrency各不超过1 |
 | SY05 | 复用 resource GET的 standard conditional read与 no-store | 12.1、12.5、13、20 | strong SHA-256 ETag、If-None-Match list/weak/`*`/malformed、200/304/HEAD/OPTIONS/Allow/no-body/no-store全部通过；无新 endpoint |
 | SY06 | view-once忽略 validator并保留 consume-on-body | 10、12.1 | valid或malformed `If-None-Match`的 authorized GET仍200并 consume；HEAD不 consume；无304 |
-| SY07 | version、contentRevision、updatedAt、localGeneration和 exact source阻止 rollback | 17.5、17.8、19.2 | marker partial-order fixtures覆盖 older/newer/equal/incomparable/different-generation/legacy；older或 localGeneration改变前 capture的 response不能改任何 surface |
-| SY08 | divergent response需要 deterministic repeated candidate或 non-destructive conflict | 17.8 | first quarantine；第二次 exact full200才 apply；candidate变化 conflict；Use remote/Keep current/Retry sync stop-resume均通过 |
-| SY09 | remote apply更新每个 canonical surface且不 autosave | 17.5、17.8 | read/plain/Markdown visual-source-preview/summary/diff同时改变，history invalidation正确，save和 history mutation count为0 |
-| SY10 | sync明确处理200/304/403/404/409/503/network/offline | 17.9、19.2 | 每种 response/event保留 source并按 frozen stop、normal retry或 explicit retry行为转换，无 modal/toast和 status-only request |
-| FE01 | React 19.3.0与 pinned shadcn `new-york-v4/sidebar-11`完全拥有可见 application UI | 4.1、4.2、17.1、17.2 | create/paste/password/error均由 `createRoot` render；server shell无 visible controls；source/provenance pin exact |
+| SY07 | ordering markers、localGeneration和 exact source只允许 proven-newer自动 apply | 17.5、17.8、19.2 | fixtures覆盖 older/newer/equal/incomparable/different-generation/legacy；每个 valid definitely-newer自动 staged apply，其他分类及失效 capture不改 accepted surface |
+| SY08 | divergent response只产生 non-destructive candidate，重复 stale response不构成 freshness | 17.8、19.2 | 已接受G2后重复G1与 repeated marker-equal/incomparable均零 surface change；只有 explicit Use remote可 apply；Keep current只 dismiss，Retry/expiry/activity规则精确 |
+| SY09 | remote apply按一个 observable generation更新或 invalidate每个 mounted surface且不 autosave | 17.5、17.8 | read/plain/Markdown visual-source-preview/summary/diff同时发布 target或 target-bound fallback；renderer/Crepe/diff injected failures无 stale surface，history invalidation正确，save/history mutation count为0 |
+| SY10 | sync明确处理200/304/403/404/409/503/network/offline及 terminal view-once | 17.8、17.9、19.2 | 每种 response/event保留必要 exact source并按 frozen stop、normal retry、explicit retry或 terminal local-only行为转换；replacement credential只在 authorized proof后 commit，无 modal/toast/status-only request |
+| SY11 | 全部 page mutation共享一个 authoritative slot与 baseline token | 17.6、17.10、19.2 | autosave versus settings/password/delete controllable promises证明 strict serialization、retired response不回退、最多一个 coalesced source intent；metadata-only advancement不触发 content PATCH |
+| SY12 | history list/snapshot response绑定 accepted generation/version/contentRevision/source | 17.5、17.10、19.2 | remote apply、reload、mutation ack、consume、delete后的 late list/snapshot均被丢弃，不能清空 settled state、替换 selection或使用错误 current side |
+| FE01 | React 19.3.0与 pinned shadcn `new-york-v4/sidebar-11`完全拥有可见 application UI | 4.1、4.2、16.3、17.1、17.2 | create/paste/password/error及 read-only `/md`均由 `createRoot` render；server shell无 visible controls/wrapper；source/provenance pin exact |
 | FE02 | Vite 8.3.0 static client与 exact dependency pins，无 banned stack | 3、4.1、4.2、18 | manifest/lockfile exact；无 Next/Vercel runtime/Router/RSC/auth/query/chart/admin/second backend；all bundle gates通过 |
-| FE03 | shell保留 inert bootstrap/source/safe-initial-preview、CSP和 hashed external assets | 4.2、16.5、17.1 | source在 mount前 exact decode，preview只来自 fixed renderer，bootstrap escaped且无 password/content，inline executable为0，application CSP与 `/html` exception不变 |
+| FE03 | shell保留 variant-specific inert bootstrap/source/safe preview、CSP和 hashed external assets | 4.2、16.5、17.1 | ordinary/consumed/markdown的 discriminator与 preview cardinality逐项验证 missing/duplicate/unexpected；source mount前 exact decode，bootstrap无 password/content，inline executable为0，`/md`无第二 read，`/html` exception不变 |
 | FE04 | old visible DOM/CSS/controller与 tabs candidate superseded | 4.2、19 | old `src/client/app.ts`、`src/client/styles.css`和 duplicate binders不存在；`bfaac29` chain未集成；React tests保留可观察 tabs keyboard cases |
 | FE05 | `sidebar-11`只适配 paste Document Workbench，320 px使用 Sheet和 full-width editor | 17.2、17.13 | sample/static boilerplate为0；320 px无 page overflow或 reserved rail；no gradient/glass/decorative cards/external fonts |
 | FE06 | 所有 explanation/warning/limitation只在 accessible question-mark help | 17.3、19.2 | closed-page visible text scan无 banned prose；hover/focus/click/touch/Escape/outside/name/relationship和不依赖 help的 form journey通过 |
-| FE07 | 常驻 OperationStatus分开 autosave、autosync、network、last-action并精确定义时间 | 17.11 | exact state union、timestamp event meaning、localized `<time>`、polite incremental announcement及 password absence通过 |
-| FE08 | action button原位持久反馈，无 popup式 operation feedback | 17.3、17.11 | pending/succeeded/failed icon+label与 status同一 outcome；无额外 backend call、toast/snackbar/`alert()`；Dialog只用于 destructive confirmation |
+| FE07 | 常驻 OperationStatus分开 autosave、autosync、network、last-action并只显示对应真实 event time | 17.11 | initial clean/waiting/idle无 timestamp；stateChangedAt/checkedAt/appliedAt/confirmedAt等选择准确，failure-after-success显示 failure time，remote clean不改 confirmedAt；localized `<time>`与 polite incremental announcement通过 |
+| FE08 | closed ActionKey的 fallible operation有原位持久反馈，pure toggle与不可观测 navigation无伪 outcome | 17.3、17.11 | union/dictionary exhaustiveness；pending/succeeded/failed icon+label与 status同一 outcome；Help/Sidebar/tab/locale/theme/reveal/wrap等不改 Last action；无额外 request或 popup feedback |
 | FE09 | en/zh-CN、document-only theme、reduced motion、WCAG 2.2 AA与 current-two-major matrix | 17.12、17.13、19 | dictionary parity、lang/title/date、storage空、contrast/focus/44 px/reflow、Playwright engines和 actual browser记录通过 |
-| FE10 | template和 dependencies履行 license/notice义务 | 4.1、4.2、19 | adapted source provenance comments与 `THIRD_PARTY_NOTICES.md`包含 shadcn MIT、direct MIT/ISC、Apache-2.0及 upstream NOTICE；不要求 visible credit |
+| FE10 | exact materialized template/dependency source set履行 license/notice义务 | 4.1、4.2、19 | adapted source和 pinned `apps/v4/registry/new-york-v4/hooks/use-mobile.tsx` provenance准确；`SidebarMenuSkeleton`与 `skeleton.tsx`不存在；`THIRD_PARTY_NOTICES.md` source set、shadcn MIT、direct MIT/ISC、Apache-2.0及 upstream NOTICE完整 |
 
 ## 22．明确接受的风险与平台限制
 
@@ -1471,7 +1584,7 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 14. **No backup或恢复**：成功 delete、view-once consume、ring overwrite和expiry不可恢复。
 15. **Browser variation**：download filename、clipboard permission、blob navigation、IME 与 complex editor accessibility受浏览器行为影响；本规格以声明的 release matrix为验收范围。
 16. **Polling cost与 detection lag**：每个持续 active且 clean的 tab最多按第18节发出99次 GET；304仍消耗 Worker request且通常仍需 KV read。remote change先受 KV最多60秒或更久的 visibility delay，再受至多一个完成后3秒间隔；没有实时或最大通知时限保证。
-17. **Autosync ordering uncertainty**：version、contentRevision、updatedAt、generation和 source comparison只阻止明确 stale response直接回滚。并发 writers可产生相等或不可比较 markers；repeated candidate与 explicit conflict不会建立 global total order或恢复被覆盖的内容。
-18. **Remote view-once transition**：ordinary page发出 resource GET后，另一 client已把 paste改为 view-once时，该 GET会按 frozen consume-on-body contract消费。response到达后 page立即停止 sync并转 local-only或 conflict；没有额外 metadata probe可在一个 GET、无 status-only接口的约束下消除这个 race。
+17. **Autosync ordering uncertainty**：version、contentRevision、updatedAt、generation和 source comparison只允许 proven-newer response自动 apply。并发 writers可产生相等或不可比较 markers；这些 response无论重复多少次都只保留 explicit candidate，不能建立 global total order或恢复被覆盖内容。
+18. **Remote view-once transition**：ordinary page发出 resource GET后，另一 client已把 paste改为 view-once时，该 GET会按 frozen consume-on-body contract消费。response到达后 page先永久移除 server能力并转 local-only；ordering不确定时只允许在内存中的两个 exact sources间选择，没有额外 metadata probe可消除该 race。
 
 以上风险是选定单 KV、plaintext credential、same-origin executable HTML、direct browser polling与无账户模型的直接结果。实现不得用未获批准的第二存储、token、sandbox、application CSP、push service、Cache或 rate limit暗中改变这些产品决策。
