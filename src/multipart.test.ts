@@ -496,6 +496,13 @@ describe("strict multipart create fields", () => {
     }
   });
 
+  it("rejects duplicate case-insensitive Content-Type parameters", async () => {
+    const boundary = "observe";
+    const body = bytes(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\nContent-Type: text/plain; charset=utf-8; CHARSET=ascii\r\n\r\nvalue\r\n--${boundary}--\r\n`);
+
+    await expect(fieldsFor(body, boundary)).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+  });
+
   it("accepts one valid Content-Type header and rejects unknown, duplicate, and malformed headers", async () => {
     const boundary = "part-headers";
     await expect(fieldsFor(multipart(boundary, [formPart("content", "literal", { extraHeaders: ["Content-Type: text/plain; charset=utf-8"] })]), boundary)).resolves.toMatchObject({

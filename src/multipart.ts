@@ -255,16 +255,20 @@ function parseContentType(source: string): void {
   const subtype = readToken(source, type.position + 1);
   if (subtype === undefined) throw badRequest();
   position = skipOws(source, subtype.position);
+  const parameters = new Set<string>();
   while (position < source.length) {
     if (source[position] !== ";") throw badRequest();
     position = skipOws(source, position + 1);
     const parameter = readToken(source, position);
     if (parameter === undefined) throw badRequest();
+    const key = parameter.value.toLowerCase();
     position = skipOws(source, parameter.position);
     if (source[position] !== "=") throw badRequest();
     position = skipOws(source, position + 1);
     const value = readParameterValue(source, position, () => { throw badRequest(); });
     position = skipOws(source, value.position);
+    if (parameters.has(key)) throw badRequest();
+    parameters.add(key);
   }
 }
 
