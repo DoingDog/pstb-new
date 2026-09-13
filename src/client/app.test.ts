@@ -75,7 +75,9 @@ import {
   AutosaveController,
   createAutosaveMarkdownModes,
   createHistoryDiff,
+  createThemeController,
   formatHistoryDiffLine,
+  withPastePassword,
   type AutosaveSaveRequest,
   type AutosaveSaveResult,
   type AutosaveSnapshot,
@@ -155,8 +157,10 @@ function localeFixture() {
   const error = element({ "data-i18n-error": "METHOD_NOT_ALLOWED" }, "Method not allowed");
   const title = element({ "data-i18n-title": "create" }, "Create a paste");
   const locale = element({ "data-action": "locale" }, "Language");
+  const theme = element({ "data-action": "theme", "data-theme-control": "", "aria-label": "Theme follows system. Switch theme." }, "");
+  const themeText = element({ "data-i18n-theme": "" }, "Theme follows system. Switch theme.");
   const document = {
-    documentElement: { lang: "en" },
+    documentElement: { lang: "en", dataset: {}, style: { colorScheme: "" } },
     title: "Create a paste",
     querySelector(): null {
       return null;
@@ -168,10 +172,39 @@ function localeFixture() {
       if (selector === "[data-i18n-error]") return [error];
       if (selector === "[data-i18n-title]") return [title];
       if (selector === '[data-action="locale"]') return [locale];
+      if (selector === '[data-action="theme"]') return [theme];
+      if (selector === "[data-theme-control]") return [theme];
+      if (selector === "[data-i18n-theme]") return [themeText];
       return [];
     },
   } as unknown as Document;
-  return { accessible, create, date, document, error, locale, status, title };
+  return { accessible, create, date, document, error, locale, status, theme, themeText, title };
+}
+
+function themeMedia(initial: boolean) {
+  let matches = initial;
+  const listeners: Array<(event: { matches: boolean }) => void> = [];
+  return {
+    media: {
+      get matches(): boolean {
+        return matches;
+      },
+      addEventListener(_type: string, listener: (event: { matches: boolean }) => void): void {
+        listeners.push(listener);
+      },
+      removeEventListener(_type: string, listener: (event: { matches: boolean }) => void): void {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      },
+    },
+    emit(next: boolean): void {
+      matches = next;
+      for (const listener of [...listeners]) listener({ matches });
+    },
+    listenerCount(): number {
+      return listeners.length;
+    },
+  };
 }
 
 class FakeClock {
@@ -636,6 +669,36 @@ describe("AutosaveController", () => {
 });
 
 describe("browser document state", () => {
+  it("follows the system theme until a manual override and removes its listener on dispose", () => {
+    const root: { dataset: { theme?: string }; style: { colorScheme: string } } = { dataset: {}, style: { colorScheme: "" } };
+    const media = themeMedia(true);
+    const changes: string[] = [];
+    const controller = createThemeController({
+      root,
+      media: media.media,
+      onThemeChange: (theme) => changes.push(theme),
+    });
+
+    expect(root.dataset.theme).toBe("dark");
+    expect(root.style.colorScheme).toBe("dark");
+    expect(media.listenerCount()).toBe(1);
+    media.emit(false);
+    expect(root.dataset.theme).toBe("light");
+
+    controller.toggle();
+    expect(root.dataset.theme).toBe("dark");
+    media.emit(false);
+    expect(root.dataset.theme).toBe("dark");
+    controller.toggle();
+    expect(root.dataset.theme).toBe("light");
+    expect(changes).toEqual(["dark", "light", "dark", "light"]);
+
+    controller.dispose();
+    expect(media.listenerCount()).toBe(0);
+    media.emit(true);
+    expect(root.dataset.theme).toBe("light");
+  });
+
   it("corrects the server locale, updates current copy, and installs one locale toggle", () => {
     const fixture = localeFixture();
     vi.stubGlobal("document", fixture.document);
@@ -669,6 +732,38 @@ describe("browser document state", () => {
     expect(fixture.locale.listenerCount()).toBe(1);
   });
 
+  it("installs one theme control that follows system changes until its manual override", () => {
+    const fixture = localeFixture();
+    const media = themeMedia(true);
+    vi.stubGlobal("document", fixture.document);
+    vi.stubGlobal("navigator", { languages: ["en-US"] });
+    vi.stubGlobal("location", { href: "https://paste.example/a" });
+    vi.stubGlobal("matchMedia", vi.fn(() => media.media));
+
+    browser.startApp();
+    browser.startApp();
+
+    expect(fixture.document.documentElement.dataset.theme).toBe("dark");
+    expect(fixture.document.documentElement.style.colorScheme).toBe("dark");
+    expect(fixture.themeText.textContent).toBe("Switch to light theme. Current theme: dark.");
+    expect(fixture.theme.getAttribute("aria-label")).toBe("Switch to light theme. Current theme: dark.");
+    expect(fixture.theme.listenerCount()).toBe(1);
+    expect(media.listenerCount()).toBe(1);
+
+    media.emit(false);
+    expect(fixture.document.documentElement.dataset.theme).toBe("light");
+    expect(fixture.themeText.textContent).toBe("Switch to dark theme. Current theme: light.");
+
+    fixture.theme.click();
+    expect(fixture.document.documentElement.dataset.theme).toBe("dark");
+    media.emit(false);
+    expect(fixture.document.documentElement.dataset.theme).toBe("dark");
+
+    fixture.locale.click();
+    expect(fixture.themeText.textContent).toBe("切换为浅色主题。当前主题：深色。");
+    expect(fixture.theme.getAttribute("aria-label")).toBe("切换为浅色主题。当前主题：深色。");
+  });
+
   it("rebuilds an untitled paste document title from its translation key and ID", () => {
     const title = {
       textContent: "Paste example",
@@ -691,12 +786,45 @@ describe("browser document state", () => {
     expect(document.title).toBe("剪贴板 example");
   });
 
+  it("rewrites passwords with URLSearchParams while preserving fragments and unrelated query values", () => {
+    const target = new URL("https://paste.example/raw/example?keep=one&password=old&keep=two&password=other#source");
+    const password = "  a+b %&#?  ";
+    const withPassword = withPastePassword(target, password);
+
+    expect(withPassword.searchParams.getAll("password")).toEqual([password]);
+    expect([...withPassword.searchParams.entries()]).toEqual([
+      ["keep", "one"],
+      ["keep", "two"],
+      ["password", password],
+    ]);
+    expect(withPassword.hash).toBe("#source");
+    expect(target.searchParams.getAll("password")).toEqual(["old", "other"]);
+
+    const cleared = withPastePassword(withPassword, null);
+    expect(cleared.searchParams.getAll("password")).toEqual([]);
+    expect([...cleared.searchParams.entries()]).toEqual([["keep", "one"], ["keep", "two"]]);
+    expect(cleared.hash).toBe("#source");
+
+    const clean = withPastePassword(new URL("https://paste.example/file/example#download"), null);
+    expect(clean.search).toBe("");
+    expect(clean.hash).toBe("#download");
+  });
+
+  it("accepts a startup password only when the query has exactly one value", () => {
+    vi.stubGlobal("document", {});
+    vi.stubGlobal("location", { href: "https://paste.example/a?password=one&password=two" });
+
+    browser.startApp();
+
+    expect(browser.currentPastePassword()).toBeNull();
+  });
+
   it("keeps password only in the current document and rewrites its unique URL query", () => {
     const replaceState = vi.fn();
     const localStorage = { setItem: vi.fn() };
     const sessionStorage = { setItem: vi.fn() };
     vi.stubGlobal("document", {});
-    vi.stubGlobal("location", { href: "https://paste.example/a?keep=yes&password=old+password" });
+    vi.stubGlobal("location", { href: "https://paste.example/a?keep=yes&password=old+password#source" });
     vi.stubGlobal("history", { state: { current: true }, replaceState });
     vi.stubGlobal("localStorage", localStorage);
     vi.stubGlobal("sessionStorage", sessionStorage);
@@ -704,16 +832,18 @@ describe("browser document state", () => {
     browser.startApp();
     expect(browser.currentPastePassword()).toBe("old password");
 
-    browser.setPastePassword("new +%&#?");
-    expect(browser.currentPastePassword()).toBe("new +%&#?");
+    browser.setPastePassword(" new +%&#? ");
+    expect(browser.currentPastePassword()).toBe(" new +%&#? ");
     const withPassword = new URL(String(replaceState.mock.calls[0]![2]));
-    expect(withPassword.searchParams.getAll("password")).toEqual(["new +%&#?"]);
+    expect(withPassword.searchParams.getAll("password")).toEqual([" new +%&#? "]);
     expect(withPassword.searchParams.get("keep")).toBe("yes");
+    expect(withPassword.hash).toBe("#source");
 
     browser.setPastePassword(null);
     const withoutPassword = new URL(String(replaceState.mock.calls[1]![2]));
     expect(withoutPassword.searchParams.has("password")).toBe(false);
     expect(withoutPassword.searchParams.get("keep")).toBe("yes");
+    expect(withoutPassword.hash).toBe("#source");
     expect(localStorage.setItem).not.toHaveBeenCalled();
     expect(sessionStorage.setItem).not.toHaveBeenCalled();
   });

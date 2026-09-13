@@ -258,9 +258,15 @@ describe("application documents", () => {
     ].join("\n");
     const annotated = [...html.matchAll(/data-i18n(?:-aria-label)?="([^"]+)"/g)].map((match) => match[1]).sort();
 
-    expect([...new Set(annotated)]).toEqual(Object.keys(dictionaries.en.labels).sort());
+    expect([...new Set(annotated)]).toEqual(Object.keys(dictionaries.en.labels).filter((key) => ![
+      "themeSystem",
+      "switchToDarkTheme",
+      "switchToLightTheme",
+    ].includes(key)).sort());
     expect(html).toContain('data-i18n-aria-label="application"');
     expect(html).toContain('data-i18n-aria-label="reveal"');
+    expect(html).toContain(`data-theme-control aria-label="${dictionaries.en.labels.themeSystem}"`);
+    expect(html).toContain(`<span data-i18n-theme>${dictionaries.en.labels.themeSystem}</span>`);
     expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
   });
 
@@ -365,6 +371,7 @@ describe("application documents", () => {
 
     expect(pages).toContain(`<html lang="${locale}">`);
     for (const [key, value] of Object.entries(dictionaries[locale].labels)) {
+      if (key === "switchToDarkTheme" || key === "switchToLightTheme") continue;
       expect(pages, key).toContain(value);
     }
   });

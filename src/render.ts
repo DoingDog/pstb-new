@@ -128,7 +128,7 @@ function localActions(copy: Labels): string {
 }
 
 function siteHeader(copy: Labels, location: string, actions = "", rootLabel = translated(copy, "brand")): string {
-  return `<header class="site-header"><nav class="site-nav" aria-label="${copy.application}" data-i18n-aria-label="application"><a href="/">${rootLabel}</a><p class="page-location">${location}</p><div class="utility-actions"><button type="button" data-action="locale"${i18nAttribute("locale")}>${copy.locale}</button><button type="button" data-action="theme"${i18nAttribute("theme")}>${copy.theme}</button>${actions}</div></nav></header>`;
+  return `<header class="site-header"><nav class="site-nav" aria-label="${copy.application}" data-i18n-aria-label="application"><a href="/">${rootLabel}</a><p class="page-location">${location}</p><div class="utility-actions"><button type="button" data-action="locale"${i18nAttribute("locale")}>${copy.locale}</button><button type="button" data-action="theme" data-theme-control aria-label="${copy.themeSystem}"><span${i18nAttribute("theme")}>${copy.theme}</span>: <span data-i18n-theme>${copy.themeSystem}</span></button>${actions}</div></nav></header>`;
 }
 
 function lifecycleItem(label: string, value: string): string {
