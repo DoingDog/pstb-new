@@ -120,6 +120,30 @@ describe("HTTP slice 1", () => {
     ]);
   });
 
+  it("cancels an overlong password while parsing streamed create JSON", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"content":"new","password":"${"x".repeat(65_536)}"}`));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "password" }] } },
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it("creates a multipart paste with form values normalized at the HTTP boundary", async () => {
     const id = `http-${crypto.randomUUID()}`;
     const form = new FormData();
@@ -314,6 +338,30 @@ describe("HTTP slice 1", () => {
     await deletePaste(id);
   });
 
+  it("rejects an overlong PATCH password before loading the paste", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"content":"new","password":"${"x".repeat(65_536)}"}`));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "password" }] } },
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it("rejects noncanonical PATCH payloads and version carriers before mutation", async () => {
     const id = `http-${crypto.randomUUID()}`;
     const createdResponse = await request("/api/pastes", {
@@ -467,6 +515,30 @@ describe("HTTP slice 1", () => {
     });
   });
 
+  it("rejects an overlong DELETE password before loading the paste", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"password":"${"x".repeat(65_536)}"}`));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "password" }] } },
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it("exposes only the canonical mutation method contract for a paste resource", async () => {
     const options = await request("/api/pastes/example", { method: "OPTIONS" });
     expect(options.status).toBe(204);
@@ -579,6 +651,49 @@ describe("HTTP slice 1", () => {
       await deletePaste(id);
     }
   });
+
+  it("preserves a leading UTF-8 BOM in PUT content", async () => {
+    const bom = String.fromCharCode(0xfeff);
+    const id = `http-${crypto.randomUUID()}`;
+    const created = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", customId: id, expiration: "permanent" }),
+    });
+    expect(created.status).toBe(201);
+
+    try {
+      const response = await request(`/api/pastes/${id}`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain; charset=utf-8" },
+        body: `${bom}new source`,
+      });
+      expect(response.status).toBe(200);
+      await expect((env as unknown as Env).PASTE_DB.get(id)).resolves.toBe(`${bom}new source`);
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it.each([
+    ["without a BOM", "x".repeat(10_485_760), 404],
+    ["with a BOM", `${String.fromCharCode(0xfeff)}${"x".repeat(10_485_757)}`, 404],
+    ["without a BOM plus one byte", "x".repeat(10_485_761), 413],
+    ["with a BOM plus one byte", `${String.fromCharCode(0xfeff)}${"x".repeat(10_485_758)}`, 413],
+  ])("enforces the 10 MiB PUT limit %s", async (_description, body, status) => {
+    const response = await request("/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body,
+    });
+
+    expect(response.status).toBe(status);
+    if (status === 413) {
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "CONTENT_TOO_LARGE", details: { maxBytes: 10_485_760 } },
+      });
+    }
+  }, 10_000);
 
   it("rejects wildcard, weak, list, space, and control If-Match values", async () => {
     for (const ifMatch of ["*", 'W/"version"', '"one", "two"', '"has space"', '"has\tcontrol"']) {

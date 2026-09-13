@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty } from "./json";
+import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonParsePolicy } from "./json";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
 import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
@@ -69,6 +69,48 @@ function requestTooLarge(): PasteError {
   return new PasteError("REQUEST_TOO_LARGE", 413, undefined, { maxBytes: wireBodyLimit });
 }
 
+function jsonStringLimitError(field: string): PasteError {
+  switch (field) {
+    case "content":
+      return contentTooLarge();
+    case "title":
+      return validationError("title", "Must contain at most 200 Unicode scalars.");
+    case "format":
+      return validationError("format", "Must be text or markdown.");
+    case "expiration":
+      return validationError("expiration", "Must be permanent, at least 60 seconds, or a timezone-bearing RFC3339 timestamp.");
+    case "password":
+      return validationError("password", "Must be empty or 1 to 128 visible ASCII characters.");
+    case "customId":
+      return validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
+    case "version":
+      return new PasteError("VERSION_CONFLICT", 409);
+    case "viewOnce":
+      return validationError("viewOnce", "Must be a boolean.");
+    case "body":
+      return validationError("body", "Unknown field.");
+    default:
+      return badRequest();
+  }
+}
+
+const httpJsonPolicy: StrictJsonParsePolicy = {
+  maxRetainedCodeUnits: contentBodyLimit + 4_096,
+  maxTopLevelKeyCodeUnits: "expiration".length,
+  topLevelStringMaxCodeUnits: new Map([
+    ["content", contentBodyLimit],
+    ["title", 400],
+    ["format", "markdown".length],
+    ["expiration", 29],
+    ["password", 128],
+    ["viewOnce", 0],
+    ["customId", 64],
+    ["version", 53],
+  ]),
+  onStringLimit: jsonStringLimitError,
+  onRetainedLimit: badRequest,
+};
+
 async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
   try {
     await body?.cancel();
@@ -94,7 +136,7 @@ async function parseTextContent(request: Request): Promise<string> {
   }
   if (request.body === null) return "";
 
-  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const reader = request.body.getReader();
   const chunks: string[] = [];
   let length = 0;
@@ -198,13 +240,18 @@ function parseMutationCredentials(value: Record<string, unknown>): MutationCrede
 
 async function parseContentPatch(request: Request): Promise<ContentPatch> {
   jsonMediaType(request);
-  const value = await parseStrictJsonObject(request, new Set(["content", "password", "version"]));
+  const value = await parseStrictJsonObject(request, new Set(["content", "password", "version"]), httpJsonPolicy);
   if (typeof value.content !== "string") throw validationError("content", "Must be a string.");
   return { content: value.content, ...parseMutationCredentials(value) };
 }
 
 async function parseDeleteBody(request: Request): Promise<MutationCredentials> {
-  const value = await parseStrictJsonObjectOrEmpty(request, new Set(["password", "version"]), () => jsonMediaType(request));
+  const value = await parseStrictJsonObjectOrEmpty(
+    request,
+    new Set(["password", "version"]),
+    () => jsonMediaType(request),
+    httpJsonPolicy,
+  );
   return value === undefined ? {} : parseMutationCredentials(value);
 }
 
@@ -259,7 +306,7 @@ async function parseMultipartCreate(request: Request): Promise<CreateInput> {
 
 async function parseCreate(request: Request): Promise<CreateInput> {
   return createMediaType(request) === "json"
-    ? createInput(await parseStrictJsonObject(request, createFields))
+    ? createInput(await parseStrictJsonObject(request, createFields, httpJsonPolicy))
     : parseMultipartCreate(request);
 }
 

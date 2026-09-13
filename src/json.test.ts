@@ -1,9 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { decodeUtf8, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, readLimitedBytes } from "./json";
+import {
+  decodeUtf8,
+  parseStrictJsonObject,
+  parseStrictJsonObjectOrEmpty,
+  readLimitedBytes,
+  type StrictJsonParsePolicy,
+} from "./json";
+import { PasteError } from "./types";
 
 const wireBodyLimit = 67_108_864;
+const contentBodyLimit = 10_485_760;
 
 type JsonValue = boolean | null | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+const fieldBoundPolicy: StrictJsonParsePolicy = {
+  maxRetainedCodeUnits: contentBodyLimit + 4_096,
+  maxTopLevelKeyCodeUnits: "expiration".length,
+  topLevelStringMaxCodeUnits: new Map([
+    ["content", contentBodyLimit],
+    ["title", 400],
+    ["format", "markdown".length],
+    ["expiration", 29],
+    ["password", 128],
+    ["customId", 64],
+    ["version", 53],
+  ]),
+  onStringLimit: (field) => field === "content"
+    ? new PasteError("CONTENT_TOO_LARGE", 413, undefined, { maxBytes: contentBodyLimit })
+    : new PasteError("VALIDATION_FAILED", 422),
+  onRetainedLimit: () => new PasteError("BAD_REQUEST", 400),
+};
 
 function request(body: BodyInit, headers?: HeadersInit): Request {
   return new Request("https://unit.test", {
@@ -253,6 +279,53 @@ describe("strict JSON boundary", () => {
     );
 
     expect(parsed.value).toBe(Infinity);
+  });
+
+  it.each([
+    ["content", "x".repeat(contentBodyLimit), "x".repeat(contentBodyLimit + 1), "CONTENT_TOO_LARGE"],
+    ["password", "x".repeat(128), "x".repeat(129), "VALIDATION_FAILED"],
+    ["customId", "x".repeat(64), "x".repeat(65), "VALIDATION_FAILED"],
+    ["title", "🙂".repeat(200), `${"🙂".repeat(200)}x`, "VALIDATION_FAILED"],
+    ["format", "markdown", "markdownx", "VALIDATION_FAILED"],
+    ["expiration", "9999-12-31T23:59:59.999+23:59", "9999-12-31T23:59:59.999+23:590", "VALIDATION_FAILED"],
+    ["version", "123e4567-e89b-42d3-a456-426614174000.9007199254740991", "123e4567-e89b-42d3-a456-426614174000.90071992547409910", "VALIDATION_FAILED"],
+  ])("retains %s through its exact field bound and rejects one decoded code unit over", async (field, exact, over, code) => {
+    const allowedKeys = new Set([field]);
+    await expect(parseStrictJsonObject(request(JSON.stringify({ [field]: exact })), allowedKeys, fieldBoundPolicy)).resolves.toEqual({ [field]: exact });
+    await expect(parseStrictJsonObject(request(JSON.stringify({ [field]: over })), allowedKeys, fieldBoundPolicy)).rejects.toMatchObject({ code });
+  });
+
+  it.each([
+    ["arrays", `{"password":[${Array(128).fill("0").join(",")}]}`],
+    ["objects", `{"password":{${Array.from({ length: 64 }, (_value, index) => `"key${index}":0`).join(",")}}}`],
+    ["small strings", `{"password":[${Array(128).fill('"x"').join(",")}]}`],
+  ])("bounds aggregate retained parser state for malformed nested %s", async (_kind, source) => {
+    const policy: StrictJsonParsePolicy = { ...fieldBoundPolicy, maxRetainedCodeUnits: 1_024 };
+    await expect(parseStrictJsonObject(request(source), new Set(["password"]), policy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+  });
+
+  it("preserves a field overflow when cancellation of one large input chunk rejects", async () => {
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"password":"${"x".repeat(65_536)}"}`));
+      },
+      cancel() {
+        cancelled += 1;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const overflow = streamedRequest(body);
+
+    await expect(parseStrictJsonObject(overflow, new Set(["password"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+    });
+    expect(cancelled).toBe(1);
+    expect(overflow.body?.locked).toBe(false);
   });
 
   it("reads a body with the supplied byte limit and decodes valid UTF-8", async () => {

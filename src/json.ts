@@ -3,6 +3,7 @@ import { PasteError } from "./types";
 const maxRequestBytes = 67_108_864;
 const maxJsonDepth = 256;
 const tokenBlockLength = 8_192;
+const retainedContainerUnits = 256;
 
 const whitespace = /[ \t\n\r]+/y;
 
@@ -44,6 +45,15 @@ class FlatTextBuffer {
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
+
+export type StrictJsonParsePolicy = {
+  maxRetainedCodeUnits: number;
+  maxTopLevelKeyCodeUnits: number;
+  topLevelStringMaxCodeUnits: ReadonlyMap<string, number>;
+  onStringLimit: (field: string) => PasteError;
+  onRetainedLimit: () => PasteError;
+};
+
 type ParserState = "normal" | "string" | "escape" | "unicode" | "number" | "literal";
 type NumberState =
   | "minus"
@@ -161,6 +171,7 @@ export function decodeUtf8(bytes: Uint8Array): string {
 }
 
 class StrictJsonParser {
+  #allowedTopLevelKeys: ReadonlySet<string> | undefined;
   #frameStack: Frame[] = [];
   #hasRoot = false;
   #literal = "";
@@ -168,10 +179,20 @@ class StrictJsonParser {
   #literalValue: boolean | null = null;
   #number = new FlatTextBuffer();
   #numberState: NumberState = "minus";
+  #policy: StrictJsonParsePolicy | undefined;
+  #retainedCodeUnits = 0;
   #root: JsonValue | undefined;
   #state: ParserState = "normal";
   #string = new FlatTextBuffer();
+  #stringLength = 0;
+  #stringLimit: number | undefined;
+  #stringLimitField: string | undefined;
   #unicode = "";
+
+  constructor(allowedTopLevelKeys?: ReadonlySet<string>, policy?: StrictJsonParsePolicy) {
+    this.#allowedTopLevelKeys = allowedTopLevelKeys;
+    this.#policy = policy;
+  }
 
   write(source: string): void {
     let position = 0;
@@ -260,7 +281,7 @@ class StrictJsonParser {
 
   private readString(source: string, position: number): number {
     const end = this.findStringSpecial(source, position);
-    if (end > position) this.#string.append(source, position, end);
+    if (end > position) this.appendString(source, position, end);
     if (end === source.length) return end;
 
     const character = source[end]!;
@@ -291,27 +312,27 @@ class StrictJsonParser {
       case '"':
       case "\\":
       case "/":
-        this.#string.append(character);
+        this.appendString(character);
         this.#state = "string";
         return position + 1;
       case "b":
-        this.#string.append("\b");
+        this.appendString("\b");
         this.#state = "string";
         return position + 1;
       case "f":
-        this.#string.append("\f");
+        this.appendString("\f");
         this.#state = "string";
         return position + 1;
       case "n":
-        this.#string.append("\n");
+        this.appendString("\n");
         this.#state = "string";
         return position + 1;
       case "r":
-        this.#string.append("\r");
+        this.appendString("\r");
         this.#state = "string";
         return position + 1;
       case "t":
-        this.#string.append("\t");
+        this.appendString("\t");
         this.#state = "string";
         return position + 1;
       case "u":
@@ -328,7 +349,7 @@ class StrictJsonParser {
     if (!this.isHexadecimal(character)) this.invalid();
     this.#unicode += character;
     if (this.#unicode.length === 4) {
-      this.#string.append(String.fromCharCode(Number.parseInt(this.#unicode, 16)));
+      this.appendString(String.fromCharCode(Number.parseInt(this.#unicode, 16)));
       this.#state = "string";
     }
     return position + 1;
@@ -412,6 +433,7 @@ class StrictJsonParser {
   private startContainer(kind: Frame["kind"]): void {
     this.assertValueExpected();
     if (this.#frameStack.length >= maxJsonDepth) this.invalid();
+    this.retain(retainedContainerUnits);
     if (kind === "array") {
       this.#frameStack.push({ kind, state: "valueOrEnd", value: [] });
     } else {
@@ -449,6 +471,9 @@ class StrictJsonParser {
     const frame = this.#frameStack.at(-1);
     if (frame?.kind === "object" && (frame.state === "keyOrEnd" || frame.state === "key")) {
       if (frame.keys.has(value)) throw validationError(value, "Duplicate field.");
+      if (this.#policy !== undefined && this.#frameStack.length === 1 && !this.#allowedTopLevelKeys?.has(value)) {
+        throw validationError(value, "Unknown field.");
+      }
       frame.keys.add(value);
       frame.key = value;
       frame.state = "colon";
@@ -468,12 +493,14 @@ class StrictJsonParser {
 
     if (frame.kind === "array") {
       if (frame.state !== "valueOrEnd" && frame.state !== "value") this.invalid();
+      this.retain(retainedContainerUnits);
       frame.value.push(value);
       frame.state = "commaOrEnd";
       return;
     }
 
     if (frame.state !== "value" || frame.key === undefined) this.invalid();
+    this.retain(retainedContainerUnits);
     Object.defineProperty(frame.value, frame.key, { enumerable: true, configurable: true, writable: true, value });
     frame.key = undefined;
     frame.state = "commaOrEnd";
@@ -495,11 +522,46 @@ class StrictJsonParser {
 
   private startString(): void {
     this.#string.reset();
+    this.#stringLength = 0;
+    this.#stringLimit = undefined;
+    this.#stringLimitField = undefined;
+
+    const policy = this.#policy;
+    const frame = this.#frameStack.at(-1);
+    if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1) {
+      if (frame.state === "keyOrEnd" || frame.state === "key") {
+        this.#stringLimit = policy.maxTopLevelKeyCodeUnits;
+        this.#stringLimitField = "body";
+      } else if (frame.state === "value" && frame.key !== undefined) {
+        const limit = policy.topLevelStringMaxCodeUnits.get(frame.key);
+        if (limit !== undefined) {
+          this.#stringLimit = limit;
+          this.#stringLimitField = frame.key;
+        }
+      }
+    }
     this.#state = "string";
+  }
+
+  private appendString(source: string, start = 0, end = source.length): void {
+    const length = end - start;
+    if (this.#stringLimit !== undefined && this.#stringLength > this.#stringLimit - length) {
+      throw this.#policy!.onStringLimit(this.#stringLimitField!);
+    }
+    this.retain(length);
+    this.#string.append(source, start, end);
+    this.#stringLength += length;
   }
 
   private finishString(): string {
     return this.#string.finish();
+  }
+
+  private retain(codeUnits: number): void {
+    const policy = this.#policy;
+    if (policy === undefined) return;
+    if (codeUnits > policy.maxRetainedCodeUnits - this.#retainedCodeUnits) throw policy.onRetainedLimit();
+    this.#retainedCodeUnits += codeUnits;
   }
 
   private startNumber(source: string, position: number): number {
@@ -548,11 +610,25 @@ class StrictJsonParser {
   }
 }
 
-function decodeChunk(decoder: TextDecoder, bytes: Uint8Array, stream: boolean): string {
-  try {
-    return decoder.decode(bytes, { stream });
-  } catch {
-    throw badRequest();
+function decodeChunk(decoder: TextDecoder, bytes: Uint8Array, stream: boolean, write: (source: string) => void): void {
+  if (!stream) {
+    let source: string;
+    try {
+      source = decoder.decode(bytes);
+    } catch {
+      throw badRequest();
+    }
+    write(source);
+    return;
+  }
+  for (let start = 0; start < bytes.byteLength; start += tokenBlockLength) {
+    let source: string;
+    try {
+      source = decoder.decode(bytes.subarray(start, Math.min(start + tokenBlockLength, bytes.byteLength)), { stream: true });
+    } catch {
+      throw badRequest();
+    }
+    write(source);
   }
 }
 
@@ -561,14 +637,15 @@ async function parseStrictJsonObjectValue(
   allowedKeys: ReadonlySet<string>,
   allowEmpty: boolean,
   onNonEmpty?: () => void,
+  policy?: StrictJsonParsePolicy,
 ): Promise<JsonObject | undefined> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  const parser = new StrictJsonParser();
+  const parser = new StrictJsonParser(allowedKeys, policy);
   const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
-    parser.write(decodeChunk(decoder, chunk, true));
+    decodeChunk(decoder, chunk, true, (source) => parser.write(source));
   }, onNonEmpty);
   if (!hasBytes && allowEmpty) return undefined;
-  parser.write(decodeChunk(decoder, new Uint8Array(), false));
+  decodeChunk(decoder, new Uint8Array(), false, (source) => parser.write(source));
 
   const value = parser.finish();
   if (value === null || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -581,14 +658,19 @@ async function parseStrictJsonObjectValue(
   return value as JsonObject;
 }
 
-export async function parseStrictJsonObject(request: Request, allowedKeys: ReadonlySet<string>): Promise<JsonObject> {
-  return (await parseStrictJsonObjectValue(request, allowedKeys, false))!;
+export async function parseStrictJsonObject(
+  request: Request,
+  allowedKeys: ReadonlySet<string>,
+  policy?: StrictJsonParsePolicy,
+): Promise<JsonObject> {
+  return (await parseStrictJsonObjectValue(request, allowedKeys, false, undefined, policy))!;
 }
 
 export async function parseStrictJsonObjectOrEmpty(
   request: Request,
   allowedKeys: ReadonlySet<string>,
   onNonEmpty: () => void = () => {},
+  policy?: StrictJsonParsePolicy,
 ): Promise<JsonObject | undefined> {
-  return parseStrictJsonObjectValue(request, allowedKeys, true, onNonEmpty);
+  return parseStrictJsonObjectValue(request, allowedKeys, true, onNonEmpty, policy);
 }
