@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { BoundedDecimalNumberAccumulator, impossibleOpaqueMatch, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
-import { parseMultipartBoundary } from "./multipart";
+import { parseMultipartBoundary, parseMultipartCreateFields } from "./multipart";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
 import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
@@ -439,51 +439,6 @@ async function parseTextContent(request: Request): Promise<string> {
   }
 }
 
-async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuffer>> {
-  const body = request.body;
-  const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && /^\d+$/.test(contentLength) && BigInt(contentLength) > BigInt(wireBodyLimit)) {
-    try {
-      await body?.cancel();
-    } catch {
-      // Preserve the boundary error that caused cancellation.
-    }
-    throw requestTooLarge();
-  }
-  if (body === null) return new Uint8Array();
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value === undefined) continue;
-      if (value.byteLength > wireBodyLimit - length) {
-        try {
-          await reader.cancel();
-        } catch {
-          // Preserve the boundary error that caused cancellation.
-        }
-        throw requestTooLarge();
-      }
-      chunks.push(value);
-      length += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
 type OpaqueMutationValue = string | typeof impossibleOpaqueMatch;
 type MutationCredentials = { password?: OpaqueMutationValue; version?: OpaqueMutationValue };
 type ContentPatch = MutationCredentials & { content: string };
@@ -548,22 +503,7 @@ function contentUpdateInput(content: string, password: OpaqueMutationValue | und
 }
 
 async function parseMultipartCreate(request: Request, boundary: string): Promise<CreateInput> {
-  const bytes = await readMultipartBytes(request);
-  let form: FormData;
-  try {
-    const contentType = `multipart/form-data; boundary="${boundary.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-    form = await new Response(bytes, { headers: { "Content-Type": contentType } }).formData();
-  } catch {
-    throw new PasteError("BAD_REQUEST", 400);
-  }
-
-  const values: Record<string, string> = Object.create(null);
-  for (const [name, value] of form) {
-    if (!createFields.has(name)) throw validationError(name, "Unknown field.");
-    if (Object.hasOwn(values, name)) throw validationError(name, "Duplicate field.");
-    if (typeof value !== "string") throw validationError(name, "Must be a string.");
-    values[name] = value;
-  }
+  const values = await parseMultipartCreateFields(request, boundary);
   if (!Object.hasOwn(values, "viewOnce")) throw validationError("viewOnce", "Required.");
 
   const input: Record<string, unknown> = { ...values };

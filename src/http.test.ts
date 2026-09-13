@@ -43,6 +43,59 @@ function rawContentTypeRequest(path: string, method: string, contentType: string
   } as Request;
 }
 
+type HttpMultipartPart = { headers: readonly string[]; body: string | Uint8Array };
+
+function multipartBody(boundary: string, parts: readonly HttpMultipartPart[], close = true): Uint8Array {
+  const encoder = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  for (const part of parts) {
+    chunks.push(encoder.encode(`--${boundary}\r\n`));
+    for (const header of part.headers) chunks.push(encoder.encode(`${header}\r\n`));
+    chunks.push(encoder.encode("\r\n"));
+    chunks.push(typeof part.body === "string" ? encoder.encode(part.body) : part.body);
+    chunks.push(encoder.encode("\r\n"));
+  }
+  if (close) chunks.push(encoder.encode(`--${boundary}--\r\n`));
+  const result = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function multipartField(name: string, body: string | Uint8Array, extraHeaders: readonly string[] = []): HttpMultipartPart {
+  return { headers: [`Content-Disposition: form-data; name="${name}"`, ...extraHeaders], body };
+}
+
+function streamBytes(bytes: Uint8Array, chunkBytes: number): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset === bytes.byteLength) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(offset + chunkBytes, bytes.byteLength);
+      controller.enqueue(bytes.subarray(offset, end));
+      offset = end;
+    },
+  });
+}
+
+function multipartCreateRequest(
+  body: Uint8Array | ReadableStream<Uint8Array>,
+  contentType: string,
+  headers: HeadersInit = {},
+): Request {
+  return new Request("https://paste.test/api/pastes", {
+    method: "POST",
+    headers: { "content-type": contentType, ...headers },
+    body: body instanceof Uint8Array ? streamBytes(body, body.byteLength) : body,
+  });
+}
+
 describe("HTTP slice 1", () => {
   it("serves the create page and its exact root method contract", async () => {
     const get = await request("/", { headers: { "accept-language": "zh-CN" } });
@@ -707,6 +760,176 @@ describe("HTTP slice 1", () => {
     }
   });
 
+  it("streams a quoted-pair multipart boundary one byte at a time without stripping a content BOM", async () => {
+    const app = createHttpApp(env as unknown as Env);
+    const id = `http-${crypto.randomUUID()}`;
+    const boundary = "stream;boundary";
+    const body = multipartBody(boundary, [
+      multipartField("content", `${String.fromCharCode(0xfeff)}multipart source`),
+      multipartField("viewOnce", "false"),
+      multipartField("customId", id),
+    ]);
+
+    try {
+      const response = await app.fetch(multipartCreateRequest(
+        streamBytes(body, 1),
+        'multipart/form-data; boundary="stream\\;boundary"',
+      ));
+
+      expect(response.status).toBe(201);
+      await expect((env as unknown as Env).PASTE_DB.get(id)).resolves.toBe(`${String.fromCharCode(0xfeff)}multipart source`);
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("preserves strict multipart parser errors through the create route", async () => {
+    const boundary = "strict-errors";
+    const cases = [
+      {
+        name: "fatal malformed UTF-8",
+        body: (id: string) => multipartBody(boundary, [
+          multipartField("content", Uint8Array.of(0xc3, 0x28)),
+          multipartField("viewOnce", "false"),
+          multipartField("customId", id),
+        ]),
+        error: { code: "BAD_REQUEST", status: 400 },
+      },
+      {
+        name: "filename parts",
+        body: (id: string) => multipartBody(boundary, [
+          { headers: ['Content-Disposition: form-data; name="content"; filename="upload.txt"'], body: "source" },
+          multipartField("viewOnce", "false"),
+          multipartField("customId", id),
+        ]),
+        error: { code: "VALIDATION_FAILED", status: 422, details: { fields: [{ field: "content", message: "Must be a string." }] } },
+      },
+      {
+        name: "RFC2231 filename variants",
+        body: (id: string) => multipartBody(boundary, [
+          { headers: ['Content-Disposition: form-data; name="content"; filename*0*=utf-8\'\'upload.txt'], body: "source" },
+          multipartField("viewOnce", "false"),
+          multipartField("customId", id),
+        ]),
+        error: { code: "VALIDATION_FAILED", status: 422, details: { fields: [{ field: "content", message: "Must be a string." }] } },
+      },
+      {
+        name: "case-insensitive duplicate part Content-Type parameters",
+        body: (id: string) => multipartBody(boundary, [
+          multipartField("content", "source", ["Content-Type: text/plain; charset=utf-8; CHARSET=ascii"]),
+          multipartField("viewOnce", "false"),
+          multipartField("customId", id),
+        ]),
+        error: { code: "BAD_REQUEST", status: 400 },
+      },
+      {
+        name: "a malformed closing delimiter",
+        body: (id: string) => multipartBody(boundary, [
+          multipartField("content", "source"),
+          multipartField("viewOnce", "false"),
+          multipartField("customId", id),
+        ], false),
+        error: { code: "BAD_REQUEST", status: 400 },
+      },
+      {
+        name: "LF-only framing",
+        body: (id: string) => new TextEncoder().encode(
+          new TextDecoder().decode(multipartBody(boundary, [
+            multipartField("content", "source"),
+            multipartField("viewOnce", "false"),
+            multipartField("customId", id),
+          ])).replaceAll("\r\n", "\n"),
+        ),
+        error: { code: "BAD_REQUEST", status: 400 },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const id = `http-${crypto.randomUUID()}`;
+      try {
+        const response = await createHttpApp(env as unknown as Env).fetch(multipartCreateRequest(
+          streamBytes(testCase.body(id), 1),
+          `multipart/form-data; boundary=${boundary}`,
+        ));
+
+        expect(response.status, testCase.name).toBe(testCase.error.status);
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: testCase.error.code,
+            message: testCase.error.code === "BAD_REQUEST" ? "The request is malformed." : "One or more fields are invalid.",
+            ...(testCase.error.details === undefined ? {} : { details: testCase.error.details }),
+          },
+        });
+      } finally {
+        await deletePaste(id);
+      }
+    }
+  });
+
+  it("accepts a declared 64 MiB multipart Content-Length", async () => {
+    const boundary = "wire-limit";
+    const id = `http-${crypto.randomUUID()}`;
+    const exact = multipartBody(boundary, [
+      multipartField("content", "source"),
+      multipartField("viewOnce", "false"),
+      multipartField("customId", id),
+    ]);
+
+    try {
+      const accepted = await createHttpApp(env as unknown as Env).fetch(multipartCreateRequest(
+        exact,
+        `multipart/form-data; boundary=${boundary}`,
+        { "content-length": String(wireBodyLimit) },
+      ));
+      expect(accepted.status).toBe(201);
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("accepts exactly 10 MiB multipart content and rejects a split multibyte scalar over it", async () => {
+    const boundary = "content-limit";
+    const id = `http-${crypto.randomUUID()}`;
+    const content = new Uint8Array(10_485_760).fill(0x61);
+    const exact = multipartBody(boundary, [
+      multipartField("content", content),
+      multipartField("viewOnce", "false"),
+      multipartField("customId", id),
+    ]);
+
+    try {
+      const response = await createHttpApp(env as unknown as Env).fetch(multipartCreateRequest(
+        streamBytes(exact, 65_537),
+        `multipart/form-data; boundary=${boundary}`,
+      ));
+      expect(response.status).toBe(201);
+    } finally {
+      await deletePaste(id);
+    }
+
+    const split = new Uint8Array(10_485_761);
+    split.fill(0x61, 0, 10_485_759);
+    split.set([0xc2, 0xa2], 10_485_759);
+    const tooLarge = multipartBody(boundary, [
+      multipartField("content", split),
+      multipartField("viewOnce", "false"),
+    ]);
+    const contentPrefixLength = new TextEncoder().encode(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n`).byteLength;
+    const response = await createHttpApp(env as unknown as Env).fetch(multipartCreateRequest(
+      streamBytes(tooLarge, contentPrefixLength + 10_485_760),
+      `multipart/form-data; boundary=${boundary}`,
+    ));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "CONTENT_TOO_LARGE",
+        message: "The content exceeds the maximum size.",
+        details: { maxBytes: 10_485_760 },
+      },
+    });
+  }, 60_000);
+
   it("accepts Content-Type tokens, quoted-pairs, case, and HTTP OWS", async () => {
     const app = createHttpApp(env as unknown as Env);
     const id = `http-${crypto.randomUUID()}`;
@@ -1167,7 +1390,7 @@ describe("HTTP slice 1", () => {
     expect(cancelled).toBe(true);
   });
 
-  it("cancels an oversized multipart stream without Content-Length", async () => {
+  it("preserves malformed multipart before its unknown-length wire limit", async () => {
     let chunks = 0;
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
@@ -1192,14 +1415,14 @@ describe("HTTP slice 1", () => {
       body,
     }));
 
-    expect(response.status).toBe(413);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+      error: { code: "BAD_REQUEST" },
     });
     expect(cancelled).toBe(true);
   });
 
-  it("preserves REQUEST_TOO_LARGE when counted multipart cancellation rejects", async () => {
+  it("preserves malformed multipart when cancellation rejects", async () => {
     let chunks = 0;
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
@@ -1225,9 +1448,9 @@ describe("HTTP slice 1", () => {
       body,
     }));
 
-    expect(response.status).toBe(413);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+      error: { code: "BAD_REQUEST" },
     });
     expect(cancelled).toBe(true);
   });
