@@ -478,6 +478,7 @@ interface LocalizedElement {
 
 export interface LocaleDocument {
   documentElement: { lang: string };
+  title: string;
   querySelectorAll(selector: string): Iterable<LocalizedElement>;
 }
 
@@ -493,6 +494,12 @@ export function updateDocumentLocale(root: LocaleDocument, locale: Locale): void
   const dictionary = dictionaries[locale];
   root.documentElement.lang = locale;
 
+  for (const element of root.querySelectorAll("[data-i18n-title]")) {
+    const key = element.getAttribute("data-i18n-title");
+    if (!isLabelKey(key)) continue;
+    const suffix = element.getAttribute("data-i18n-title-suffix");
+    root.title = `${dictionary.labels[key]}${suffix === null ? "" : ` ${suffix}`}`;
+  }
   for (const element of root.querySelectorAll("[data-i18n]")) {
     const key = element.getAttribute("data-i18n");
     if (isLabelKey(key)) element.textContent = dictionary.labels[key];

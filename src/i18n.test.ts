@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertDictionaryParity,
   dictionaries,
+  errorMessage,
   formatDate,
   resolveBrowserLocale,
   resolveServerLocale,
@@ -15,6 +16,23 @@ describe("i18n", () => {
       en: { create: "Create" },
       "zh-CN": { paste: "粘贴内容" },
     } as never)).toThrow("dictionary keys do not match");
+  });
+
+  it("pairs every displayed error with a localized recovery action and normalizes unknown codes", () => {
+    for (const locale of ["en", "zh-CN"] as const) {
+      for (const message of Object.values(dictionaries[locale].errors)) {
+        expect(message).toMatch(locale === "en" ? /\.\s+\S/ : /。\S/);
+      }
+    }
+
+    expect(dictionaries.en.errors.METHOD_NOT_ALLOWED).toBe("Method not allowed. Return to the create page.");
+    expect(errorMessage("zh-CN", "UNKNOWN_ERROR")).toBe(dictionaries["zh-CN"].errors.INTERNAL_ERROR);
+    expect(dictionaries["zh-CN"].labels).toMatchObject({
+      create: "创建剪贴板",
+      submit: "创建剪贴板",
+      delete: "删除剪贴板",
+      paste: "剪贴板",
+    });
   });
 
   it("selects the first supported browser language and falls back to the document locale", () => {

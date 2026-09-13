@@ -2,7 +2,7 @@ import { micromark } from "micromark";
 import { gfm, gfmHtml } from "micromark-extension-gfm";
 import { validateTitle } from "./pastes";
 import { assetPaths } from "./generated/assets";
-import { errorMessage, formatDate, labels, type ErrorMessageCode, type LabelKey, type Labels, type Locale } from "./i18n";
+import { errorMessage, formatDate, labels, normalizeErrorMessageCode, type ErrorMessageCode, type LabelKey, type Labels, type Locale } from "./i18n";
 import { encodeSourceData, sourceDataEncoding } from "./source-data";
 import type { PasteSummary } from "./types";
 
@@ -18,14 +18,12 @@ export interface PastePageModel {
 
 export interface PasswordPageModel {
   locale: Locale;
-  error?: string;
   errorCode?: ErrorMessageCode;
 }
 
 export interface ErrorPageModel {
   locale: Locale;
-  error: string;
-  errorCode?: ErrorMessageCode;
+  errorCode: ErrorMessageCode;
 }
 
 export interface MarkdownDocumentModel {
@@ -81,8 +79,8 @@ function i18nAttribute(key: LabelKey): string {
   return ` data-i18n="${key}"`;
 }
 
-function translatedError(locale: Locale, error: string, code: ErrorMessageCode | undefined): string {
-  return escapeText(code === undefined ? error : errorMessage(locale, code));
+function translatedError(locale: Locale, code: string | undefined): string {
+  return escapeText(errorMessage(locale, code));
 }
 
 function documentTitle(locale: Locale, paste: PasteSummary): string {
@@ -93,13 +91,16 @@ function sourceData(content: string): string {
   return `<script id="source-data" type="application/octet-stream" data-source-encoding="${sourceDataEncoding}">${encodeSourceData(content)}</script>`;
 }
 
-function pageDocument(locale: Locale, page: string, title: string, body: string, bootstrap: unknown, content?: string): string {
+function pageDocument(locale: Locale, page: string, title: string, body: string, bootstrap: unknown, content?: string, titleKey?: LabelKey, titleSuffix?: string): string {
+  const titleMetadata = titleKey === undefined
+    ? ""
+    : ` data-i18n-title="${titleKey}"${titleSuffix === undefined ? "" : ` data-i18n-title-suffix="${escapeText(titleSuffix)}"`}`;
   return `<!doctype html>
 <html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeText(title)}</title>
+<title${titleMetadata}>${escapeText(title)}</title>
 <link rel="stylesheet" href="${escapeText(assetPaths.appCss)}">
 </head>
 <body data-page="${page}">
@@ -215,7 +216,7 @@ ${createLifecycleRail(copy)}
 </form>
 </section>
 </main>`;
-  return pageDocument(locale, "create", copy.create, body, { page: "create", locale });
+  return pageDocument(locale, "create", copy.create, body, { page: "create", locale }, undefined, "create");
 }
 
 export function renderPastePage(model: PastePageModel): string {
@@ -223,6 +224,8 @@ export function renderPastePage(model: PastePageModel): string {
   const copy = labels(model.locale);
   const restricted = paste.viewOnce || model.consumed === true;
   const title = documentTitle(model.locale, paste);
+  const untitled = paste.title === "";
+  const heading = untitled ? `${translated(copy, "paste")} ${escapeText(paste.id)}` : escapeText(title);
   const contentView = pasteContentView(model.content, paste.format);
   const headerActions = restricted
     ? `<button type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`
@@ -235,35 +238,37 @@ export function renderPastePage(model: PastePageModel): string {
   const body = `${header}
 <main class="workbench" data-workbench="paste" data-consumed="${restricted}">
 ${pasteLifecycleRail(model.locale, copy, paste)}
-<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${escapeText(title)}</h1>${restricted ? restrictedBody : ordinaryBody}<p id="paste-status" aria-live="polite"></p></section>
+<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${heading}</h1>${restricted ? restrictedBody : ordinaryBody}<p id="paste-status" aria-live="polite"></p></section>
 </main>`;
   const bootstrap = restricted
     ? { page: "paste", locale: model.locale, consumed: true }
     : { page: "paste", paste, consumed: false };
-  return pageDocument(model.locale, "paste", title, body, bootstrap, model.content);
+  return pageDocument(model.locale, "paste", title, body, bootstrap, model.content, untitled ? "paste" : undefined, untitled ? paste.id : undefined);
 }
 
 export function renderPasswordPage(model: PasswordPageModel): string {
   const copy = labels(model.locale);
-  const message = model.error === undefined
+  const errorCode = normalizeErrorMessageCode(model.errorCode);
+  const message = model.errorCode === undefined
     ? `<p id="password-error" class="field-error" hidden></p>`
-    : `<p id="password-error" class="field-error" role="alert"${model.errorCode === undefined ? "" : ` data-i18n-error="${model.errorCode}"`}>${translatedError(model.locale, model.error, model.errorCode)}</p>`;
+    : `<p id="password-error" class="field-error" role="alert" data-i18n-error="${errorCode}">${translatedError(model.locale, model.errorCode)}</p>`;
   const body = `${siteHeader(copy, translated(copy, "passwordRequired"))}
 <main class="workbench" data-workbench="password">
 ${statusLifecycleRail(translated(copy, "passwordRequired"))}
 <section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${translated(copy, "passwordRequired")}</h1><form class="workbench-form" method="post"><div class="form-section"><label for="password">${translated(copy, "password")}</label><input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error">${message}</div><div class="form-actions"><button class="primary-action" type="submit"${i18nAttribute("continue")}>${copy.continue}</button></div></form></section>
 </main>`;
-  return pageDocument(model.locale, "password", copy.passwordRequired, body, { page: "password", locale: model.locale });
+  return pageDocument(model.locale, "password", copy.passwordRequired, body, { page: "password", locale: model.locale }, undefined, "passwordRequired");
 }
 
 export function renderErrorPage(model: ErrorPageModel): string {
   const copy = labels(model.locale);
+  const errorCode = normalizeErrorMessageCode(model.errorCode);
   const body = `${siteHeader(copy, translated(copy, "error"))}
 <main class="workbench" data-workbench="error">
 ${statusLifecycleRail(translated(copy, "error"))}
-<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${translated(copy, "error")}</h1><p role="alert"${model.errorCode === undefined ? "" : ` data-i18n-error="${model.errorCode}"`}>${translatedError(model.locale, model.error, model.errorCode)}</p><p><a href="/"${i18nAttribute("create")}>${copy.create}</a></p></section>
+<section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${translated(copy, "error")}</h1><p role="alert" data-i18n-error="${errorCode}">${translatedError(model.locale, model.errorCode)}</p><p><a href="/"${i18nAttribute("create")}>${copy.create}</a></p></section>
 </main>`;
-  return pageDocument(model.locale, "error", copy.error, body, { page: "error", locale: model.locale });
+  return pageDocument(model.locale, "error", copy.error, body, { page: "error", locale: model.locale }, undefined, "error");
 }
 
 export function renderMarkdownDocument(model: MarkdownDocumentModel): string {
@@ -271,18 +276,20 @@ export function renderMarkdownDocument(model: MarkdownDocumentModel): string {
   const copy = labels(model.locale);
   const restricted = paste.viewOnce;
   const title = documentTitle(model.locale, paste);
+  const untitled = paste.title === "";
+  const heading = untitled ? `${translated(copy, "paste")} ${escapeText(paste.id)}` : escapeText(title);
   const actions = restricted
     ? `<button class="markdown-document-action" type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`
     : `<a class="markdown-document-action" data-action="open-source" href="${escapeText(paste.links.view)}"${i18nAttribute("openSource")}>${copy.openSource}</a><button class="markdown-document-action" type="button" data-action="copy"${i18nAttribute("copy")}>${copy.copy}</button>`;
   const body = `${siteHeader(copy, pasteLocation(copy, paste), actions, restricted ? translated(copy, "create") : translated(copy, "brand"))}
 <main class="workbench" data-workbench="markdown" data-consumed="${restricted}">
 ${pasteLifecycleRail(model.locale, copy, paste)}
-<section class="workbench-surface markdown-document" aria-labelledby="page-title"><article><h1 id="page-title">${escapeText(title)}</h1>${renderMarkdown(model.content)}</article></section>
+<section class="workbench-surface markdown-document" aria-labelledby="page-title"><article><h1 id="page-title">${heading}</h1>${renderMarkdown(model.content)}</article></section>
 </main>`;
   const bootstrap = restricted
     ? { page: "markdown", locale: model.locale, consumed: true }
     : { page: "markdown", paste, consumed: false };
-  return pageDocument(model.locale, "markdown", title, body, bootstrap, model.content);
+  return pageDocument(model.locale, "markdown", title, body, bootstrap, model.content, untitled ? "paste" : undefined, untitled ? paste.id : undefined);
 }
 
 function rfc5987(value: string): string {

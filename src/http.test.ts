@@ -39,7 +39,7 @@ describe("HTTP slice 1", () => {
     expect(get.status).toBe(200);
     expect(get.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(get.headers.get("cache-control")).toBe("no-store");
-    expect(await get.text()).toContain("创建粘贴内容");
+    expect(await get.text()).toContain("创建剪贴板");
 
     const head = await request("/", { method: "HEAD" });
     expect(head.status).toBe(200);
@@ -64,7 +64,7 @@ describe("HTTP slice 1", () => {
     expect(methodHtml).toContain(`href="${assetPaths.appCss}"`);
     expect(methodHtml).toContain(`src="${assetPaths.appJs}"`);
     expect(methodHtml).toContain('data-workbench="error"');
-    expect(methodHtml).toContain('data-i18n-error="METHOD_NOT_ALLOWED">请求方法不被允许');
+    expect(methodHtml).toContain('data-i18n-error="METHOD_NOT_ALLOWED">请求方法不被允许。请返回创建页面。');
   });
 
   it("does not render the create page for HEAD", async () => {

@@ -253,7 +253,7 @@ describe("application documents", () => {
       renderPastePage({ locale: "en", paste: { ...paste, protected: false }, content: "source" }),
       renderPastePage({ locale: "en", paste: { ...paste, viewOnce: true }, content: "source", consumed: true }),
       renderPasswordPage({ locale: "en" }),
-      renderErrorPage({ locale: "en", error: "Method not allowed" }),
+      renderErrorPage({ locale: "en", errorCode: "METHOD_NOT_ALLOWED" }),
       renderMarkdownDocument({ locale: "en", paste, content: "source" }),
     ].join("\n");
     const annotated = [...html.matchAll(/data-i18n(?:-aria-label)?="([^"]+)"/g)].map((match) => match[1]).sort();
@@ -262,6 +262,21 @@ describe("application documents", () => {
     expect(html).toContain('data-i18n-aria-label="application"');
     expect(html).toContain('data-i18n-aria-label="reveal"');
     expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
+  });
+
+  it("marks locale-derived titles and untitled paste headings for document updates", () => {
+    const create = renderCreatePage("en");
+    const untitledPaste = renderPastePage({ locale: "zh-CN", paste: { ...paste, title: "" }, content: "source" });
+    const untitledMarkdown = renderMarkdownDocument({ locale: "zh-CN", paste: { ...paste, title: "" }, content: "source" });
+    const titledPaste = renderPastePage({ locale: "zh-CN", paste: { ...paste, title: "User title" }, content: "source" });
+
+    expect(create).toContain('<title data-i18n-title="create">Create a paste</title>');
+    for (const html of [untitledPaste, untitledMarkdown]) {
+      expect(html).toContain('<title data-i18n-title="paste" data-i18n-title-suffix="example">剪贴板 example</title>');
+      expect(html).toContain('<h1 id="page-title"><span data-i18n="paste">剪贴板</span> example</h1>');
+    }
+    expect(titledPaste).toContain("<title>User title</title>");
+    expect(titledPaste).toContain('<h1 id="page-title">User title</h1>');
   });
 
   it("renders CSS hooks for the responsive workbench, history, and dialog primitives", () => {
@@ -343,8 +358,8 @@ describe("application documents", () => {
       renderPastePage({ locale, paste: localizedPaste, content: "source" }),
       renderPastePage({ locale, paste: { ...localizedPaste, protected: false }, content: "source" }),
       renderPastePage({ locale, paste: { ...localizedPaste, viewOnce: true }, content: "source", consumed: true }),
-      renderPasswordPage({ locale, error: "Incorrect password" }),
-      renderErrorPage({ locale, error: "Missing paste" }),
+      renderPasswordPage({ locale, errorCode: "FORBIDDEN" }),
+      renderErrorPage({ locale, errorCode: "PASTE_NOT_FOUND" }),
       renderMarkdownDocument({ locale, paste: localizedPaste, content: "source" }),
     ].join("\n");
 
@@ -354,16 +369,27 @@ describe("application documents", () => {
     }
   });
 
-  it("renders generic password and escaped error pages without paste data", () => {
-    const password = renderPasswordPage({ locale: "en", error: "Wrong <password>" });
-    const error = renderErrorPage({ locale: "en", error: "Missing <paste>" });
+  it("renders only normalized dictionary errors", () => {
+    const error = renderErrorPage({ locale: "zh-CN", errorCode: "UNKNOWN_ERROR" as never });
+    const password = renderPasswordPage({ locale: "zh-CN", errorCode: "UNKNOWN_ERROR" as never });
+
+    for (const html of [error, password]) {
+      expect(html).toContain('data-i18n-error="INTERNAL_ERROR"');
+      expect(html).toContain(dictionaries["zh-CN"].errors.INTERNAL_ERROR);
+      expect(html).not.toContain("UNKNOWN_ERROR");
+    }
+  });
+
+  it("renders generic password and dictionary error pages without paste data", () => {
+    const password = renderPasswordPage({ locale: "en", errorCode: "FORBIDDEN" });
+    const error = renderErrorPage({ locale: "en", errorCode: "PASTE_NOT_FOUND" });
 
     expect(password).toContain('data-page="password"');
-    expect(password).toContain("Wrong &lt;password&gt;");
+    expect(password).toContain(dictionaries.en.errors.FORBIDDEN);
     expect(password).not.toContain("Example paste");
     expect(password).not.toContain('"content"');
     expect(error).toContain('role="alert"');
-    expect(error).toContain("Missing &lt;paste&gt;");
+    expect(error).toContain(dictionaries.en.errors.PASTE_NOT_FOUND);
   });
 
   it("wraps safe Markdown in a semantic application article", () => {
@@ -379,7 +405,7 @@ describe("application documents", () => {
     ["create", () => renderCreatePage("en")],
     ["paste", () => renderPastePage({ locale: "en", paste, content: "source" })],
     ["password", () => renderPasswordPage({ locale: "en" })],
-    ["error", () => renderErrorPage({ locale: "en", error: "error" })],
+    ["error", () => renderErrorPage({ locale: "en", errorCode: "INTERNAL_ERROR" })],
     ["markdown", () => renderMarkdownDocument({ locale: "en", paste, content: "source" })],
   ])("loads hashed assets without inline executable scripts on %s pages", (_name, render) => {
     const html = render();

@@ -153,9 +153,11 @@ function localeFixture() {
   const accessible = element({ "data-i18n-aria-label": "application", "aria-label": "Application" }, "");
   const date = element({ datetime: "2026-09-14T00:00:00.000Z", "data-i18n-date": "" }, "2026-09-14T00:00:00.000Z");
   const error = element({ "data-i18n-error": "METHOD_NOT_ALLOWED" }, "Method not allowed");
+  const title = element({ "data-i18n-title": "create" }, "Create a paste");
   const locale = element({ "data-action": "locale" }, "Language");
   const document = {
     documentElement: { lang: "en" },
+    title: "Create a paste",
     querySelector(): null {
       return null;
     },
@@ -164,11 +166,12 @@ function localeFixture() {
       if (selector === "[data-i18n-aria-label]") return [accessible];
       if (selector === "time[data-i18n-date]") return [date];
       if (selector === "[data-i18n-error]") return [error];
+      if (selector === "[data-i18n-title]") return [title];
       if (selector === '[data-action="locale"]') return [locale];
       return [];
     },
   } as unknown as Document;
-  return { accessible, create, date, document, error, locale, status };
+  return { accessible, create, date, document, error, locale, status, title };
 }
 
 class FakeClock {
@@ -642,10 +645,11 @@ describe("browser document state", () => {
     browser.startApp();
 
     expect(fixture.document.documentElement.lang).toBe("zh-CN");
-    expect(fixture.create.textContent).toBe("创建粘贴内容");
+    expect(fixture.document.title).toBe("创建剪贴板");
+    expect(fixture.create.textContent).toBe("创建剪贴板");
     expect(fixture.status.textContent).toBe("已保存");
     expect(fixture.accessible.getAttribute("aria-label")).toBe("应用");
-    expect(fixture.error.textContent).toBe("请求方法不被允许");
+    expect(fixture.error.textContent).toBe("请求方法不被允许。请返回创建页面。");
     expect(fixture.date.getAttribute("datetime")).toBe("2026-09-14T00:00:00.000Z");
     expect(fixture.date.textContent).toBe(new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "medium" }).format(new Date("2026-09-14T00:00:00.000Z")));
 
@@ -654,14 +658,37 @@ describe("browser document state", () => {
     fixture.locale.click();
 
     expect(fixture.document.documentElement.lang).toBe("en");
+    expect(fixture.document.title).toBe("Create a paste");
     expect(fixture.create.textContent).toBe("Create a paste");
     expect(fixture.status.textContent).toBe("Saved");
     expect(fixture.accessible.getAttribute("aria-label")).toBe("Application");
-    expect(fixture.error.textContent).toBe("Method not allowed");
+    expect(fixture.error.textContent).toBe("Method not allowed. Return to the create page.");
 
     browser.startApp();
     expect(fixture.document.documentElement.lang).toBe("en");
     expect(fixture.locale.listenerCount()).toBe(1);
+  });
+
+  it("rebuilds an untitled paste document title from its translation key and ID", () => {
+    const title = {
+      textContent: "Paste example",
+      getAttribute(name: string): string | null {
+        return name === "data-i18n-title" ? "paste" : name === "data-i18n-title-suffix" ? "example" : null;
+      },
+      setAttribute(): void {},
+    };
+    const document = {
+      documentElement: { lang: "en" },
+      title: "Paste example",
+      querySelectorAll(selector: string) {
+        return selector === "[data-i18n-title]" ? [title] : [];
+      },
+    };
+
+    app.updateDocumentLocale(document, "zh-CN");
+
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.title).toBe("剪贴板 example");
   });
 
   it("keeps password only in the current document and rewrites its unique URL query", () => {
