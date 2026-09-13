@@ -112,6 +112,29 @@ function trackedBody(chunks: number, chunkBytes: number, rejectCancel = false): 
   };
 }
 
+function chunkedBody(chunks: readonly Uint8Array[]): {
+  body: ReadableStream<Uint8Array>;
+  state: { cancels: number };
+} {
+  const state = { cancels: 0 };
+  let position = 0;
+  return {
+    body: new ReadableStream({
+      pull(controller) {
+        if (position === chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[position++]!);
+      },
+      cancel() {
+        state.cancels += 1;
+      },
+    }, { highWaterMark: 0 }),
+    state,
+  };
+}
+
 function exactLengthWhitespaceBody(bytes: number): ReadableStream<Uint8Array> {
   const whitespace = new Uint8Array(65_536).fill(0x20);
   let remaining = bytes - 2;
@@ -387,6 +410,27 @@ describe("strict JSON boundary", () => {
     expect(state).toEqual({ cancels: 1, pulls: 1 });
     expect(oversized.body?.locked).toBe(false);
   });
+
+  it("preserves malformed UTF-8 precedence across a wire-limit crossing chunk", async () => {
+    const bytes = new Uint8Array(wireBodyLimit + 1).fill(0x20);
+    const malformed = 63 * 1024 * 1024 - 2;
+    bytes.set([0x7b, 0x7d], 0);
+    bytes.set([0xc3, 0x28], malformed);
+
+    const crossing = chunkedBody([bytes]);
+    const split = chunkedBody([
+      bytes.subarray(0, malformed),
+      bytes.subarray(malformed, malformed + 2),
+      bytes.subarray(malformed + 2),
+    ]);
+
+    for (const streamed of [crossing, split]) {
+      const parsed = streamedRequest(streamed.body);
+      await expect(parseStrictJsonObject(parsed, new Set())).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+      expect(streamed.state.cancels).toBe(1);
+      expect(parsed.body?.locked).toBe(false);
+    }
+  }, 20_000);
 
   it("accepts an exact 64 MiB expiration number without retaining its token", async () => {
     const streamed = streamedExpirationNumberBody(wireBodyLimit);
@@ -704,6 +748,67 @@ describe("strict JSON boundary", () => {
       status: 413,
       details: { maxBytes: contentBodyLimit },
     });
+  }, 20_000);
+
+  it("preserves content-limit precedence over later malformed UTF-8 across decoder splits", async () => {
+    const prefix = new TextEncoder().encode('{"content":"');
+    const bytes = new Uint8Array(prefix.byteLength + contentBodyLimit + 3);
+    const split = prefix.byteLength + contentBodyLimit + 1;
+    bytes.set(prefix);
+    bytes.fill(0x61, prefix.byteLength, split);
+    bytes.set([0xc3, 0x28], split);
+
+    const crossing = chunkedBody([bytes]);
+    const networkSplit = chunkedBody([bytes.subarray(0, split), bytes.subarray(split)]);
+    for (const streamed of [crossing, networkSplit]) {
+      await expect(parseStrictJsonObject(streamedRequest(streamed.body), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+        code: "CONTENT_TOO_LARGE",
+        status: 413,
+        details: { maxBytes: contentBodyLimit },
+      });
+      expect(streamed.state.cancels).toBe(1);
+    }
+  }, 20_000);
+
+  it("checks a decoder-pending scalar before later malformed UTF-8 at the content limit", async () => {
+    const decoderSliceBytes = 8_192;
+    const prefix = new TextEncoder().encode('{"content":"');
+    const beforeScalar = contentBodyLimit - decoderSliceBytes - 1;
+    const leadingWhitespace = decoderSliceBytes - 3 - (prefix.byteLength + beforeScalar) % decoderSliceBytes;
+    const bytes = new Uint8Array(leadingWhitespace + prefix.byteLength + beforeScalar + 8_195);
+    let position = 0;
+    bytes.fill(0x20, position, position + leadingWhitespace);
+    position += leadingWhitespace;
+    bytes.set(prefix, position);
+    position += prefix.byteLength;
+    bytes.fill(0x61, position, position + beforeScalar);
+    position += beforeScalar;
+    bytes.set([0xf0, 0x9f, 0x99, 0x82], position);
+    position += 4;
+    bytes.fill(0x61, position, position + 8_190);
+    bytes[position + 8_190] = 0xff;
+
+    await expect(parseStrictJsonObject(streamedRequest(chunkedBody([bytes]).body), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "CONTENT_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: contentBodyLimit },
+    });
+  }, 20_000);
+
+  it("returns BAD_REQUEST for malformed and incomplete UTF-8 that begins at the content limit", async () => {
+    const prefix = new TextEncoder().encode('{"content":"');
+    const bytes = new Uint8Array(prefix.byteLength + contentBodyLimit + 2);
+    const boundary = prefix.byteLength + contentBodyLimit;
+    bytes.set(prefix);
+    bytes.fill(0x61, prefix.byteLength, boundary);
+    bytes.set([0xc3, 0x28], boundary);
+
+    for (const source of [bytes, bytes.subarray(0, boundary + 1)]) {
+      await expect(parseStrictJsonObject(streamedRequest(chunkedBody([source]).body), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    }
   }, 20_000);
 
   it("defers policy unknown fields through malformed JSON, UTF-8, and wire-size failures without retaining their values", async () => {

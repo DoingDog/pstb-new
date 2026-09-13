@@ -3,6 +3,7 @@ import { PasteError } from "./types";
 const maxRequestBytes = 67_108_864;
 const maxJsonDepth = 256;
 const tokenBlockLength = 8_192;
+const maxUtf8PendingBytes = 3;
 const retainedContainerUnits = 256;
 const retainedKeyUnits = 32;
 
@@ -197,10 +198,13 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
   }
 }
 
-function validateContentLength(request: Request, maxBytes: number): void {
+function validateContentLength(request: Request, maxBytes: number): number | undefined {
   const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && !/^\d+$/.test(contentLength)) throw badRequest();
-  if (contentLength !== null && Number(contentLength) > maxBytes) throw requestTooLarge(maxBytes);
+  if (contentLength === null) return undefined;
+  if (!/^\d+$/.test(contentLength)) throw badRequest();
+  const length = Number(contentLength);
+  if (length > maxBytes) throw requestTooLarge(maxBytes);
+  return length;
 }
 
 async function visitLimitedBytes(
@@ -209,8 +213,13 @@ async function visitLimitedBytes(
   visit: (chunk: Uint8Array) => void,
   onNonEmpty?: () => void,
 ): Promise<boolean> {
+  let announcedNonEmpty = false;
   try {
-    validateContentLength(request, maxBytes);
+    const contentLength = validateContentLength(request, maxBytes);
+    if (contentLength !== undefined && contentLength > 0) {
+      onNonEmpty?.();
+      announcedNonEmpty = true;
+    }
   } catch (error) {
     await cancelBody(request.body);
     throw error;
@@ -226,12 +235,13 @@ async function visitLimitedBytes(
       const { done, value } = await reader.read();
       if (done) return hasBytes;
       if (!hasBytes && value.byteLength > 0) {
-        onNonEmpty?.();
+        if (!announcedNonEmpty) onNonEmpty?.();
         hasBytes = true;
       }
-      length += value.byteLength;
-      if (length > maxBytes) throw requestTooLarge(maxBytes);
-      visit(value);
+      const acceptedLength = Math.min(value.byteLength, maxBytes - length);
+      if (acceptedLength > 0) visit(value.subarray(0, acceptedLength));
+      length += acceptedLength;
+      if (acceptedLength !== value.byteLength) throw requestTooLarge(maxBytes);
     }
   } catch (error) {
     try {
@@ -341,6 +351,14 @@ class StrictJsonParser {
           break;
       }
     }
+  }
+
+  needsIncrementalUtf8Decode(): boolean {
+    return (
+      this.#stringByteLimit !== undefined &&
+      (this.#state === "string" || this.#state === "escape" || this.#state === "unicode") &&
+      this.#stringUtf8Bytes >= this.#stringByteLimit - tokenBlockLength - maxUtf8PendingBytes
+    );
   }
 
   finish(): JsonValue {
@@ -972,7 +990,13 @@ class StrictJsonParser {
   }
 }
 
-function decodeChunk(decoder: TextDecoder, bytes: Uint8Array, stream: boolean, write: (source: string) => void): void {
+function decodeChunk(
+  decoder: TextDecoder,
+  bytes: Uint8Array,
+  stream: boolean,
+  write: (source: string) => void,
+  needsIncrementalDecode?: () => boolean,
+): void {
   if (!stream) {
     let source: string;
     try {
@@ -983,14 +1007,16 @@ function decodeChunk(decoder: TextDecoder, bytes: Uint8Array, stream: boolean, w
     write(source);
     return;
   }
-  for (let start = 0; start < bytes.byteLength; start += tokenBlockLength) {
+  for (let start = 0; start < bytes.byteLength;) {
+    const end = needsIncrementalDecode?.() ? start + 1 : Math.min(start + tokenBlockLength, bytes.byteLength);
     let source: string;
     try {
-      source = decoder.decode(bytes.subarray(start, Math.min(start + tokenBlockLength, bytes.byteLength)), { stream: true });
+      source = decoder.decode(bytes.subarray(start, end), { stream: true });
     } catch {
       throw badRequest();
     }
     write(source);
+    start = end;
   }
 }
 
@@ -1004,7 +1030,7 @@ async function parseStrictJsonObjectValue(
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new StrictJsonParser(allowedKeys, policy);
   const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
-    decodeChunk(decoder, chunk, true, (source) => parser.write(source));
+    decodeChunk(decoder, chunk, true, (source) => parser.write(source), () => parser.needsIncrementalUtf8Decode());
   }, onNonEmpty);
   if (!hasBytes && allowEmpty) return undefined;
   decodeChunk(decoder, new Uint8Array(), false, (source) => parser.write(source));

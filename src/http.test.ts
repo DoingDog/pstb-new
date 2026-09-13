@@ -930,6 +930,53 @@ describe("HTTP slice 1", () => {
     }
   });
 
+  it("rejects a known nonempty DELETE media type before the delayed first byte", async () => {
+    const storage = { get: vi.fn(), getWithMetadata: vi.fn(), put: vi.fn(), delete: vi.fn() };
+    const app = createHttpApp({ PASTE_DB: storage } as unknown as Env);
+    let pulls = 0;
+    let cancelled = false;
+    let releaseFirstByte!: () => void;
+    const firstByte = new Promise<void>((resolve) => { releaseFirstByte = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        pulls += 1;
+        await firstByte;
+        controller.enqueue(Uint8Array.of(0x20));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const responsePromise = app.fetch({
+      body,
+      headers: {
+        get(name: string) {
+          if (name.toLowerCase() === "content-length") return "1";
+          return name.toLowerCase() === "content-type" ? "application/json " : null;
+        },
+      } as Headers,
+      method: "DELETE",
+      url: "https://paste.test/api/pastes/missing",
+    } as Request);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const response = await Promise.race([
+        responsePromise,
+        new Promise<Response>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error("DELETE waited for its first byte")), 100); }),
+      ]);
+      expect(response.status).toBe(415);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "UNSUPPORTED_MEDIA_TYPE" } });
+      expect(pulls).toBe(0);
+      expect(cancelled).toBe(true);
+      for (const operation of Object.values(storage)) expect(operation).not.toHaveBeenCalled();
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
+      releaseFirstByte();
+      await responsePromise;
+    }
+  });
+
   it("rejects an oversized DELETE Content-Length before the delayed first byte", async () => {
     let pulls = 0;
     let cancelled = false;
