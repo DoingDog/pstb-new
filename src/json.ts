@@ -181,6 +181,7 @@ export function decodeUtf8(bytes: Uint8Array): string {
 class StrictJsonParser {
   #allowedTopLevelKeys: ReadonlySet<string> | undefined;
   #deferredError: PasteError | undefined;
+  #deferredUnknownKey: string | undefined;
   #frameStack: Frame[] = [];
   #hasRoot = false;
   #literal = "";
@@ -204,6 +205,8 @@ class StrictJsonParser {
   #stringKeyHash = 2_166_136_261;
   #stringKeyTooLong = false;
   #stringLength = 0;
+  #stringMatchesDeferredUnknownKey = false;
+  #stringTopLevelKeyCandidates: Set<string> | undefined;
   #stringLimit: number | undefined;
   #stringLimitField: string | undefined;
   #stringPendingHighSurrogate = false;
@@ -462,6 +465,7 @@ class StrictJsonParser {
   }
 
   private startContainer(kind: Frame["kind"]): void {
+    this.assertObjectRoot(kind);
     this.assertValueExpected();
     this.assertTopLevelKind(kind);
     if (this.#frameStack.length >= maxJsonDepth) this.invalid();
@@ -503,6 +507,29 @@ class StrictJsonParser {
   private acceptString(value: string): void {
     const frame = this.#frameStack.at(-1);
     if (frame?.kind === "object" && (frame.state === "keyOrEnd" || frame.state === "key")) {
+      if (this.#stringDiscarded) {
+        let allowedKey: string | undefined;
+        for (const candidate of this.#stringTopLevelKeyCandidates ?? []) {
+          if (candidate.length === this.#stringLength) {
+            allowedKey = candidate;
+            break;
+          }
+        }
+        if (allowedKey !== undefined) {
+          if (frame.keys.has(allowedKey)) throw validationError(allowedKey, "Duplicate field.");
+          this.retain(retainedKeyUnits);
+          frame.keys.add(allowedKey);
+          frame.key = allowedKey;
+          frame.state = "colon";
+          return;
+        }
+        if (this.#stringMatchesDeferredUnknownKey && this.#stringLength === this.#deferredUnknownKey!.length) {
+          this.#deferredError = validationError(this.#deferredUnknownKey!, "Duplicate field.");
+        }
+        frame.key = "";
+        frame.state = "colon";
+        return;
+      }
       const topLevel = this.#frameStack.length === 1;
       const unknown = topLevel && this.#policy !== undefined && !this.#allowedTopLevelKeys?.has(value);
       if (frame.keys.has(value)) {
@@ -517,6 +544,7 @@ class StrictJsonParser {
       }
       if (unknown && this.#deferredError === undefined) {
         this.#deferredError = validationError(this.#stringKeyTooLong ? "body" : value, "Unknown field.");
+        if (!this.#stringKeyTooLong) this.#deferredUnknownKey = value;
       }
       frame.key = value;
       frame.state = "colon";
@@ -570,10 +598,16 @@ class StrictJsonParser {
 
   private assertTopLevelKind(kind: StrictJsonKind): void {
     const field = this.topLevelValueField();
-    if (field === undefined) return;
+    if (field === undefined || !this.#allowedTopLevelKeys?.has(field)) return;
     const expected = this.#policy?.expectedTopLevelKinds?.get(field);
     if (expected !== undefined && !expected.has(kind)) {
       throw this.#policy?.onUnexpectedTopLevelKind?.(field) ?? badRequest();
+    }
+  }
+
+  private assertObjectRoot(kind: StrictJsonKind): void {
+    if (kind !== "object" && this.#frameStack.length === 0 && !this.#hasRoot) {
+      throw validationError("body", "Expected a JSON object.");
     }
   }
 
@@ -600,6 +634,8 @@ class StrictJsonParser {
     this.#stringKeyHash = 2_166_136_261;
     this.#stringKeyTooLong = false;
     this.#stringLength = 0;
+    this.#stringMatchesDeferredUnknownKey = false;
+    this.#stringTopLevelKeyCandidates = undefined;
     this.#stringLimit = undefined;
     this.#stringLimitField = undefined;
     this.#stringPendingHighSurrogate = false;
@@ -609,12 +645,19 @@ class StrictJsonParser {
     const policy = this.#policy;
     const frame = this.#frameStack.at(-1);
     this.#stringIsKey = frame?.kind === "object" && (frame.state === "keyOrEnd" || frame.state === "key");
-    if (!this.#stringIsKey) {
+    if (this.#stringIsKey) {
+      this.#stringDiscarded = frame!.discard || (this.#frameStack.length === 1 && this.#deferredError !== undefined);
+      this.#stringMatchesDeferredUnknownKey = this.#stringDiscarded && this.#frameStack.length === 1 && this.#deferredUnknownKey !== undefined;
+      if (this.#stringDiscarded && this.#frameStack.length === 1) {
+        this.#stringTopLevelKeyCandidates = new Set(this.#allowedTopLevelKeys);
+      }
+    } else {
+      this.assertObjectRoot("string");
       this.assertValueExpected();
       this.assertTopLevelKind("string");
       this.#stringDiscarded = this.isDiscardingValue();
     }
-    if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1 && !this.#stringIsKey && frame.key !== undefined) {
+    if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1 && !this.#stringIsKey && frame.key !== undefined && this.#allowedTopLevelKeys?.has(frame.key)) {
       this.#stringField = frame.key;
       this.#stringByteLimit = policy.topLevelUtf8ByteMax?.get(frame.key);
       const limit = policy.topLevelStringMaxCodeUnits.get(frame.key);
@@ -632,7 +675,24 @@ class StrictJsonParser {
       throw this.#policy!.onStringLimit(this.#stringLimitField!);
     }
     if (this.#stringByteLimit !== undefined) this.countStringUtf8Bytes(source, start, end);
-    if (this.#stringIsKey) {
+    for (const candidate of this.#stringTopLevelKeyCandidates ?? []) {
+      for (let position = start; position < end; position += 1) {
+        if (source.charCodeAt(position) !== candidate.charCodeAt(this.#stringLength + position - start)) {
+          this.#stringTopLevelKeyCandidates!.delete(candidate);
+          break;
+        }
+      }
+    }
+    if (this.#stringMatchesDeferredUnknownKey) {
+      const expected = this.#deferredUnknownKey!;
+      for (let position = start; position < end; position += 1) {
+        if (source.charCodeAt(position) !== expected.charCodeAt(this.#stringLength + position - start)) {
+          this.#stringMatchesDeferredUnknownKey = false;
+          break;
+        }
+      }
+    }
+    if (this.#stringIsKey && !this.#stringDiscarded) {
       for (let position = start; position < end; position += 1) {
         this.#stringKeyHash = Math.imul(this.#stringKeyHash ^ source.charCodeAt(position), 16_777_619) >>> 0;
       }
@@ -703,6 +763,7 @@ class StrictJsonParser {
   }
 
   private startNumber(source: string, position: number): number {
+    this.assertObjectRoot("number");
     this.assertValueExpected();
     this.assertTopLevelKind("number");
     const character = source[position]!;
@@ -710,7 +771,9 @@ class StrictJsonParser {
     this.#number.reset();
     this.#numberDiscarded = this.isDiscardingValue();
     this.#numberLength = 0;
-    this.#numberLimit = field === undefined ? undefined : this.#policy?.topLevelNumberMaxCodeUnits?.get(field);
+    this.#numberLimit = field === undefined || !this.#allowedTopLevelKeys?.has(field)
+      ? undefined
+      : this.#policy?.topLevelNumberMaxCodeUnits?.get(field);
     this.#numberLimitField = field;
     this.#numberState = character === "-" ? "minus" : character === "0" ? "zero" : "integer";
     this.#state = "number";
@@ -728,6 +791,7 @@ class StrictJsonParser {
   }
 
   private startLiteral(literal: string, value: boolean | null): void {
+    this.assertObjectRoot(value === null ? "null" : "boolean");
     this.assertValueExpected();
     this.assertTopLevelKind(value === null ? "null" : "boolean");
     this.#literal = literal;

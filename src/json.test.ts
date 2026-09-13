@@ -289,11 +289,15 @@ describe("strict JSON boundary", () => {
     await expect(parseStrictJsonObject(streamedRequest(exactLengthWhitespaceBody(wireBodyLimit)), new Set())).resolves.toEqual({});
   });
 
-  it.each([
-    ["arrays", "[".repeat(10_000) + "0" + "]".repeat(10_000)],
-    ["objects", '{"value":'.repeat(10_000) + "0" + "}".repeat(10_000)],
-  ])("rejects deeply nested %s with PasteError", async (_kind, body) => {
-    await expect(parseStrictJsonObject(request(body), new Set())).rejects.toMatchObject({
+  it("rejects a deeply nested array root before parsing its descendants", async () => {
+    await expect(parseStrictJsonObject(request("[".repeat(10_000) + "0" + "]".repeat(10_000)), new Set())).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+    });
+  });
+
+  it("rejects deeply nested objects with PasteError", async () => {
+    await expect(parseStrictJsonObject(request('{"value":'.repeat(10_000) + "0" + "}".repeat(10_000)), new Set())).rejects.toMatchObject({
       code: "BAD_REQUEST",
       status: 400,
     });
@@ -498,6 +502,11 @@ describe("strict JSON boundary", () => {
       status: 422,
       details: { fields: [{ field: "unknown", message: "Duplicate field." }] },
     });
+    await expect(parseStrictJsonObject(request('{"unknown":1,"content":"first","content":"second"}'), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "content", message: "Duplicate field." }] },
+    });
   });
 
   it("cancels an exact-wire-limit numeric stream before retaining a body-sized number", async () => {
@@ -523,4 +532,38 @@ describe("strict JSON boundary", () => {
     expect(cancelled).toBe(true);
     expect(parsed.body?.locked).toBe(false);
   });
+
+  it("rejects a non-object root before retaining a streamed array", async () => {
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls <= 10) controller.enqueue(encoder.encode(`${pulls === 1 ? "[" : ""}${"0,".repeat(4_500)}`));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const parsed = streamedRequest(body);
+
+    await expect(parseStrictJsonObject(parsed, new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "body", message: "Expected a JSON object." }] },
+    });
+    expect(pulls).toBe(1);
+    expect(cancelled).toBe(true);
+  });
+
+  it("discards nested keys of an unknown top-level value", async () => {
+    const fields = Array.from({ length: 300_000 }, (_value, index) => `"u${index}":0`).join(",");
+
+    await expect(parseStrictJsonObject(request(`{"unknown":{${fields}}}`), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "unknown", message: "Unknown field." }] },
+    });
+  }, 20_000);
 });

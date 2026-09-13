@@ -1177,6 +1177,48 @@ describe("HTTP slice 1", () => {
     expect(invalidUtf8.status).toBe(400);
   });
 
+  it("defers route-unknown fields ahead of PATCH kind and DELETE content limits", async () => {
+    const malformedPatch = await request("/api/pastes/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: '{"content":"x","title":{',
+    });
+    expect(malformedPatch.status).toBe(400);
+    await expect(malformedPatch.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "The request is malformed." },
+    });
+
+    const longTitlePatch = await request("/api/pastes/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: `{"content":"x","title":"${"x".repeat(401)}"}`,
+    });
+    expect(longTitlePatch.status).toBe(422);
+    await expect(longTitlePatch.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "title", message: "Unknown field." }] } },
+    });
+
+    const unknownDelete = await request("/api/pastes/missing", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: `{"content":"${"x".repeat(10_485_761)}"}`,
+    });
+    expect(unknownDelete.status).toBe(422);
+    await expect(unknownDelete.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "content", message: "Unknown field." }] } },
+    });
+
+    const longNumberDelete = await request("/api/pastes/missing", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: `{"expiration":1${"0".repeat(64)}}`,
+    });
+    expect(longNumberDelete.status).toBe(422);
+    await expect(longNumberDelete.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "expiration", message: "Unknown field." }] } },
+    });
+  }, 20_000);
+
   it("does not synthesize a bare version conflict for a 54-code-unit version", async () => {
     const id = `http-${crypto.randomUUID()}`;
     const created = await request("/api/pastes", {
@@ -1257,6 +1299,33 @@ describe("HTTP slice 1", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
+
+  it("flushes pending UTF-8 before reporting a streamed PUT over its content limit", async () => {
+    const content = new Uint8Array(10_485_760).fill(0x61);
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(content);
+        } else {
+          controller.enqueue(Uint8Array.of(0xc3));
+          controller.close();
+        }
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body,
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "BAD_REQUEST", message: "The request is malformed." },
+    });
+    expect(pulls).toBe(2);
+  }, 20_000);
 
   it("accepts normal numeric expiration spellings and rejects malformed or extra charset parameters", async () => {
     const ids: string[] = [];

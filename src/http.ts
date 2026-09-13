@@ -156,6 +156,74 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
   }
 }
 
+function appendUtf8Tail(tail: Uint8Array, length: number, source: Uint8Array): number {
+  if (source.byteLength >= tail.byteLength) {
+    tail.set(source.subarray(source.byteLength - tail.byteLength));
+    return tail.byteLength;
+  }
+  const retained = Math.min(length, tail.byteLength - source.byteLength);
+  if (retained > 0) tail.copyWithin(0, length - retained, length);
+  tail.set(source, retained);
+  return retained + source.byteLength;
+}
+
+function pendingUtf8ContinuationBytes(tail: Uint8Array, length: number): number {
+  let continuations = 0;
+  while (continuations < length && continuations < 3 && tail[length - continuations - 1]! >= 0x80 && tail[length - continuations - 1]! <= 0xbf) {
+    continuations += 1;
+  }
+  const lead = tail[length - continuations - 1];
+  const expected = lead !== undefined && lead >= 0xc2 && lead <= 0xdf
+    ? 1
+    : lead !== undefined && lead >= 0xe0 && lead <= 0xef
+      ? 2
+      : lead !== undefined && lead >= 0xf0 && lead <= 0xf4
+        ? 3
+        : 0;
+  return expected > continuations ? expected - continuations : 0;
+}
+
+async function resolvePendingUtf8AtContentLimit(
+  decoder: TextDecoder,
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  initial: Uint8Array,
+  tail: Uint8Array,
+  tailLength: number,
+): Promise<never> {
+  let source = initial;
+  const readPrefix = async (length: number): Promise<Uint8Array> => {
+    const prefix = new Uint8Array(length);
+    let offset = 0;
+    while (offset < prefix.byteLength) {
+      if (source.byteLength === 0) {
+        const next = await reader.read();
+        if (next.done) throw badRequest();
+        source = next.value;
+        continue;
+      }
+      const copied = Math.min(prefix.byteLength - offset, source.byteLength);
+      prefix.set(source.subarray(0, copied), offset);
+      offset += copied;
+      source = source.subarray(copied);
+    }
+    return prefix;
+  };
+
+  let needed = pendingUtf8ContinuationBytes(tail, tailLength);
+  try {
+    if (needed === 0) {
+      const first = await readPrefix(1);
+      decoder.decode(first, { stream: true });
+      needed = pendingUtf8ContinuationBytes(first, first.byteLength);
+    }
+    if (needed > 0) decoder.decode(await readPrefix(needed), { stream: true });
+    decoder.decode();
+  } catch {
+    throw badRequest();
+  }
+  throw contentTooLarge();
+}
+
 async function parseTextContent(request: Request): Promise<string> {
   textMediaType(request);
   const contentLength = request.headers.get("content-length");
@@ -176,22 +244,29 @@ async function parseTextContent(request: Request): Promise<string> {
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const reader = request.body.getReader();
   const chunks: string[] = [];
+  const tail = new Uint8Array(4);
   let length = 0;
+  let tailLength = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       for (let start = 0; start < value.byteLength; start += decoderSliceBytes) {
         const slice = value.subarray(start, Math.min(start + decoderSliceBytes, value.byteLength));
+        const acceptedLength = Math.min(slice.byteLength, contentBodyLimit - length);
+        const accepted = slice.subarray(0, acceptedLength);
         let decoded: string;
         try {
-          decoded = decoder.decode(slice, { stream: true });
+          decoded = decoder.decode(accepted, { stream: true });
         } catch {
           throw badRequest();
         }
-        if (slice.byteLength > contentBodyLimit - length) throw contentTooLarge();
-        length += slice.byteLength;
+        length += accepted.byteLength;
+        tailLength = appendUtf8Tail(tail, tailLength, accepted);
         chunks.push(decoded);
+        if (accepted.byteLength !== slice.byteLength) {
+          await resolvePendingUtf8AtContentLimit(decoder, reader, slice.subarray(accepted.byteLength), tail, tailLength);
+        }
       }
     }
     try {
