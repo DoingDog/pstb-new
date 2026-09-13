@@ -38,7 +38,7 @@ export interface MarkdownModes {
 
 export function createMarkdownModes(options: MarkdownModesOptions): MarkdownModes {
   let visualEditor: Crepe | undefined;
-  let visualRootSnapshot: ReadonlySet<ChildNode> | undefined;
+  let visualSession: HTMLElement | undefined;
   let visualSerialized = "";
   let visualDirty = false;
   let visualReady = false;
@@ -61,34 +61,38 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     return next;
   };
 
-  const removePartialVisualRoot = (initialNodes: ReadonlySet<ChildNode>): void => {
-    for (const child of Array.from(options.visualRoot.childNodes)) {
-      if (initialNodes.has(child)) continue;
-      try {
-        options.visualRoot.removeChild(child);
-      } catch {
-        // Keep cleanup best-effort when a library node was already removed.
-      }
+  const createVisualSession = (): HTMLElement => {
+    const session = options.visualRoot.ownerDocument?.createElement("div") ?? ({} as HTMLElement);
+    options.visualRoot.appendChild?.(session);
+    return session;
+  };
+
+  const removeVisualSession = (session: Node | undefined): void => {
+    if (session === undefined) return;
+    try {
+      options.visualRoot.removeChild(session);
+    } catch {
+      // Keep cleanup best-effort when a library node was already removed.
     }
   };
 
-  const destroyEditor = async (editor: Crepe, initialNodes: ReadonlySet<ChildNode> | undefined): Promise<void> => {
+  const destroyEditor = async (editor: Crepe, session: HTMLElement | undefined): Promise<void> => {
     try {
       await editor.destroy();
     } catch {
       // Keep teardown recoverable when the editor rejects its own cleanup.
     } finally {
-      if (initialNodes !== undefined) removePartialVisualRoot(initialNodes);
+      removeVisualSession(session);
     }
   };
 
   const leaveCurrentVisual = async (): Promise<void> => {
     const editor = visualEditor;
-    const rootSnapshot = visualRootSnapshot;
+    const session = visualSession;
     const wasDirty = visualDirty;
     const serialized = visualSerialized;
     visualEditor = undefined;
-    visualRootSnapshot = undefined;
+    visualSession = undefined;
     visualDirty = false;
     visualReady = false;
     visualSerialized = "";
@@ -105,7 +109,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         }
       }
     } finally {
-      await destroyEditor(editor, rootSnapshot);
+      await destroyEditor(editor, session);
     }
   };
 
@@ -178,24 +182,48 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           return;
         }
 
-        const initialNodes = new Set<ChildNode>(Array.from(options.visualRoot.childNodes));
         const [{ Crepe }, { prosePluginsCtx }, { Plugin }] = modules;
-        let editor: Crepe;
+        let editor: Crepe | undefined;
+        let session: HTMLElement | undefined;
         let ready = false;
         try {
-          editor = new Crepe({ root: options.visualRoot, defaultValue: visualSourceSnapshot });
-          editor.editor.config((ctx) => {
+          session = createVisualSession();
+          const mountedSession = session;
+          editor = new Crepe({ root: mountedSession, defaultValue: visualSourceSnapshot });
+          const mountedEditor = editor;
+          const serializeVisualDocument = (): void => {
+            if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+            try {
+              const markdown = mountedEditor.getMarkdown();
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+              visualSerialized = markdown;
+              options.source.value = markdown;
+              options.onDocumentChange(markdown);
+            } catch (error) {
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+              options.onVisualError?.({
+                message: error instanceof Error ? error.message : String(error),
+                retry: async () => serializeVisualDocument(),
+              });
+            }
+          };
+          mountedEditor.editor.config((ctx) => {
             ctx.update(prosePluginsCtx, (plugins) =>
               plugins.concat(
                 new Plugin({
                   view: () => ({
                     update: (view, previous) => {
-                      if (!ready || !current(id) || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
+                      if (
+                        !ready ||
+                        !current(id) ||
+                        view.state.doc.eq(previous.doc) ||
+                        visualEditor !== mountedEditor ||
+                        visualSession !== mountedSession
+                      ) {
+                        return;
+                      }
                       visualDirty = true;
-                      const markdown = editor.getMarkdown();
-                      visualSerialized = markdown;
-                      options.source.value = markdown;
-                      options.onDocumentChange(markdown);
+                      serializeVisualDocument();
                     },
                   }),
                 }),
@@ -203,18 +231,19 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
             );
           });
         } catch (error) {
-          removePartialVisualRoot(initialNodes);
+          removeVisualSession(session);
           reportVisualError(id, error);
           return;
         }
+        if (editor === undefined || session === undefined) return;
         if (!current(id) || options.source.value !== visualSourceSnapshot) {
-          removePartialVisualRoot(initialNodes);
+          removeVisualSession(session);
           if (current(id)) setMode("source");
           return;
         }
 
         visualEditor = editor;
-        visualRootSnapshot = initialNodes;
+        visualSession = session;
         visualDirty = false;
         visualReady = false;
         visualSerialized = visualSourceSnapshot;
@@ -225,13 +254,13 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           // Milkdown can remain OnCreate here, where destroy() does not settle.
           if (visualEditor === editor) {
             visualEditor = undefined;
-            visualRootSnapshot = undefined;
+            visualSession = undefined;
             visualDirty = false;
             visualReady = false;
             visualSerialized = "";
             visualTransition = 0;
           }
-          removePartialVisualRoot(initialNodes);
+          removeVisualSession(session);
           reportVisualError(id, error);
           return;
         }

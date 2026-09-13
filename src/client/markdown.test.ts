@@ -108,6 +108,12 @@ const crepe = vi.hoisted(() => {
       this.doc = fakeDocument(this.markdown);
       this.documentView?.update?.({ state: { doc: this.doc } }, previous);
     }
+
+    appendLateNode(): Node {
+      const node = {} as Node;
+      this.root.appendChild(node);
+      return node;
+    }
   }
 
   return { state, Crepe: FakeCrepe };
@@ -127,14 +133,19 @@ import { createMarkdownModes } from "./markdown";
 
 type FakeVisualRoot = Node & {
   childNodes: Node[];
+  ownerDocument: Pick<Document, "createElement">;
   appendChild(child: Node): Node;
   removeChild(child: Node): Node;
 };
 
 function createVisualRoot(): FakeVisualRoot {
   const childNodes: Node[] = [];
+  const ownerDocument = {
+    createElement: () => createVisualRoot() as unknown as HTMLElement,
+  } as Pick<Document, "createElement">;
   return {
     childNodes,
+    ownerDocument,
     appendChild(child: Node) {
       childNodes.push(child);
       return child;
@@ -345,6 +356,63 @@ describe("createMarkdownModes", () => {
     expect(onModeChange).toHaveBeenLastCalledWith(previewRequested ? "preview" : "source");
   });
 
+  it("keeps the visual document and retries an edit serialization failure", async () => {
+    const { source, visualRoot, onDocumentChange, onModeChange, onVisualError, modes } = fixture();
+    const canonical = source.value;
+    const edited = "# edited but not yet serialized\n";
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    crepe.state.failGetMarkdown = true;
+
+    expect(() => editor.documentChanged(edited)).not.toThrow();
+    expect(source.value).toBe(canonical);
+    expect(editor.markdown).toBe(edited);
+    expect(editor.destroyed).toBe(false);
+    expect(crepe.state.instances).toEqual([editor]);
+    expect(visualRoot.childNodes).toHaveLength(1);
+    expect(onModeChange).toHaveBeenLastCalledWith("visual");
+    expect(onDocumentChange).not.toHaveBeenCalled();
+    expect(onVisualError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Crepe failed to serialize" }),
+    );
+
+    await onVisualError.mock.calls[0]![0].retry();
+
+    expect(source.value).toBe(canonical);
+    expect(editor.markdown).toBe(edited);
+    expect(crepe.state.instances).toEqual([editor]);
+    expect(onDocumentChange).not.toHaveBeenCalled();
+    expect(onVisualError).toHaveBeenCalledTimes(2);
+
+    crepe.state.failGetMarkdown = false;
+    await onVisualError.mock.calls[1]![0].retry();
+
+    expect(source.value).toBe(edited);
+    expect(crepe.state.instances).toEqual([editor]);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(onDocumentChange).toHaveBeenCalledWith(edited);
+  });
+
+  it.each(["source", "preview", "destroy"])("does not publish a failed edit serialization retry after a newer %s transition", async (next) => {
+    const { source, onDocumentChange, onVisualError, modes } = fixture();
+    const canonical = source.value;
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    crepe.state.failGetMarkdown = true;
+    expect(() => editor.documentChanged("# stale retry\n")).not.toThrow();
+    const retry = onVisualError.mock.calls[0]![0].retry;
+
+    await (next === "source" ? modes.enterSource() : next === "preview" ? modes.enterPreview() : modes.destroy());
+    crepe.state.failGetMarkdown = false;
+    await retry();
+
+    expect(source.value).toBe(canonical);
+    expect(editor.destroyed).toBe(true);
+    expect(onDocumentChange).not.toHaveBeenCalled();
+  });
+
   it("notifies autosave at the edit instead of 1,000 ms later", async () => {
     vi.useFakeTimers();
     const { onDocumentChange, modes } = fixture();
@@ -465,6 +533,35 @@ describe("createMarkdownModes", () => {
 
     expect(crepe.state.instances[1]!.markdown).toBe(editedDuringInitialization);
     expect(onModeChange).toHaveBeenLastCalledWith("visual");
+  });
+
+  it.each([
+    ["resolves", false],
+    ["rejects", true],
+  ])("isolates a failed Crepe create root and removes its retry container when destroy %s", async (_outcome, failDestroy) => {
+    const { visualRoot, onVisualError, modes } = fixture();
+    const applicationNode = {} as Node;
+    visualRoot.appendChild(applicationNode);
+    crepe.state.failCreate = true;
+
+    await modes.enterVisual();
+    const failedEditor = crepe.state.instances[0]!;
+    const lateNode = failedEditor.appendLateNode();
+
+    expect(visualRoot.childNodes).toEqual([applicationNode]);
+
+    crepe.state.failCreate = false;
+    await onVisualError.mock.calls[0]![0].retry();
+
+    const session = visualRoot.childNodes[1]!;
+    expect(visualRoot.childNodes).toEqual([applicationNode, session]);
+    expect(session.childNodes).toHaveLength(1);
+    expect(session.childNodes).not.toContain(lateNode);
+
+    crepe.state.failDestroy = failDestroy;
+    await modes.enterSource();
+
+    expect(visualRoot.childNodes).toEqual([applicationNode]);
   });
 
   it("waits for a stale visual creation to finish teardown before destroy settles", async () => {
