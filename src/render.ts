@@ -83,7 +83,7 @@ const englishLabels = {
   passwordDescription: "Optional. Use 1 to 128 visible ASCII characters.",
   viewOnce: "View once",
   customId: "Custom ID",
-  customIdDescription: "Optional. Start with a letter or number; use up to 64 letters, numbers, underscores, or hyphens.",
+  customIdDescription: "Optional. Start with an ASCII letter or number; use up to 64 ASCII letters, numbers, underscores, or hyphens.",
   submit: "Create",
   reveal: "Show password",
   theme: "Theme",
@@ -158,7 +158,7 @@ const chineseLabels: Labels = {
   passwordDescription: "可选。使用 1 到 128 个可见 ASCII 字符。",
   viewOnce: "阅后即焚",
   customId: "自定义 ID",
-  customIdDescription: "可选。以字母或数字开头，最多 64 个字母、数字、下划线或连字符。",
+  customIdDescription: "可选。以 ASCII 字母或数字开头，最多 64 个 ASCII 字母、数字、下划线或连字符。",
   submit: "创建",
   reveal: "显示密码",
   theme: "主题",
@@ -339,7 +339,7 @@ ${createLifecycleRail(copy)}
 <section class="workbench-surface" aria-labelledby="page-title">
 <h1 id="page-title">${copy.create}</h1>
 <form id="create-form" class="workbench-form" method="post" action="/api/pastes">
-<div class="form-section" data-create-field="title"><label for="title">${copy.title}</label><input id="title" name="title" type="text" maxlength="200" aria-describedby="title-description title-error"><p id="title-description">${copy.titleDescription}</p><p id="title-error" class="field-error" hidden></p></div>
+<div class="form-section" data-create-field="title"><label for="title">${copy.title}</label><input id="title" name="title" type="text" aria-describedby="title-description title-error"><p id="title-description">${copy.titleDescription}</p><p id="title-error" class="field-error" hidden></p></div>
 <div class="form-section" data-create-field="format"><label for="format">${copy.format}</label><select id="format" name="format" aria-describedby="format-description format-error"><option value="text">${copy.text}</option><option value="markdown">${copy.markdown}</option></select><p id="format-description">${copy.formatDescription}</p><p id="format-error" class="field-error" hidden></p></div>
 <div class="form-section" data-create-field="expiration"><label for="expiration">${copy.expiration}</label><select id="expiration" name="expiration" aria-describedby="expiration-description expiration-error">${options}</select><p id="expiration-description">${copy.expirationDescription}</p><p id="expiration-error" class="field-error" hidden></p></div>
 <div class="form-section editor-surface" data-create-field="content"><label for="content">${copy.content}</label><textarea id="content" name="content" required spellcheck="false" aria-describedby="content-description content-error"></textarea><p id="content-description">${copy.storedExactly}</p><p id="content-error" class="field-error" hidden></p></div>
@@ -407,8 +407,8 @@ export function renderMarkdownDocument(model: MarkdownDocumentModel): string {
   const restricted = paste.viewOnce;
   const title = documentTitle(model.locale, paste);
   const actions = restricted
-    ? `<button type="button" data-action="copy">${copy.copy}</button>`
-    : `<a data-action="open-source" href="${escapeText(paste.links.view)}">${copy.openSource}</a><button type="button" data-action="copy">${copy.copy}</button>`;
+    ? `<button class="markdown-document-action" type="button" data-action="copy">${copy.copy}</button>`
+    : `<a class="markdown-document-action" data-action="open-source" href="${escapeText(paste.links.view)}">${copy.openSource}</a><button class="markdown-document-action" type="button" data-action="copy">${copy.copy}</button>`;
   const body = `${siteHeader(copy, pasteLocation(copy, paste), actions, restricted ? copy.create : copy.brand)}
 <main class="workbench" data-workbench="markdown" data-consumed="${restricted}">
 ${pasteLifecycleRail(copy, paste)}

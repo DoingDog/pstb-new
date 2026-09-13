@@ -120,8 +120,8 @@ describe("application documents", () => {
   });
 
   it.each([
-    ["en", ["Optional. Up to 200 characters.", "Select the default view for this paste.", "Choose when this paste expires.", "Optional. Use 1 to 128 visible ASCII characters.", "Optional. Start with a letter or number; use up to 64 letters, numbers, underscores, or hyphens."]],
-    ["zh-CN", ["可选。最多 200 个字符。", "选择此剪贴板默认打开的视图。", "选择剪贴板何时过期。", "可选。使用 1 到 128 个可见 ASCII 字符。", "可选。以字母或数字开头，最多 64 个字母、数字、下划线或连字符。"]],
+    ["en", ["Optional. Up to 200 characters.", "Select the default view for this paste.", "Choose when this paste expires.", "Optional. Use 1 to 128 visible ASCII characters.", "Optional. Start with an ASCII letter or number; use up to 64 ASCII letters, numbers, underscores, or hyphens."]],
+    ["zh-CN", ["可选。最多 200 个字符。", "选择此剪贴板默认打开的视图。", "选择剪贴板何时过期。", "可选。使用 1 到 128 个可见 ASCII 字符。", "可选。以 ASCII 字母或数字开头，最多 64 个 ASCII 字母、数字、下划线或连字符。"]],
   ] as const)("renders %s create fields in reading order with visible descriptions", (locale, descriptions) => {
     const html = renderCreatePage(locale);
     const ids = ["title", "format", "expiration", "content", "password", "custom-id", "view-once"];
@@ -139,6 +139,8 @@ describe("application documents", () => {
       expect(html).toContain(`aria-describedby="${id}-description ${id}-error"`);
       expect(html).toContain(`<p id="${id}-description">${description}</p>`);
     }
+    expect(html).toContain('<input id="title" name="title" type="text" aria-describedby="title-description title-error">');
+    expect(html).not.toContain("maxlength=");
   });
 
   it("renders a workbench shell with an accessible tab workspace and empty deferred panels", () => {
@@ -227,9 +229,16 @@ describe("application documents", () => {
 
     expect(links).toEqual(["/"]);
     expect(html).toContain('data-consumed="true"');
-    expect(html).toContain('data-action="copy"');
+    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy">Copy</button>');
     expect(html).not.toContain('data-action="open-source"');
     expect(html).not.toContain('"links"');
+  });
+
+  it("marks ordinary Markdown document actions for narrow screens", () => {
+    const html = renderMarkdownDocument({ locale: "en", paste, content: "# source" });
+
+    expect(html).toContain('<a class="markdown-document-action" data-action="open-source" href="/example">Open source</a>');
+    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy">Copy</button>');
   });
 
   it("keeps English and Chinese dictionary keys in parity", () => {

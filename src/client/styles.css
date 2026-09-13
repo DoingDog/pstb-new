@@ -503,6 +503,10 @@ pre.paste-content,
   overflow-wrap: anywhere;
 }
 
+.markdown-document article :is(h1, h2, h3, h4, h5, h6, p, code) {
+  overflow-wrap: anywhere;
+}
+
 .paste-content table,
 .markdown-document article table {
   display: block;
@@ -653,6 +657,10 @@ dialog::backdrop,
 
   .utility-actions > [data-action="locale"],
   .utility-actions > [data-action="theme"] {
+    display: inline-flex;
+  }
+
+  body[data-page="markdown"] .utility-actions > .markdown-document-action {
     display: inline-flex;
   }
 
