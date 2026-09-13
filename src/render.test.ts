@@ -51,6 +51,17 @@ function sourceData(document: string): string {
   return match[1]!;
 }
 
+async function parsedSourceData(document: string): Promise<string> {
+  let encoded = "";
+  const rewriter = new HTMLRewriter().on("script#source-data", {
+    text(chunk) {
+      encoded += chunk.text;
+    },
+  });
+  await rewriter.transform(new Response(document)).text();
+  return encoded;
+}
+
 function bootstrapData(document: string): Record<string, unknown> {
   const match = document.match(/<script id="bootstrap" type="application\/json">(.*?)<\/script>/);
   if (!match) throw new Error("expected bootstrap data");
@@ -151,6 +162,13 @@ describe("application documents", () => {
     expect(html).not.toContain("not-for-bootstrap");
     expect(html).toContain('<pre class="paste-content" data-source-view></pre>');
     expect(html).toContain('<textarea id="source" class="editor-input" name="source" readonly spellcheck="false"></textarea>');
+  });
+
+  it("preserves inert source data through HTML parsing", async () => {
+    const content = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
+    const html = renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content });
+
+    expect(decodeSourceData(await parsedSourceData(html))).toBe(content);
   });
 
   it.each([

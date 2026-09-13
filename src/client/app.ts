@@ -452,6 +452,7 @@ function hydratePasteSource(): void {
   try {
     content = decodeSourceData(transport.textContent ?? "");
   } catch {
+    transport.remove();
     return;
   }
 

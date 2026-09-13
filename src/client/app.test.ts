@@ -646,8 +646,13 @@ describe("browser document state", () => {
     expect(decodeSourceData(node.textContent!)).toBe(exact);
   });
 
-  it("does not replace document state with corrupt source transport", async () => {
-    const { document, node, source, view } = sourceFixture("/w==");
+  it.each([
+    ["malformed base64", "A=AA"],
+    ["malformed UTF-8", "/w=="],
+    ["malformed UTF-8 at the maximum encoded length", `/wAA${"AAAA".repeat(3_495_252)}AA==`],
+    ["a transport at the maximum encoded length that decodes one byte over the limit", `${"A".repeat(13_981_015)}=`],
+  ])("removes %s without replacing document state", (_name, encoded) => {
+    const { document, node, source, view } = sourceFixture(encoded);
     vi.stubGlobal("document", document);
     vi.stubGlobal("location", { href: "https://paste.example/a" });
     const adapter = browser.createSourceAdapter(source);
@@ -659,7 +664,7 @@ describe("browser document state", () => {
     expect(adapter.value).toBe("existing\r\nsource");
     expect(source.value).toBe("existing\nsource");
     expect(view.textContent).toBe("existing view");
-    expect(node.remove).not.toHaveBeenCalled();
+    expect(node.remove).toHaveBeenCalledOnce();
   });
 });
 
