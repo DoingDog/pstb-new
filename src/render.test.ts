@@ -3,6 +3,7 @@ import { assetPaths } from "./generated/assets";
 import {
   applicationHeaders,
   dictionaries,
+  deriveDownloadFileName,
   deriveDownloadHeaders,
   escapeBootstrapJson,
   renderCreatePage,
@@ -299,6 +300,11 @@ describe("application documents", () => {
 });
 
 describe("deriveDownloadHeaders", () => {
+  it("derives the canonical download filename independently of its headers", () => {
+    expect(deriveDownloadFileName({ ...paste, title: "draft/final\\copy.  " })).toBe("draft_final_copy");
+    expect(deriveDownloadFileName({ ...paste, title: "...   " })).toBe("paste-example.txt");
+  });
+
   it("uses the ASCII paste fallback and RFC5987 encoded Unicode title", () => {
     const headers = deriveDownloadHeaders({ ...paste, title: "Résumé.txt" });
 

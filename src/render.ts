@@ -424,10 +424,14 @@ function rfc5987(value: string): string {
   return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
+export function deriveDownloadFileName(summary: PasteSummary): string {
+  const fallback = `paste-${summary.id}.txt`;
+  return validateTitle(summary.title).replace(/[\\/]/g, "_").replace(/[ .]+$/u, "") || fallback;
+}
+
 export function deriveDownloadHeaders(summary: PasteSummary): Headers {
   const fallback = `paste-${summary.id}.txt`;
-  const title = validateTitle(summary.title);
-  const filename = title.replace(/[\\/]/g, "_").replace(/[ .]+$/u, "") || fallback;
+  const filename = deriveDownloadFileName(summary);
   return new Headers({
     "Content-Type": "application/octet-stream",
     "Content-Disposition": `attachment; filename="${fallback}"; filename*=UTF-8''${rfc5987(filename)}`,
