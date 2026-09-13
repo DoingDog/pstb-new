@@ -105,6 +105,26 @@ function readParameterValue(source: string, position: number, error: () => never
   return token ?? error();
 }
 
+function skipFilenameValue(source: string, position: number, error: () => never): number {
+  if (source[position] !== '"') return (readToken(source, position) ?? error()).position;
+  position += 1;
+  while (position < source.length) {
+    const character = source[position]!;
+    const code = character.charCodeAt(0);
+    if (character === '"') return position + 1;
+    if (character === "\\") {
+      position += 1;
+      const escaped = source[position];
+      if (escaped === undefined || escaped.charCodeAt(0) < 0x20 || escaped.charCodeAt(0) === 0x7f) error();
+      position += 1;
+      continue;
+    }
+    if (code < 0x20 || code === 0x7f) error();
+    position += 1;
+  }
+  return error();
+}
+
 function isValidBoundary(value: string): boolean {
   return (
     value.length > 0 &&
@@ -154,7 +174,7 @@ function isFieldName(value: string): value is FieldName {
 function headerText(bytes: Uint8Array): string {
   let value = "";
   for (const byte of bytes) {
-    if (byte !== 0x09 && (byte < 0x20 || byte > 0x7e)) throw badRequest();
+    if (byte !== 0x09 && (byte < 0x20 || byte === 0x7f)) throw badRequest();
     value += String.fromCharCode(byte);
   }
   return value;
@@ -203,12 +223,18 @@ function parseContentDisposition(source: string): { name: string; file: boolean 
     position = skipOws(source, parameter.position);
     if (source[position] !== "=") throw badRequest();
     position = skipOws(source, position + 1);
-    const value = readParameterValue(source, position, () => { throw badRequest(); });
-    position = skipOws(source, value.position);
+    let value: string | undefined;
+    if (key === "filename") {
+      position = skipOws(source, skipFilenameValue(source, position, () => { throw badRequest(); }));
+    } else {
+      const parsed = readParameterValue(source, position, () => { throw badRequest(); });
+      position = skipOws(source, parsed.position);
+      value = parsed.value;
+    }
     if (parameters.has(key)) throw badRequest();
     parameters.add(key);
     if (key === "name") {
-      name = value.value;
+      name = value!;
     } else if (key === "filename" || /^filename\*(?:\d+\*?)?$/.test(key)) {
       file = true;
     } else {
@@ -285,14 +311,14 @@ class TextFieldBuffer {
       if (this.#pendingLength === this.#pending.byteLength) this.flush(true);
     }
     if (prefixEnd !== end) {
-      this.validate();
+      this.validate(false);
       throw fieldTooLarge(this.field);
     }
   }
 
   writeByte(byte: number): void {
     if (this.#byteLength === this.limit) {
-      this.validate();
+      this.validate(false);
       throw fieldTooLarge(this.field);
     }
     this.#byteLength += 1;
@@ -308,8 +334,9 @@ class TextFieldBuffer {
     return chunks.join("");
   }
 
-  private validate(): void {
+  private validate(final = true): void {
     this.flush(true);
+    if (!final) return;
     try {
       const tail = this.#decoder.decode();
       if (tail !== "") this.#chunks.push(tail);

@@ -40,6 +40,16 @@ function multipart(boundary: string, parts: Part[], close = true): Uint8Array {
   return join(...chunks);
 }
 
+function multipartWithDispositionBytes(boundary: string, disposition: Uint8Array, body = Uint8Array.of(0xc3)): Uint8Array {
+  return join(
+    bytes(`--${boundary}\r\n`),
+    disposition,
+    bytes("\r\n\r\n"),
+    body,
+    bytes(`\r\n--${boundary}--\r\n`),
+  );
+}
+
 function formPart(name: string, body: Uint8Array | string, options: { filename?: string; filenameStar?: string; extraHeaders?: string[] } = {}): Part {
   const parameters = [`name=${JSON.stringify(name)}`];
   if (options.filename !== undefined) parameters.push(`filename=${JSON.stringify(options.filename)}`);
@@ -308,6 +318,54 @@ describe("strict multipart create fields", () => {
     });
   });
 
+  it.each([undefined, 1_048_576, 8_192, 1])("reports content overflow when a valid UTF-8 scalar crosses the byte cap with %s-byte chunks", async (chunkBytes) => {
+    const boundary = "content-utf8-cap";
+    const body = multipart(boundary, [formPart("content", join(new Uint8Array(contentLimit - 1).fill(0x61), Uint8Array.of(0xc2, 0xa2)))]);
+
+    await expect(fieldsFor(body, boundary, chunkBytes)).rejects.toMatchObject({
+      code: "CONTENT_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: contentLimit },
+    });
+  }, 60_000);
+
+  it("reports ordinary ASCII overflow from the writeByte path", async () => {
+    const boundary = "write-byte-overflow";
+    const candidate = bytes(`\r\n--${boundary}`);
+    const content = join(new Uint8Array(contentLimit - candidate.byteLength).fill(0x61), candidate, bytes("X"));
+
+    await expect(fieldsFor(multipart(boundary, [formPart("content", content)]), boundary)).rejects.toMatchObject({
+      code: "CONTENT_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: contentLimit },
+    });
+  });
+
+  it("reports valid two-, three-, and four-byte scalar overflows at every field cap through bulk and one-byte delivery", async () => {
+    const fields = [
+      ["content", contentLimit],
+      ["title", 800],
+      ["format", 8],
+      ["expiration", 29],
+      ["password", 128],
+      ["viewOnce", 5],
+      ["customId", 64],
+    ] as const;
+    const scalars = [Uint8Array.of(0xc2, 0xa2), Uint8Array.of(0xe2, 0x82, 0xac), Uint8Array.of(0xf0, 0x9f, 0x99, 0x82)];
+
+    for (const [field, limit] of fields) {
+      for (const scalar of scalars) {
+        const body = multipart("all-utf8-caps", [formPart(field, join(new Uint8Array(limit - 1).fill(0x61), scalar))]);
+        for (const chunkBytes of [undefined, 1]) {
+          const expected = field === "content"
+            ? { code: "CONTENT_TOO_LARGE", status: 413, details: { maxBytes: contentLimit } }
+            : { code: "VALIDATION_FAILED", status: 422, details: { fields: [{ field }] } };
+          await expect(fieldsFor(body, "all-utf8-caps", chunkBytes)).rejects.toMatchObject(expected);
+        }
+      }
+    }
+  }, 180_000);
+
   it("bounds definitely oversized non-content fields before retaining them", async () => {
     const boundary = "field-limit";
     for (const [field, limit] of Object.entries({ title: 800, format: 8, expiration: 29, password: 128, viewOnce: 5, customId: 64 })) {
@@ -378,7 +436,7 @@ describe("strict multipart create fields", () => {
     const oversized = new Uint8Array(contentLimit + 1).fill(0x61);
     oversized.set([0xc3, 0x28]);
     const body = multipart(boundary, [formPart("content", oversized)]);
-    const errors = await Promise.all([undefined, 8_192, 1].map(async (chunkBytes) => {
+    const errors = await Promise.all([undefined, 1_048_576, 8_192, 1].map(async (chunkBytes) => {
       try {
         await fieldsFor(body, boundary, chunkBytes);
         return undefined;
@@ -454,6 +512,56 @@ describe("strict multipart create fields", () => {
     for (const body of malformed) await expect(fieldsFor(body, boundary)).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
   });
 
+  it("detects a raw UTF-8 filename as a file before decoding the body", async () => {
+    const boundary = "raw-filename";
+    const source = join(
+      bytes(`--${boundary}\r\nContent-Disposition: form-data; name="content"; filename="café.txt"\r\n\r\n`),
+      Uint8Array.of(0xc3),
+      bytes(`\r\n--${boundary}--\r\n`),
+    );
+
+    await expect(fieldsFor(source, boundary)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "content", message: "Must be a string." }] },
+    });
+  });
+
+  it.each([
+    ["captured Chromium FormData File", bytes('Content-Disposition: form-data; name="content"; filename="café.txt"')],
+    ["captured curl -F", bytes('Content-Disposition: form-data; name="content"; filename="文档.txt"')],
+    ["ASCII", bytes('Content-Disposition: form-data; name="content"; filename="upload.txt"')],
+    ["invalid UTF-8", join(bytes('Content-Disposition: form-data; name="content"; filename="'), Uint8Array.of(0xff, 0x80), bytes('"'))],
+  ])("returns the file validation for %s filename bytes at every delivery size", async (_client, disposition) => {
+    const boundary = "filename-delivery";
+    const source = multipartWithDispositionBytes(boundary, disposition);
+
+    for (const chunkBytes of [undefined, 1_048_576, 8_192, 1]) {
+      await expect(fieldsFor(source, boundary, chunkBytes)).rejects.toMatchObject({
+        code: "VALIDATION_FAILED",
+        status: 422,
+        details: { fields: [{ field: "content", message: "Must be a string." }] },
+      });
+    }
+  });
+
+  it("rejects raw obs-text outside a quoted filename value", async () => {
+    const boundary = "raw-header-grammar";
+    const invalidDispositions = [
+      join(bytes("Content-Dispo"), Uint8Array.of(0xff), bytes('ition: form-data; name="content"')),
+      join(bytes("Content-Disposition: form-data; na"), Uint8Array.of(0xff), bytes('me="content"')),
+      join(bytes('Content-Disposition: form-data; name="cont'), Uint8Array.of(0xff), bytes('ent"')),
+      join(bytes('Content-Disposition: form-data; name="content"; filename='), Uint8Array.of(0xff)),
+    ];
+
+    for (const disposition of invalidDispositions) {
+      await expect(fieldsFor(multipartWithDispositionBytes(boundary, disposition), boundary)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    }
+  });
+
   it.each(["filename", "filename*", "filename*0", "filename*0*", "filename*1", "filename*1*"])("rejects %s parts before decoding their bodies", async (parameter) => {
     const boundary = "file-parameters";
     const source = multipart(boundary, [{
@@ -462,9 +570,12 @@ describe("strict multipart create fields", () => {
       extraHeaders: ["Content-Type: application/octet-stream"],
     }]);
 
-    await expect(fieldsFor(source, boundary)).rejects.toMatchObject({
-      code: "VALIDATION_FAILED",
-      details: { fields: [{ field: "content", message: "Must be a string." }] },
-    });
+    for (const chunkBytes of [undefined, 1_048_576, 8_192, 1]) {
+      await expect(fieldsFor(source, boundary, chunkBytes)).rejects.toMatchObject({
+        code: "VALIDATION_FAILED",
+        status: 422,
+        details: { fields: [{ field: "content", message: "Must be a string." }] },
+      });
+    }
   });
 });
