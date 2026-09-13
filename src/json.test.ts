@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeUtf8, parseStrictJsonObject, readLimitedBytes } from "./json";
+import { decodeUtf8, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, readLimitedBytes } from "./json";
 
 const wireBodyLimit = 67_108_864;
 
@@ -111,6 +111,21 @@ function fuzzValue(next: () => number, depth = 0): JsonValue {
 }
 
 describe("strict JSON boundary", () => {
+  it("returns undefined only for a zero-byte stream", async () => {
+    const empty = streamedRequest(new ReadableStream({ start(controller) { controller.close(); } }));
+    let nonEmpty = 0;
+    await expect(parseStrictJsonObjectOrEmpty(empty, new Set(), () => { nonEmpty += 1; })).resolves.toBeUndefined();
+    expect(nonEmpty).toBe(0);
+
+    const value = await parseStrictJsonObjectOrEmpty(
+      chunkedUtf8Request('{"password":"right"}'),
+      new Set(["password"]),
+      () => { nonEmpty += 1; },
+    );
+    expect(value).toEqual({ password: "right" });
+    expect(nonEmpty).toBe(1);
+  });
+
   it("rejects duplicate credential keys before JSON.parse can overwrite them", async () => {
     await expect(
       parseStrictJsonObject(request('{"password":"right","password":"wrong"}'), new Set(["password"])),

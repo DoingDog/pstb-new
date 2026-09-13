@@ -640,6 +640,77 @@ describe("HTTP slice 1", () => {
     }
   });
 
+  it("parses a nonempty streaming DELETE JSON body without awaiting a tee branch cancellation", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const createdResponse = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "delete me", customId: id, expiration: "permanent" }),
+    });
+    const created = await createdResponse.json() as PasteSummary;
+    let chunks = 0;
+    const clone = vi.spyOn(Request.prototype, "clone");
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunks += 1;
+        if (chunks === 1) {
+          controller.enqueue(new TextEncoder().encode(JSON.stringify({ version: created.version })));
+        } else {
+          controller.close();
+        }
+      },
+    }, { highWaterMark: 0 });
+
+    try {
+      const response = await createHttpApp(env as unknown as Env).fetch(new Request(`https://paste.test/api/pastes/${id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body,
+      }));
+
+      expect(response.status).toBe(204);
+      expect(chunks).toBe(2);
+      expect(clone).not.toHaveBeenCalled();
+      await expect((env as unknown as Env).PASTE_DB.get(id)).resolves.toBeNull();
+    } finally {
+      clone.mockRestore();
+      await deletePaste(id);
+    }
+  }, 1_000);
+
+  it("stops a streaming PUT at the first content byte beyond 10 MiB", async () => {
+    const chunk = new Uint8Array(1_048_576).fill(0x61);
+    let chunks = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (chunks < 10) {
+          chunks += 1;
+          controller.enqueue(chunk);
+        } else if (chunks === 10) {
+          chunks += 1;
+          controller.enqueue(Uint8Array.of(0x61));
+        }
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body,
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "CONTENT_TOO_LARGE", details: { maxBytes: 10_485_760 } },
+    });
+    expect(chunks).toBe(11);
+    expect(cancelled).toBe(true);
+  }, 1_000);
+
   it("rejects an oversized multipart body from Content-Length before parsing it", async () => {
     const boundary = "paste-boundary";
     const body = [

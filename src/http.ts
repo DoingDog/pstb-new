@@ -1,10 +1,11 @@
 import { Hono } from "hono";
-import { decodeUtf8, parseStrictJsonObject, readLimitedBytes } from "./json";
+import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty } from "./json";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { applicationHeaders, renderCreatePage, renderErrorPage, type Locale } from "./render";
 import { isPasteError, PasteError, type Env } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
+const contentBodyLimit = 10_485_760;
 const wireBodyLimit = 67_108_864;
 const textPlainUtf8 = "text/plain; charset=utf-8";
 
@@ -55,13 +56,75 @@ function ifMatchVersion(request: Request): string | undefined {
   return match[1]!;
 }
 
-async function parseTextContent(request: Request): Promise<string> {
-  textMediaType(request);
-  return decodeUtf8(await readLimitedBytes(request, wireBodyLimit));
+function badRequest(): PasteError {
+  return new PasteError("BAD_REQUEST", 400);
+}
+
+function contentTooLarge(): PasteError {
+  return new PasteError("CONTENT_TOO_LARGE", 413, undefined, { maxBytes: contentBodyLimit });
 }
 
 function requestTooLarge(): PasteError {
   return new PasteError("REQUEST_TOO_LARGE", 413, undefined, { maxBytes: wireBodyLimit });
+}
+
+async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
+  try {
+    await body?.cancel();
+  } catch {
+    // Preserve the boundary error that caused cancellation.
+  }
+}
+
+async function parseTextContent(request: Request): Promise<string> {
+  textMediaType(request);
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) {
+    await cancelBody(request.body);
+    throw badRequest();
+  }
+  if (contentLength !== null && Number(contentLength) > wireBodyLimit) {
+    await cancelBody(request.body);
+    throw requestTooLarge();
+  }
+  if (contentLength !== null && Number(contentLength) > contentBodyLimit) {
+    await cancelBody(request.body);
+    throw contentTooLarge();
+  }
+  if (request.body === null) return "";
+
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const reader = request.body.getReader();
+  const chunks: string[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > contentBodyLimit - length) throw contentTooLarge();
+      length += value.byteLength;
+      try {
+        chunks.push(decoder.decode(value, { stream: true }));
+      } catch {
+        throw badRequest();
+      }
+    }
+    try {
+      chunks.push(decoder.decode());
+    } catch {
+      throw badRequest();
+    }
+    return chunks.join("");
+  } catch (error) {
+    try {
+      await reader.cancel();
+    } catch {
+      // Preserve the boundary error that caused cancellation.
+    }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 async function readMultipartBytes(request: Request): Promise<Uint8Array<ArrayBuffer>> {
@@ -139,25 +202,9 @@ async function parseContentPatch(request: Request): Promise<ContentPatch> {
   return { content: value.content, ...parseMutationCredentials(value) };
 }
 
-async function deleteBodyIsOmitted(request: Request): Promise<boolean> {
-  if (request.body === null || request.headers.get("content-length") === "0") return true;
-
-  const reader = request.clone().body?.getReader();
-  if (reader === undefined) return true;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) return true;
-    if (value !== undefined && value.byteLength > 0) {
-      await reader.cancel();
-      return false;
-    }
-  }
-}
-
 async function parseDeleteBody(request: Request): Promise<MutationCredentials> {
-  if (await deleteBodyIsOmitted(request)) return {};
-  jsonMediaType(request);
-  return parseMutationCredentials(await parseStrictJsonObject(request, new Set(["password", "version"])));
+  const value = await parseStrictJsonObjectOrEmpty(request, new Set(["password", "version"]), () => jsonMediaType(request));
+  return value === undefined ? {} : parseMutationCredentials(value);
 }
 
 function passwordForBodyMutation(request: Request, body: { password?: string }): string | undefined {

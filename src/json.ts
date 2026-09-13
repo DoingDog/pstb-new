@@ -87,29 +87,41 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
   }
 }
 
+function validateContentLength(request: Request, maxBytes: number): void {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) throw badRequest();
+  if (contentLength !== null && Number(contentLength) > maxBytes) throw requestTooLarge(maxBytes);
+}
+
 async function visitLimitedBytes(
   request: Request,
   maxBytes: number,
   visit: (chunk: Uint8Array) => void,
-): Promise<void> {
-  const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) {
-    await cancelBody(request.body);
-    throw badRequest();
-  }
-  if (contentLength !== null && Number(contentLength) > maxBytes) {
-    await cancelBody(request.body);
-    throw requestTooLarge(maxBytes);
+  onNonEmpty?: () => void,
+): Promise<boolean> {
+  if (onNonEmpty === undefined) {
+    try {
+      validateContentLength(request, maxBytes);
+    } catch (error) {
+      await cancelBody(request.body);
+      throw error;
+    }
   }
 
-  if (request.body === null) return;
+  if (request.body === null) return false;
 
   const reader = request.body.getReader();
+  let hasBytes = false;
   let length = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) return;
+      if (done) return hasBytes;
+      if (!hasBytes && value.byteLength > 0) {
+        validateContentLength(request, maxBytes);
+        onNonEmpty?.();
+        hasBytes = true;
+      }
       length += value.byteLength;
       if (length > maxBytes) throw requestTooLarge(maxBytes);
       visit(value);
@@ -547,12 +559,18 @@ function decodeChunk(decoder: TextDecoder, bytes: Uint8Array, stream: boolean): 
   }
 }
 
-export async function parseStrictJsonObject(request: Request, allowedKeys: ReadonlySet<string>): Promise<JsonObject> {
+async function parseStrictJsonObjectValue(
+  request: Request,
+  allowedKeys: ReadonlySet<string>,
+  allowEmpty: boolean,
+  onNonEmpty?: () => void,
+): Promise<JsonObject | undefined> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new StrictJsonParser();
-  await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
+  const hasBytes = await visitLimitedBytes(request, maxRequestBytes, (chunk) => {
     parser.write(decodeChunk(decoder, chunk, true));
-  });
+  }, onNonEmpty);
+  if (!hasBytes && allowEmpty) return undefined;
   parser.write(decodeChunk(decoder, new Uint8Array(), false));
 
   const value = parser.finish();
@@ -564,4 +582,16 @@ export async function parseStrictJsonObject(request: Request, allowedKeys: Reado
     if (!allowedKeys.has(key)) throw validationError(key, "Unknown field.");
   }
   return value as JsonObject;
+}
+
+export async function parseStrictJsonObject(request: Request, allowedKeys: ReadonlySet<string>): Promise<JsonObject> {
+  return (await parseStrictJsonObjectValue(request, allowedKeys, false))!;
+}
+
+export async function parseStrictJsonObjectOrEmpty(
+  request: Request,
+  allowedKeys: ReadonlySet<string>,
+  onNonEmpty: () => void = () => {},
+): Promise<JsonObject | undefined> {
+  return parseStrictJsonObjectValue(request, allowedKeys, true, onNonEmpty);
 }
