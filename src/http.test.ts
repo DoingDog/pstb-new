@@ -34,6 +34,15 @@ async function deletePaste(id: string): Promise<void> {
   ]);
 }
 
+function rawContentTypeRequest(path: string, method: string, contentType: string, body: ReadableStream<Uint8Array> | null = null): Request {
+  return {
+    body,
+    headers: { get: (name: string) => name.toLowerCase() === "content-type" ? contentType : null } as Headers,
+    method,
+    url: `https://paste.test${path}`,
+  } as Request;
+}
+
 describe("HTTP slice 1", () => {
   it("serves the create page and its exact root method contract", async () => {
     const get = await request("/", { headers: { "accept-language": "zh-CN" } });
@@ -663,6 +672,88 @@ describe("HTTP slice 1", () => {
       await expect(response.json()).resolves.toMatchObject({
         error: { code: "UNSUPPORTED_MEDIA_TYPE", details: { accepted: ["application/json", "multipart/form-data"] } },
       });
+    }
+  });
+
+  it("accepts Content-Type tokens, quoted-pairs, case, and HTTP OWS", async () => {
+    const app = createHttpApp(env as unknown as Env);
+    const cases = [
+      ["/api/pastes", "POST", " \tAPPLICATION/JSON\t", [400, 422]],
+      ["/api/pastes", "POST", " \tAPPLICATION/JSON \t;\tCHARSET \t=\t\"UTF\\-8\"\t", [400, 422]],
+      ["/api/pastes/missing", "PUT", " \tTEXT/PLAIN \t;\tCHARSET \t=\t\"UTF\\-8\"\t", [422]],
+      ["/api/pastes", "POST", " \tMULTIPART/FORM-DATA \t;\tBOUNDARY \t=\t\"paste\\;boundary\"\t", [400, 422]],
+    ] as const;
+
+    for (const [path, method, contentType, statuses] of cases) {
+      const response = await app.fetch(rawContentTypeRequest(path, method, contentType));
+      expect(statuses).toContain(response.status);
+    }
+  });
+
+  it("rejects invalid Content-Type grammar before pulling request bodies", async () => {
+    const app = createHttpApp(env as unknown as Env);
+    const nonHttpWhitespace = " ";
+    const cases = [
+      {
+        path: "/api/pastes",
+        method: "POST",
+        mediaType: "application/json",
+        parameter: "charset",
+        value: "utf-8",
+        wrongValue: "latin1",
+        accepted: ["application/json", "multipart/form-data"],
+      },
+      {
+        path: "/api/pastes/missing",
+        method: "PUT",
+        mediaType: "text/plain",
+        parameter: "charset",
+        value: "utf-8",
+        wrongValue: "latin1",
+        accepted: ["text/plain; charset=utf-8"],
+      },
+      {
+        path: "/api/pastes",
+        method: "POST",
+        mediaType: "multipart/form-data",
+        parameter: "boundary",
+        value: "paste-boundary",
+        wrongValue: "\"\"",
+        accepted: ["application/json", "multipart/form-data"],
+      },
+    ] as const;
+
+    for (const { path, method, mediaType, parameter, value, wrongValue, accepted } of cases) {
+      for (const contentType of [
+        `${nonHttpWhitespace}${mediaType}; ${parameter}=${value}`,
+        `${mediaType}; ${parameter}=${value}${nonHttpWhitespace}`,
+        `${mediaType};${nonHttpWhitespace}${parameter}=${value}`,
+        `${mediaType}; ${parameter}${nonHttpWhitespace}=${value}`,
+        `${mediaType}; ${parameter}="${value}\\`,
+        `${mediaType}; ${parameter}="${value}\\"`,
+        `${mediaType}; ${parameter}=${value}; ${parameter}=${value}`,
+        `${mediaType}; ${parameter}=${value}; extra=value`,
+        `${mediaType}; ${parameter}=${wrongValue}`,
+      ]) {
+        let pulls = 0;
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulls += 1;
+            controller.close();
+          },
+        }, { highWaterMark: 0 });
+        const response = await app.fetch(rawContentTypeRequest(path, method, contentType, body));
+
+        expect(response.status).toBe(415);
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: "UNSUPPORTED_MEDIA_TYPE",
+            message: "The media type is not supported.",
+            details: { accepted },
+          },
+        });
+        expect(pulls).toBe(0);
+      }
     }
   });
 

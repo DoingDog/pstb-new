@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
+import { parseMultipartBoundary } from "./multipart";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
 import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
@@ -10,11 +11,108 @@ const contentBodyLimit = 10_485_760;
 const wireBodyLimit = 67_108_864;
 const textPlainUtf8 = "text/plain; charset=utf-8";
 const decoderSliceBytes = 8_192;
-const jsonUtf8MediaType = /^application\/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*$/i;
-const textUtf8MediaType = /^text\/plain[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*$/i;
+
+type ParsedMediaType = { type: string; subtype: string; parameters: Array<{ name: string; value: string }> };
+
+function isHttpOws(character: string | undefined): boolean {
+  return character === " " || character === "\t";
+}
+
+function skipHttpOws(source: string, position: number): number {
+  while (isHttpOws(source[position])) position += 1;
+  return position;
+}
+
+function isTokenCharacter(character: string | undefined): boolean {
+  if (character === undefined) return false;
+  const code = character.charCodeAt(0);
+  return (
+    (code >= 0x30 && code <= 0x39) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x61 && code <= 0x7a) ||
+    "!#$%&'*+-.^_`|~".includes(character)
+  );
+}
+
+function readToken(source: string, position: number): { value: string; position: number } | undefined {
+  const start = position;
+  while (isTokenCharacter(source[position])) position += 1;
+  return position === start ? undefined : { value: source.slice(start, position), position };
+}
+
+function isQuotedPairCharacter(character: string | undefined): boolean {
+  if (character === undefined) return false;
+  const code = character.charCodeAt(0);
+  return code === 0x09 || (code >= 0x20 && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+}
+
+function isQuotedText(character: string): boolean {
+  const code = character.charCodeAt(0);
+  return code === 0x09 || (code >= 0x20 && code <= 0x21) || (code >= 0x23 && code <= 0x5b) || (code >= 0x5d && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+}
+
+function readQuotedString(source: string, position: number): { value: string; position: number } | undefined {
+  let value = "";
+  position += 1;
+  while (position < source.length) {
+    const character = source[position]!;
+    if (character === '"') return { value, position: position + 1 };
+    if (character === "\\") {
+      const escaped = source[position + 1];
+      if (!isQuotedPairCharacter(escaped)) return undefined;
+      value += escaped;
+      position += 2;
+      continue;
+    }
+    if (!isQuotedText(character)) return undefined;
+    value += character;
+    position += 1;
+  }
+  return undefined;
+}
+
+function readParameterValue(source: string, position: number): { value: string; position: number } | undefined {
+  return source[position] === '"' ? readQuotedString(source, position) : readToken(source, position);
+}
+
+function parseMediaType(value: string | null): ParsedMediaType | undefined {
+  if (value === null) return undefined;
+
+  let position = skipHttpOws(value, 0);
+  const type = readToken(value, position);
+  if (type === undefined || value[type.position] !== "/") return undefined;
+  const subtype = readToken(value, type.position + 1);
+  if (subtype === undefined) return undefined;
+  position = skipHttpOws(value, subtype.position);
+
+  const parameters: ParsedMediaType["parameters"] = [];
+  while (value[position] === ";") {
+    position = skipHttpOws(value, position + 1);
+    const name = readToken(value, position);
+    if (name === undefined) return undefined;
+    position = skipHttpOws(value, name.position);
+    if (value[position] !== "=") return undefined;
+    position = skipHttpOws(value, position + 1);
+    const parameterValue = readParameterValue(value, position);
+    if (parameterValue === undefined) return undefined;
+    parameters.push({ name: name.value, value: parameterValue.value });
+    position = skipHttpOws(value, parameterValue.position);
+  }
+
+  return position === value.length ? { type: type.value, subtype: subtype.value, parameters } : undefined;
+}
+
+function hasUtf8MediaType(request: Request, type: string, subtype: string, parameterRequired: boolean): boolean {
+  const mediaType = parseMediaType(request.headers.get("content-type"));
+  if (mediaType?.type.toLowerCase() !== type || mediaType.subtype.toLowerCase() !== subtype) return false;
+  if (mediaType.parameters.length === 0) return !parameterRequired;
+  if (mediaType.parameters.length !== 1) return false;
+  const parameter = mediaType.parameters[0]!;
+  return parameter.name.toLowerCase() === "charset" && parameter.value.toLowerCase() === "utf-8";
+}
 
 function hasJsonUtf8MediaType(request: Request): boolean {
-  return jsonUtf8MediaType.test(request.headers.get("content-type")?.trim() ?? "");
+  return hasUtf8MediaType(request, "application", "json", false);
 }
 
 function createInput(value: Record<string, unknown>): CreateInput {
@@ -33,16 +131,13 @@ function validationError(field: string, message: string): PasteError {
 }
 
 function createMediaType(request: Request): "json" | "multipart" {
-  const contentType = request.headers.get("content-type")?.trim();
   if (hasJsonUtf8MediaType(request)) return "json";
-  if (/^multipart\/form-data\s*;\s*boundary\s*=\s*(?:[!#$%&'*+\-.^_`|~0-9a-z]+|"(?:[^"\\\r\n]|\\[^\r\n])+")\s*$/i.test(contentType ?? "")) {
-    return "multipart";
-  }
-  throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json", "multipart/form-data"] });
+  parseMultipartBoundary(request.headers.get("content-type"));
+  return "multipart";
 }
 
 function textMediaType(request: Request): void {
-  if (!textUtf8MediaType.test(request.headers.get("content-type")?.trim() ?? "")) {
+  if (!hasUtf8MediaType(request, "text", "plain", true)) {
     throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: [textPlainUtf8] });
   }
 }
