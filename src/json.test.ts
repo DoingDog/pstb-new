@@ -29,6 +29,7 @@ const fieldBoundPolicy: StrictJsonParsePolicy = {
     ? new PasteError("CONTENT_TOO_LARGE", 413, undefined, { maxBytes: contentBodyLimit })
     : new PasteError("VALIDATION_FAILED", 422),
   onRetainedLimit: () => new PasteError("BAD_REQUEST", 400),
+  topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
 };
 
 function request(body: BodyInit, headers?: HeadersInit): Request {
@@ -168,6 +169,48 @@ describe("strict JSON boundary", () => {
       details: { maxBytes: wireBodyLimit },
     });
     expect(state).toEqual({ cancels: 1, pulls: 0 });
+  });
+
+  it("accepts zero-padded Content-Length values and rejects non-digit values", async () => {
+    await expect(
+      parseStrictJsonObject(streamedRequest(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("{}"));
+          controller.close();
+        },
+      }), { "content-length": "0002" }), new Set()),
+    ).resolves.toEqual({});
+
+    for (const contentLength of ["+2", "-2", " 2", "2 ", "2\t"]) {
+      await expect(parseStrictJsonObject(streamedRequest(new ReadableStream({ start(controller) { controller.close(); } }), {
+        "content-length": contentLength,
+      }), new Set())).rejects.toMatchObject({ code: "BAD_REQUEST", status: 400 });
+    }
+  });
+
+  it("defers unknown-field errors until malformed JSON and UTF-8 have been checked", async () => {
+    for (const source of [
+      '{"unknown"',
+      '{"unknown":',
+      '{"unknown":1',
+      '{"unknown":{',
+      '{"unknown":[',
+      '{"unknown":{"nested":}',
+    ]) {
+      await expect(parseStrictJsonObject(request(source), new Set())).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    }
+
+    await expect(parseStrictJsonObject(request('{"unknown":{"nested":[1]}}'), new Set())).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+    });
+    await expect(parseStrictJsonObject(request(new Uint8Array([0x7b, 0x22, 0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x22, 0x3a, 0xc3, 0x28])), new Set())).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
   });
 
   it("rejects duplicate credential keys before JSON.parse can overwrite them", async () => {
@@ -349,5 +392,135 @@ describe("strict JSON boundary", () => {
       code: "VALIDATION_FAILED",
       status: 422,
     });
+  });
+
+  it("charges retained numeric syntax and cancels before a policy-sized token is buffered", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"expiration":1${"0".repeat(4_096)}}`));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const parsed = streamedRequest(body);
+    const policy: StrictJsonParsePolicy = { ...fieldBoundPolicy, maxRetainedCodeUnits: 1_024 };
+
+    await expect(parseStrictJsonObject(parsed, new Set(["expiration"]), policy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    expect(cancelled).toBe(true);
+    expect(parsed.body?.locked).toBe(false);
+  });
+
+  it("rejects a known string field at its numeric opening token before retaining its descendants", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode('{"content":1'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const policy: StrictJsonParsePolicy = {
+      ...fieldBoundPolicy,
+      expectedTopLevelKinds: new Map([["content", new Set(["string"] as const)]]),
+      onUnexpectedTopLevelKind: (field) => new PasteError("VALIDATION_FAILED", 422, undefined, {
+        fields: [{ field, message: "Must be a string." }],
+      }),
+    };
+
+    await expect(parseStrictJsonObject(streamedRequest(body), new Set(["content"]), policy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "content", message: "Must be a string." }] },
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it("validates content Unicode scalar pairs across parser chunks before applying its UTF-8 byte limit", async () => {
+    for (const source of ['{"content":"🙂"}', '{"content":"\\uD83D\\uDE42"}']) {
+      await expect(parseStrictJsonObject(chunkedUtf8Request(source, 1), new Set(["content"]), fieldBoundPolicy)).resolves.toEqual({
+        content: "🙂",
+      });
+    }
+    for (const source of [
+      '{"content":"\\uD800"}',
+      '{"content":"\\uDC00"}',
+      '{"content":"\\uD800x"}',
+      '{"content":"\\uD800\\uD800"}',
+      '{"content":"\\uDC00\\uD800"}',
+    ]) {
+      await expect(parseStrictJsonObject(chunkedUtf8Request(source, 1), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+        code: "VALIDATION_FAILED",
+        status: 422,
+        details: { fields: [{ field: "content", message: "Must contain only Unicode scalar values." }] },
+      });
+    }
+  });
+
+  it("enforces content byte limits for multibyte Unicode scalars", async () => {
+    const exact = `${"€".repeat(Math.floor(contentBodyLimit / 3))}x`;
+    await expect(parseStrictJsonObject(request(JSON.stringify({ content: exact })), new Set(["content"]), fieldBoundPolicy)).resolves.toEqual({
+      content: exact,
+    });
+    await expect(parseStrictJsonObject(request(JSON.stringify({ content: `${exact}x` })), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "CONTENT_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: contentBodyLimit },
+    });
+  }, 20_000);
+
+  it("defers policy unknown fields through malformed JSON, UTF-8, and wire-size failures without retaining their values", async () => {
+    for (const source of ['{"unknown"', '{"unknown":', '{"unknown":{', '{"unknown":[', '{"unknown":{"nested":}']) {
+      await expect(parseStrictJsonObject(request(source), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    }
+    await expect(parseStrictJsonObject(request(new Uint8Array([0x7b, 0x22, 0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x22, 0x3a, 0xc3, 0x28])), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    await expect(parseStrictJsonObject(streamedRequest(new ReadableStream({ start(controller) { controller.close(); } }), {
+      "content-length": String(wireBodyLimit + 1),
+    }), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({ code: "REQUEST_TOO_LARGE", status: 413 });
+    await expect(parseStrictJsonObject(request(JSON.stringify({ unknown: "x".repeat(2 * 1024 * 1024) })), new Set(["content"]), {
+      ...fieldBoundPolicy,
+      maxRetainedCodeUnits: 1_024,
+    })).rejects.toMatchObject({ code: "VALIDATION_FAILED", status: 422 });
+    await expect(parseStrictJsonObject(request('{"unknown":1,"unknown":2}'), new Set(["content"]), fieldBoundPolicy)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      status: 422,
+      details: { fields: [{ field: "unknown", message: "Duplicate field." }] },
+    });
+  });
+
+  it("cancels an exact-wire-limit numeric stream before retaining a body-sized number", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new TextEncoder().encode(`{"expiration":1${"0".repeat(8_192)}`));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const policy: StrictJsonParsePolicy = { ...fieldBoundPolicy, maxRetainedCodeUnits: 1_024 };
+    const parsed = streamedRequest(body, { "content-length": String(wireBodyLimit) });
+
+    await expect(parseStrictJsonObject(parsed, new Set(["expiration"]), policy)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      status: 400,
+    });
+    expect(pulls).toBe(1);
+    expect(cancelled).toBe(true);
+    expect(parsed.body?.locked).toBe(false);
   });
 });

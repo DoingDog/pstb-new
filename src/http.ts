@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonParsePolicy } from "./json";
+import { parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
 import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
 import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
@@ -9,6 +9,13 @@ const createFields = new Set(["content", "title", "format", "expiration", "passw
 const contentBodyLimit = 10_485_760;
 const wireBodyLimit = 67_108_864;
 const textPlainUtf8 = "text/plain; charset=utf-8";
+const decoderSliceBytes = 8_192;
+const jsonUtf8MediaType = /^application\/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*$/i;
+const textUtf8MediaType = /^text\/plain[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*$/i;
+
+function hasJsonUtf8MediaType(request: Request): boolean {
+  return jsonUtf8MediaType.test(request.headers.get("content-type")?.trim() ?? "");
+}
 
 function createInput(value: Record<string, unknown>): CreateInput {
   const input: CreateInput = { content: value.content as string };
@@ -27,10 +34,7 @@ function validationError(field: string, message: string): PasteError {
 
 function createMediaType(request: Request): "json" | "multipart" {
   const contentType = request.headers.get("content-type")?.trim();
-  const parts = contentType?.split(";").map((part) => part.trim()) ?? [];
-  if (parts[0]?.toLowerCase() === "application/json" && (parts.length === 1 || (parts.length === 2 && /^charset=utf-8$/i.test(parts[1]!)))) {
-    return "json";
-  }
+  if (hasJsonUtf8MediaType(request)) return "json";
   if (/^multipart\/form-data\s*;\s*boundary\s*=\s*(?:[!#$%&'*+\-.^_`|~0-9a-z]+|"(?:[^"\\\r\n]|\\[^\r\n])+")\s*$/i.test(contentType ?? "")) {
     return "multipart";
   }
@@ -38,7 +42,7 @@ function createMediaType(request: Request): "json" | "multipart" {
 }
 
 function textMediaType(request: Request): void {
-  if (!/^text\/plain\s*;\s*charset\s*=\s*utf-8\s*$/i.test(request.headers.get("content-type")?.trim() ?? "")) {
+  if (!textUtf8MediaType.test(request.headers.get("content-type")?.trim() ?? "")) {
     throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: [textPlainUtf8] });
   }
 }
@@ -84,7 +88,7 @@ function jsonStringLimitError(field: string): PasteError {
     case "customId":
       return validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
     case "version":
-      return new PasteError("VERSION_CONFLICT", 409);
+      return validationError("version", "Must be at most 53 code units.");
     case "viewOnce":
       return validationError("viewOnce", "Must be a boolean.");
     case "body":
@@ -93,6 +97,36 @@ function jsonStringLimitError(field: string): PasteError {
       return badRequest();
   }
 }
+
+function jsonKindError(field: string): PasteError {
+  switch (field) {
+    case "content":
+    case "title":
+    case "format":
+    case "password":
+    case "version":
+      return validationError(field, "Must be a string.");
+    case "customId":
+      return validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
+    case "viewOnce":
+      return validationError("viewOnce", "Must be a boolean.");
+    case "expiration":
+      return jsonStringLimitError("expiration");
+    default:
+      return badRequest();
+  }
+}
+
+const httpJsonKinds: ReadonlyMap<string, ReadonlySet<StrictJsonKind>> = new Map([
+  ["content", new Set<StrictJsonKind>(["string"])],
+  ["title", new Set<StrictJsonKind>(["string"])],
+  ["format", new Set<StrictJsonKind>(["string"])],
+  ["expiration", new Set<StrictJsonKind>(["null", "number", "string"])],
+  ["password", new Set<StrictJsonKind>(["string"])],
+  ["viewOnce", new Set<StrictJsonKind>(["boolean"])],
+  ["customId", new Set<StrictJsonKind>(["string"])],
+  ["version", new Set<StrictJsonKind>(["string"])],
+]);
 
 const httpJsonPolicy: StrictJsonParsePolicy = {
   maxRetainedCodeUnits: contentBodyLimit + 4_096,
@@ -105,10 +139,13 @@ const httpJsonPolicy: StrictJsonParsePolicy = {
     ["password", 128],
     ["viewOnce", 0],
     ["customId", 64],
-    ["version", 53],
   ]),
-  onStringLimit: jsonStringLimitError,
+  expectedTopLevelKinds: httpJsonKinds,
   onRetainedLimit: badRequest,
+  onStringLimit: jsonStringLimitError,
+  onUnexpectedTopLevelKind: jsonKindError,
+  topLevelNumberMaxCodeUnits: new Map([["expiration", 64]]),
+  topLevelUtf8ByteMax: new Map([["content", contentBodyLimit]]),
 };
 
 async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
@@ -122,7 +159,7 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
 async function parseTextContent(request: Request): Promise<string> {
   textMediaType(request);
   const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) {
+  if (contentLength !== null && !/^\d+$/.test(contentLength)) {
     await cancelBody(request.body);
     throw badRequest();
   }
@@ -144,12 +181,17 @@ async function parseTextContent(request: Request): Promise<string> {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.byteLength > contentBodyLimit - length) throw contentTooLarge();
-      length += value.byteLength;
-      try {
-        chunks.push(decoder.decode(value, { stream: true }));
-      } catch {
-        throw badRequest();
+      for (let start = 0; start < value.byteLength; start += decoderSliceBytes) {
+        const slice = value.subarray(start, Math.min(start + decoderSliceBytes, value.byteLength));
+        let decoded: string;
+        try {
+          decoded = decoder.decode(slice, { stream: true });
+        } catch {
+          throw badRequest();
+        }
+        if (slice.byteLength > contentBodyLimit - length) throw contentTooLarge();
+        length += slice.byteLength;
+        chunks.push(decoded);
       }
     }
     try {
@@ -219,8 +261,7 @@ type MutationCredentials = { password?: string; version?: string };
 type ContentPatch = MutationCredentials & { content: string };
 
 function jsonMediaType(request: Request): void {
-  const parts = request.headers.get("content-type")?.split(";").map((part) => part.trim()) ?? [];
-  if (parts[0]?.toLowerCase() !== "application/json" || (parts.length !== 1 && (parts.length !== 2 || !/^charset=utf-8$/i.test(parts[1]!)))) {
+  if (!hasJsonUtf8MediaType(request)) {
     throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/json"] });
   }
 }

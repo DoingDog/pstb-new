@@ -5,6 +5,8 @@ import { assetPaths } from "./generated/assets";
 import { renderCreatePage } from "./render";
 import type { Env, MutationResult, PasteSummary } from "./types";
 
+const wireBodyLimit = 67_108_864;
+
 vi.mock("./render", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./render")>();
   return { ...actual, renderCreatePage: vi.fn(actual.renderCreatePage) };
@@ -118,6 +120,50 @@ describe("HTTP slice 1", () => {
       (env as unknown as Env).PASTE_DB.delete(`__cfpb:rev:${id}:1`),
       (env as unknown as Env).PASTE_DB.delete(`__cfpb:rev:${id}:2`),
     ]);
+  });
+
+  it("accepts quoted UTF-8 charsets and zero-padded Content-Length on every JSON and text boundary", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const createBody = JSON.stringify({ content: "old", customId: id, expiration: "permanent" });
+    const create = await request("/api/pastes", {
+      method: "POST",
+      headers: {
+        "content-type": 'application/json; charset="UTF-8"',
+        "content-length": `000${new TextEncoder().encode(createBody).byteLength}`,
+      },
+      body: createBody,
+    });
+    expect(create.status).toBe(201);
+    const created = await create.json() as PasteSummary;
+
+    try {
+      const patchBody = JSON.stringify({ content: "patched", version: created.version });
+      const patch = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": 'application/json; charset="utf-8"',
+          "content-length": `000${new TextEncoder().encode(patchBody).byteLength}`,
+        },
+        body: patchBody,
+      });
+      expect(patch.status).toBe(200);
+
+      const put = await request(`/api/pastes/${id}`, {
+        method: "PUT",
+        headers: { "content-type": 'text/plain; charset="UTF-8"', "content-length": "0003" },
+        body: "put",
+      });
+      expect(put.status).toBe(200);
+
+      const deleted = await request(`/api/pastes/${id}`, {
+        method: "DELETE",
+        headers: { "content-type": 'application/json; charset="utf-8"', "content-length": "0002" },
+        body: "{}",
+      });
+      expect(deleted.status).toBe(204);
+    } finally {
+      await deletePaste(id);
+    }
   });
 
   it("cancels an overlong password while parsing streamed create JSON", async () => {
@@ -983,5 +1029,290 @@ describe("HTTP slice 1", () => {
       error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
     });
     expect(cancelled).toBe(true);
+  });
+
+  it("rejects malformed JSON and text Content-Length values while accepting zero-padded exact limits", async () => {
+    for (const contentLength of ["+2", "-2", " 2", "2 ", "2\t"]) {
+      const headers = {
+        get(name: string) {
+          if (name === "content-type") return "application/json";
+          return name === "content-length" ? contentLength : null;
+        },
+      } as Headers;
+      const json = await createHttpApp(env as unknown as Env).fetch({
+        body: null,
+        headers,
+        method: "POST",
+        url: "https://paste.test/api/pastes",
+      } as Request);
+      expect(json.status).toBe(400);
+      const text = await createHttpApp(env as unknown as Env).fetch({
+        body: null,
+        headers: {
+          get(name: string) {
+            if (name === "content-type") return "text/plain; charset=utf-8";
+            return name === "content-length" ? contentLength : null;
+          },
+        } as Headers,
+        method: "PUT",
+        url: "https://paste.test/api/pastes/missing",
+      } as Request);
+      expect(text.status).toBe(400);
+    }
+
+    const jsonExact = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": "00067108864" },
+      body: "{}",
+    });
+    expect(jsonExact.status).toBe(422);
+    const jsonOver = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": "00067108865" },
+      body: "{}",
+    });
+    expect(jsonOver.status).toBe(413);
+
+    const textExact = await request("/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8", "content-length": "00010485760" },
+      body: "",
+    });
+    expect(textExact.status).toBe(422);
+    const textOver = await request("/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8", "content-length": "00010485761" },
+      body: "",
+    });
+    expect(textOver.status).toBe(413);
+  });
+
+  it("rejects every wrong top-level kind before nested JSON descendants are retained", async () => {
+    const createCases: Array<[string, unknown, string]> = [
+      ["content", { nested: true }, "content"],
+      ["title", [], "title"],
+      ["format", false, "format"],
+      ["expiration", {}, "expiration"],
+      ["password", [], "password"],
+      ["viewOnce", "true", "viewOnce"],
+      ["customId", 1, "id"],
+    ];
+    for (const [field, invalid, errorField] of createCases) {
+      const response = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "source", [field]: invalid }),
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "VALIDATION_FAILED", details: { fields: [{ field: errorField }] } },
+      });
+    }
+
+    for (const [field, invalid] of [["content", []], ["password", 1], ["version", false]] as const) {
+      const response = await request("/api/pastes/missing", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "source", [field]: invalid }),
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "VALIDATION_FAILED", details: { fields: [{ field }] } },
+      });
+    }
+
+    for (const [field, invalid] of [["password", {}], ["version", 1]] as const) {
+      const response = await request("/api/pastes/missing", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ [field]: invalid }),
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "VALIDATION_FAILED", details: { fields: [{ field }] } },
+      });
+    }
+
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode(`{"password":{${'"nested":['.repeat(1_024)}`));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const nested = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+    expect(nested.status).toBe(422);
+    expect(cancelled).toBe(true);
+  });
+
+  it("defers unknown top-level fields until JSON syntax, UTF-8, and wire limits are checked", async () => {
+    for (const source of ['{"unknown"', '{"unknown":', '{"unknown":1', '{"unknown":{', '{"unknown":[', '{"unknown":{"nested":}']) {
+      const response = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: source,
+      });
+      expect(response.status).toBe(400);
+    }
+    const complete = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"unknown":{"nested":[1]}}',
+    });
+    expect(complete.status).toBe(422);
+    await expect(complete.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "unknown", message: "Unknown field." }] } },
+    });
+    const invalidUtf8 = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: new Uint8Array([0x7b, 0x22, 0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x22, 0x3a, 0xc3, 0x28]),
+    }));
+    expect(invalidUtf8.status).toBe(400);
+  });
+
+  it("does not synthesize a bare version conflict for a 54-code-unit version", async () => {
+    const id = `http-${crypto.randomUUID()}`;
+    const created = await request("/api/pastes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "old", password: "right", customId: id, expiration: "permanent" }),
+    });
+    expect(created.status).toBe(201);
+    const version = "v".repeat(54);
+
+    try {
+      const missing = await request("/api/pastes/missing", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "new", version }),
+      });
+      expect(missing.status).toBe(404);
+      const wrongPassword = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "new", password: "wrong", version }),
+      });
+      expect(wrongPassword.status).toBe(403);
+      const correctPassword = await request(`/api/pastes/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "new", password: "right", version }),
+      });
+      expect(correctPassword.status).toBe(409);
+      await expect(correctPassword.json()).resolves.toMatchObject({
+        error: { code: "VERSION_CONFLICT", details: { currentVersion: expect.any(String), updatedAt: expect.any(String) } },
+      });
+    } finally {
+      await deletePaste(id);
+    }
+  });
+
+  it("returns the content scalar validation before size for a large escaped-surrogate PATCH stream", async () => {
+    const repetitions = 10_485_761;
+    const contentLength = new TextEncoder().encode('{"content":"').byteLength + repetitions * "\\uD800".length + 2;
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new TextEncoder().encode('{"content":"\\uD800\\uD800'));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "content-length": String(contentLength) },
+      body,
+    }));
+
+    expect(contentLength).toBeLessThanOrEqual(wireBodyLimit);
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "content", message: "Must contain only Unicode scalar values." }] } },
+    });
+    expect(pulls).toBe(1);
+    expect(cancelled).toBe(true);
+  });
+
+  it("proves malformed UTF-8 in a PUT chunk before reporting its content size", async () => {
+    const bytes = new Uint8Array(10_485_762).fill(0x61);
+    bytes[bytes.length - 2] = 0xc3;
+    bytes[bytes.length - 1] = 0x28;
+    const response = await createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "PUT",
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      body: bytes,
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+  });
+
+  it("accepts normal numeric expiration spellings and rejects malformed or extra charset parameters", async () => {
+    const ids: string[] = [];
+    try {
+      for (const expiration of ["60", "6e1", "60.0"]) {
+        const id = `http-${crypto.randomUUID()}`;
+        ids.push(id);
+        const response = await request("/api/pastes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `{"content":"source","customId":"${id}","expiration":${expiration}}`,
+        });
+        expect(response.status).toBe(201);
+      }
+      const pathological = await request("/api/pastes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: `{"content":"source","expiration":1${"0".repeat(64)}}`,
+      });
+      expect(pathological.status).toBe(422);
+      await expect(pathological.json()).resolves.toMatchObject({
+        error: { code: "VALIDATION_FAILED", details: { fields: [{ field: "expiration" }] } },
+      });
+      for (const contentType of [
+        "application/json; charset=latin1",
+        'application/json; charset="utf-8\\"',
+        'application/json; charset="utf-8"; charset=utf-8',
+        "application/json; charset=utf-8; boundary=x",
+      ]) {
+        const response = await request("/api/pastes", {
+          method: "POST",
+          headers: { "content-type": contentType },
+          body: '{"content":"source"}',
+        });
+        expect(response.status).toBe(415);
+        await expect(response.json()).resolves.toMatchObject({
+          error: { code: "UNSUPPORTED_MEDIA_TYPE", details: { accepted: ["application/json", "multipart/form-data"] } },
+        });
+      }
+      for (const contentType of [
+        "text/plain; charset=latin1",
+        'text/plain; charset="utf-8\\"',
+        'text/plain; charset="utf-8"; charset=utf-8',
+      ]) {
+        const response = await request("/api/pastes/missing", {
+          method: "PUT",
+          headers: { "content-type": contentType },
+          body: "source",
+        });
+        expect(response.status).toBe(415);
+        await expect(response.json()).resolves.toMatchObject({
+          error: { code: "UNSUPPORTED_MEDIA_TYPE", details: { accepted: ["text/plain; charset=utf-8"] } },
+        });
+      }
+    } finally {
+      await Promise.all(ids.map((id) => deletePaste(id)));
+    }
   });
 });

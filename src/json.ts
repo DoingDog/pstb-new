@@ -4,6 +4,7 @@ const maxRequestBytes = 67_108_864;
 const maxJsonDepth = 256;
 const tokenBlockLength = 8_192;
 const retainedContainerUnits = 256;
+const retainedKeyUnits = 32;
 
 const whitespace = /[ \t\n\r]+/y;
 
@@ -46,12 +47,18 @@ class FlatTextBuffer {
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
 
+export type StrictJsonKind = "array" | "boolean" | "null" | "number" | "object" | "string";
+
 export type StrictJsonParsePolicy = {
   maxRetainedCodeUnits: number;
   maxTopLevelKeyCodeUnits: number;
   topLevelStringMaxCodeUnits: ReadonlyMap<string, number>;
   onStringLimit: (field: string) => PasteError;
   onRetainedLimit: () => PasteError;
+  expectedTopLevelKinds?: ReadonlyMap<string, ReadonlySet<StrictJsonKind>>;
+  onUnexpectedTopLevelKind?: (field: string) => PasteError;
+  topLevelNumberMaxCodeUnits?: ReadonlyMap<string, number>;
+  topLevelUtf8ByteMax?: ReadonlyMap<string, number>;
 };
 
 type ParserState = "normal" | "string" | "escape" | "unicode" | "number" | "literal";
@@ -64,8 +71,9 @@ type NumberState =
   | "exponentFirst"
   | "exponentSign"
   | "exponent";
-type ArrayFrame = { kind: "array"; state: "valueOrEnd" | "value" | "commaOrEnd"; value: JsonValue[] };
+type ArrayFrame = { discard: boolean; kind: "array"; state: "valueOrEnd" | "value" | "commaOrEnd"; value: JsonValue[] };
 type ObjectFrame = {
+  discard: boolean;
   key: string | undefined;
   keys: Set<string>;
   kind: "object";
@@ -99,7 +107,7 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
 
 function validateContentLength(request: Request, maxBytes: number): void {
   const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && !/^(?:0|[1-9]\d*)$/.test(contentLength)) throw badRequest();
+  if (contentLength !== null && !/^\d+$/.test(contentLength)) throw badRequest();
   if (contentLength !== null && Number(contentLength) > maxBytes) throw requestTooLarge(maxBytes);
 }
 
@@ -172,21 +180,35 @@ export function decodeUtf8(bytes: Uint8Array): string {
 
 class StrictJsonParser {
   #allowedTopLevelKeys: ReadonlySet<string> | undefined;
+  #deferredError: PasteError | undefined;
   #frameStack: Frame[] = [];
   #hasRoot = false;
   #literal = "";
   #literalIndex = 0;
   #literalValue: boolean | null = null;
   #number = new FlatTextBuffer();
+  #numberDiscarded = false;
+  #numberLength = 0;
+  #numberLimit: number | undefined;
+  #numberLimitField: string | undefined;
   #numberState: NumberState = "minus";
   #policy: StrictJsonParsePolicy | undefined;
   #retainedCodeUnits = 0;
   #root: JsonValue | undefined;
   #state: ParserState = "normal";
   #string = new FlatTextBuffer();
+  #stringByteLimit: number | undefined;
+  #stringDiscarded = false;
+  #stringField: string | undefined;
+  #stringIsKey = false;
+  #stringKeyHash = 2_166_136_261;
+  #stringKeyTooLong = false;
   #stringLength = 0;
   #stringLimit: number | undefined;
   #stringLimitField: string | undefined;
+  #stringPendingHighSurrogate = false;
+  #stringStoredLength = 0;
+  #stringUtf8Bytes = 0;
   #unicode = "";
 
   constructor(allowedTopLevelKeys?: ReadonlySet<string>, policy?: StrictJsonParsePolicy) {
@@ -227,6 +249,7 @@ class StrictJsonParser {
       this.invalid();
     }
     if (!this.#hasRoot) this.invalid();
+    if (this.#deferredError !== undefined) throw this.#deferredError;
     return this.#root!;
   }
 
@@ -408,7 +431,15 @@ class StrictJsonParser {
   }
 
   private appendNumber(source: string, start: number, end: number, state: NumberState): number {
-    this.#number.append(source, start, end);
+    const length = end - start;
+    if (this.#numberLimit !== undefined && this.#numberLength > this.#numberLimit - length) {
+      throw this.#policy!.onStringLimit(this.#numberLimitField!);
+    }
+    if (!this.#numberDiscarded) {
+      this.retain(length);
+      this.#number.append(source, start, end);
+    }
+    this.#numberLength += length;
     this.#numberState = state;
     return end;
   }
@@ -432,12 +463,14 @@ class StrictJsonParser {
 
   private startContainer(kind: Frame["kind"]): void {
     this.assertValueExpected();
+    this.assertTopLevelKind(kind);
     if (this.#frameStack.length >= maxJsonDepth) this.invalid();
-    this.retain(retainedContainerUnits);
+    const discard = this.isDiscardingValue();
+    if (!discard) this.retain(retainedContainerUnits);
     if (kind === "array") {
-      this.#frameStack.push({ kind, state: "valueOrEnd", value: [] });
+      this.#frameStack.push({ discard, kind, state: "valueOrEnd", value: [] });
     } else {
-      this.#frameStack.push({ kind, key: undefined, keys: new Set(), state: "keyOrEnd", value: {} });
+      this.#frameStack.push({ discard, kind, key: undefined, keys: new Set(), state: "keyOrEnd", value: {} });
     }
   }
 
@@ -470,11 +503,21 @@ class StrictJsonParser {
   private acceptString(value: string): void {
     const frame = this.#frameStack.at(-1);
     if (frame?.kind === "object" && (frame.state === "keyOrEnd" || frame.state === "key")) {
-      if (frame.keys.has(value)) throw validationError(value, "Duplicate field.");
-      if (this.#policy !== undefined && this.#frameStack.length === 1 && !this.#allowedTopLevelKeys?.has(value)) {
-        throw validationError(value, "Unknown field.");
+      const topLevel = this.#frameStack.length === 1;
+      const unknown = topLevel && this.#policy !== undefined && !this.#allowedTopLevelKeys?.has(value);
+      if (frame.keys.has(value)) {
+        if (unknown) {
+          this.#deferredError = validationError(this.#stringKeyTooLong ? "body" : value, "Duplicate field.");
+        } else {
+          throw validationError(value, "Duplicate field.");
+        }
+      } else {
+        this.retain(retainedKeyUnits);
+        frame.keys.add(value);
       }
-      frame.keys.add(value);
+      if (unknown && this.#deferredError === undefined) {
+        this.#deferredError = validationError(this.#stringKeyTooLong ? "body" : value, "Unknown field.");
+      }
       frame.key = value;
       frame.state = "colon";
       return;
@@ -493,17 +536,45 @@ class StrictJsonParser {
 
     if (frame.kind === "array") {
       if (frame.state !== "valueOrEnd" && frame.state !== "value") this.invalid();
-      this.retain(retainedContainerUnits);
-      frame.value.push(value);
+      if (!frame.discard) {
+        this.retain(retainedContainerUnits);
+        frame.value.push(value);
+      }
       frame.state = "commaOrEnd";
       return;
     }
 
     if (frame.state !== "value" || frame.key === undefined) this.invalid();
-    this.retain(retainedContainerUnits);
-    Object.defineProperty(frame.value, frame.key, { enumerable: true, configurable: true, writable: true, value });
+    if (!this.isDiscardingValue()) {
+      this.retain(retainedContainerUnits);
+      Object.defineProperty(frame.value, frame.key, { enumerable: true, configurable: true, writable: true, value });
+    }
     frame.key = undefined;
     frame.state = "commaOrEnd";
+  }
+
+  private topLevelValueField(): string | undefined {
+    const frame = this.#frameStack.at(-1);
+    return this.#frameStack.length === 1 && frame?.kind === "object" && frame.state === "value"
+      ? frame.key
+      : undefined;
+  }
+
+  private isDiscardingValue(): boolean {
+    const frame = this.#frameStack.at(-1);
+    if (frame === undefined) return false;
+    if (frame.discard) return true;
+    const field = this.topLevelValueField();
+    return this.#policy !== undefined && field !== undefined && !this.#allowedTopLevelKeys?.has(field);
+  }
+
+  private assertTopLevelKind(kind: StrictJsonKind): void {
+    const field = this.topLevelValueField();
+    if (field === undefined) return;
+    const expected = this.#policy?.expectedTopLevelKinds?.get(field);
+    if (expected !== undefined && !expected.has(kind)) {
+      throw this.#policy?.onUnexpectedTopLevelKind?.(field) ?? badRequest();
+    }
   }
 
   private assertValueExpected(): void {
@@ -522,22 +593,34 @@ class StrictJsonParser {
 
   private startString(): void {
     this.#string.reset();
+    this.#stringByteLimit = undefined;
+    this.#stringDiscarded = false;
+    this.#stringField = undefined;
+    this.#stringIsKey = false;
+    this.#stringKeyHash = 2_166_136_261;
+    this.#stringKeyTooLong = false;
     this.#stringLength = 0;
     this.#stringLimit = undefined;
     this.#stringLimitField = undefined;
+    this.#stringPendingHighSurrogate = false;
+    this.#stringStoredLength = 0;
+    this.#stringUtf8Bytes = 0;
 
     const policy = this.#policy;
     const frame = this.#frameStack.at(-1);
-    if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1) {
-      if (frame.state === "keyOrEnd" || frame.state === "key") {
-        this.#stringLimit = policy.maxTopLevelKeyCodeUnits;
-        this.#stringLimitField = "body";
-      } else if (frame.state === "value" && frame.key !== undefined) {
-        const limit = policy.topLevelStringMaxCodeUnits.get(frame.key);
-        if (limit !== undefined) {
-          this.#stringLimit = limit;
-          this.#stringLimitField = frame.key;
-        }
+    this.#stringIsKey = frame?.kind === "object" && (frame.state === "keyOrEnd" || frame.state === "key");
+    if (!this.#stringIsKey) {
+      this.assertValueExpected();
+      this.assertTopLevelKind("string");
+      this.#stringDiscarded = this.isDiscardingValue();
+    }
+    if (policy !== undefined && frame?.kind === "object" && this.#frameStack.length === 1 && !this.#stringIsKey && frame.key !== undefined) {
+      this.#stringField = frame.key;
+      this.#stringByteLimit = policy.topLevelUtf8ByteMax?.get(frame.key);
+      const limit = policy.topLevelStringMaxCodeUnits.get(frame.key);
+      if (this.#stringByteLimit === undefined && limit !== undefined) {
+        this.#stringLimit = limit;
+        this.#stringLimitField = frame.key;
       }
     }
     this.#state = "string";
@@ -548,13 +631,68 @@ class StrictJsonParser {
     if (this.#stringLimit !== undefined && this.#stringLength > this.#stringLimit - length) {
       throw this.#policy!.onStringLimit(this.#stringLimitField!);
     }
-    this.retain(length);
-    this.#string.append(source, start, end);
+    if (this.#stringByteLimit !== undefined) this.countStringUtf8Bytes(source, start, end);
+    if (this.#stringIsKey) {
+      for (let position = start; position < end; position += 1) {
+        this.#stringKeyHash = Math.imul(this.#stringKeyHash ^ source.charCodeAt(position), 16_777_619) >>> 0;
+      }
+    }
     this.#stringLength += length;
+    if (this.#stringDiscarded) return;
+
+    let capturedEnd = end;
+    if (this.#stringIsKey && this.#policy !== undefined) {
+      const remaining = this.#policy.maxTopLevelKeyCodeUnits - this.#stringStoredLength;
+      if (remaining <= 0) {
+        this.#stringKeyTooLong = true;
+        return;
+      }
+      capturedEnd = Math.min(end, start + remaining);
+      if (capturedEnd !== end) this.#stringKeyTooLong = true;
+    }
+    if (capturedEnd === start) return;
+    this.retain(capturedEnd - start);
+    this.#string.append(source, start, capturedEnd);
+    this.#stringStoredLength += capturedEnd - start;
   }
 
   private finishString(): string {
-    return this.#string.finish();
+    if (this.#stringByteLimit !== undefined && this.#stringPendingHighSurrogate) {
+      throw validationError(this.#stringField!, "Must contain only Unicode scalar values.");
+    }
+    const value = this.#string.finish();
+    return this.#stringIsKey && this.#stringKeyTooLong
+      ? `${String.fromCharCode(0)}long-key:${this.#stringLength}:${this.#stringKeyHash}`
+      : value;
+  }
+
+  private countStringUtf8Bytes(source: string, start: number, end: number): void {
+    for (let position = start; position < end; position += 1) {
+      const code = source.charCodeAt(position);
+      if (this.#stringPendingHighSurrogate) {
+        if (code < 0xdc00 || code > 0xdfff) {
+          throw validationError(this.#stringField!, "Must contain only Unicode scalar values.");
+        }
+        this.#stringPendingHighSurrogate = false;
+        this.addStringUtf8Bytes(4);
+        continue;
+      }
+      if (code >= 0xd800 && code <= 0xdbff) {
+        this.#stringPendingHighSurrogate = true;
+        continue;
+      }
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        throw validationError(this.#stringField!, "Must contain only Unicode scalar values.");
+      }
+      this.addStringUtf8Bytes(code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3);
+    }
+  }
+
+  private addStringUtf8Bytes(bytes: number): void {
+    if (bytes > this.#stringByteLimit! - this.#stringUtf8Bytes) {
+      throw this.#policy!.onStringLimit(this.#stringField!);
+    }
+    this.#stringUtf8Bytes += bytes;
   }
 
   private retain(codeUnits: number): void {
@@ -565,8 +703,15 @@ class StrictJsonParser {
   }
 
   private startNumber(source: string, position: number): number {
+    this.assertValueExpected();
+    this.assertTopLevelKind("number");
     const character = source[position]!;
+    const field = this.topLevelValueField();
     this.#number.reset();
+    this.#numberDiscarded = this.isDiscardingValue();
+    this.#numberLength = 0;
+    this.#numberLimit = field === undefined ? undefined : this.#policy?.topLevelNumberMaxCodeUnits?.get(field);
+    this.#numberLimitField = field;
     this.#numberState = character === "-" ? "minus" : character === "0" ? "zero" : "integer";
     this.#state = "number";
     this.appendNumber(source, position, position + 1, this.#numberState);
@@ -577,12 +722,14 @@ class StrictJsonParser {
     if (this.#numberState !== "zero" && this.#numberState !== "integer" && this.#numberState !== "fraction" && this.#numberState !== "exponent") {
       this.invalid();
     }
-    const value = Number(this.#number.finish());
+    const value = this.#numberDiscarded ? 0 : Number(this.#number.finish());
     this.#state = "normal";
     this.acceptValue(value);
   }
 
   private startLiteral(literal: string, value: boolean | null): void {
+    this.assertValueExpected();
+    this.assertTopLevelKind(value === null ? "null" : "boolean");
     this.#literal = literal;
     this.#literalIndex = 1;
     this.#literalValue = value;
