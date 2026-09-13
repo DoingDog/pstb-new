@@ -208,7 +208,9 @@ describe("MCP transport boundary", () => {
     const response = await handleMcp(modernRequest("tools/list", {}), toolEnvironment, context);
 
     expect(response.status).toBe(200);
-    const body = await response.json() as { result: { tools: Array<{ name: string }> } };
+    const body = await response.json() as {
+      result: { tools: Array<{ name: string; inputSchema: Record<string, unknown> }> };
+    };
     expect(body.result.tools.map((tool) => tool.name)).toEqual([
       "paste_create",
       "paste_get",
@@ -219,6 +221,15 @@ describe("MCP transport boundary", () => {
       "paste_settings_update",
       "paste_password_update",
     ]);
+    expect(body.result.tools.find((tool) => tool.name === "paste_settings_update")?.inputSchema).toMatchObject({
+      required: ["id"],
+      anyOf: [
+        { required: ["title"] },
+        { required: ["format"] },
+        { required: ["expiration"] },
+        { required: ["viewOnce"] },
+      ],
+    });
   });
 
   it("returns JSON-RPC InvalidParams for malformed modern tool calls", async () => {
