@@ -41,6 +41,8 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   let visualRootSnapshot: ReadonlySet<ChildNode> | undefined;
   let visualSerialized = "";
   let visualDirty = false;
+  let visualReady = false;
+  let visualTransition = 0;
   let transition = 0;
   let visualRootTransition = Promise.resolve();
 
@@ -86,23 +88,33 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
     visualEditor = undefined;
     visualRootSnapshot = undefined;
     visualDirty = false;
+    visualReady = false;
     visualSerialized = "";
+    visualTransition = 0;
 
     if (editor === undefined) return;
 
-    if (wasDirty && options.source.value === serialized) {
-      const markdown = editor.getMarkdown();
-      if (markdown !== options.source.value) {
-        options.source.value = markdown;
-        options.onDocumentChange(markdown);
+    try {
+      if (wasDirty && options.source.value === serialized) {
+        const markdown = editor.getMarkdown();
+        if (markdown !== options.source.value) {
+          options.source.value = markdown;
+          options.onDocumentChange(markdown);
+        }
       }
+    } finally {
+      await destroyEditor(editor, rootSnapshot);
     }
-    await destroyEditor(editor, rootSnapshot);
   };
 
   const leaveToSource = (id: number): Promise<void> =>
     useVisualRoot(async () => {
-      await leaveCurrentVisual();
+      try {
+        await leaveCurrentVisual();
+      } catch (error) {
+        reportVisualError(id, error);
+        return;
+      }
       if (current(id)) setMode("source");
     });
 
@@ -126,6 +138,8 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   };
 
   const enterVisual = (): Promise<void> => {
+    if (visualReady && visualEditor !== undefined && visualTransition === transition) return Promise.resolve();
+
     const id = ++transition;
     const visualSourceSnapshot = options.source.value;
 
@@ -174,7 +188,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
                 new Plugin({
                   view: () => ({
                     update: (view, previous) => {
-                      if (!ready || !current(id) || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
+                      if (!ready || view.state.doc.eq(previous.doc) || visualEditor !== editor) return;
                       visualDirty = true;
                       const markdown = editor.getMarkdown();
                       visualSerialized = markdown;
@@ -200,7 +214,9 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         visualEditor = editor;
         visualRootSnapshot = initialNodes;
         visualDirty = false;
+        visualReady = false;
         visualSerialized = visualSourceSnapshot;
+        visualTransition = 0;
         try {
           await editor.create();
         } catch (error) {
@@ -209,7 +225,9 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
             visualEditor = undefined;
             visualRootSnapshot = undefined;
             visualDirty = false;
+            visualReady = false;
             visualSerialized = "";
+            visualTransition = 0;
           }
           removePartialVisualRoot(initialNodes);
           reportVisualError(id, error);
@@ -223,6 +241,8 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
         }
 
         ready = true;
+        visualReady = true;
+        visualTransition = id;
         setMode("visual");
       });
     });

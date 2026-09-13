@@ -32,6 +32,7 @@ const crepe = vi.hoisted(() => {
   const state = {
     failCreate: false,
     failDestroy: false,
+    failGetMarkdown: false,
     createWait: undefined as Promise<void> | undefined,
     destroyWait: undefined as Promise<void> | undefined,
     onCreate: undefined as (() => void) | undefined,
@@ -87,6 +88,7 @@ const crepe = vi.hoisted(() => {
 
     getMarkdown(): string {
       this.getMarkdownCalls += 1;
+      if (state.failGetMarkdown) throw new Error("Crepe failed to serialize");
       return this.markdown;
     }
 
@@ -166,6 +168,7 @@ function fixture() {
 beforeEach(() => {
   crepe.state.failCreate = false;
   crepe.state.failDestroy = false;
+  crepe.state.failGetMarkdown = false;
   crepe.state.createWait = undefined;
   crepe.state.destroyWait = undefined;
   crepe.state.onCreate = undefined;
@@ -253,6 +256,37 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).toHaveBeenCalledWith("# serialized\n");
   });
 
+  it("cleans up after dirty serialization fails and exposes a retry", async () => {
+    const { source, visualRoot, onDocumentChange, onModeChange, onVisualError, modes } = fixture();
+    const lastValid = "# last valid  \n\n";
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    editor.documentChanged(lastValid);
+    crepe.state.failGetMarkdown = true;
+
+    await expect(modes.leaveVisual()).resolves.toBeUndefined();
+
+    expect(source.value).toBe(lastValid);
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(onDocumentChange).toHaveBeenCalledWith(lastValid);
+    expect(editor.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([]);
+    expect(onModeChange).toHaveBeenLastCalledWith("source");
+    expect(onVisualError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Crepe failed to serialize" }),
+    );
+
+    crepe.state.failGetMarkdown = false;
+    await onVisualError.mock.calls[0]![0].retry();
+
+    expect(crepe.state.instances).toHaveLength(2);
+    expect(crepe.state.instances[0]!.destroyed).toBe(true);
+    expect(crepe.state.instances[1]!.markdown).toBe(lastValid);
+    expect(visualRoot.childNodes).toHaveLength(1);
+    expect(onModeChange).toHaveBeenLastCalledWith("visual");
+  });
+
   it("notifies autosave at the edit instead of 1,000 ms later", async () => {
     vi.useFakeTimers();
     const { onDocumentChange, modes } = fixture();
@@ -263,6 +297,21 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).toHaveBeenCalledWith("# saved at edit\n");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(onDocumentChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a ready visual editor active after entering visual mode again", async () => {
+    const { source, onDocumentChange, modes } = fixture();
+
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    await modes.enterVisual();
+    editor.documentChanged("# retained after repeated entry\n");
+    await modes.leaveVisual();
+
+    expect(crepe.state.instances).toHaveLength(1);
+    expect(source.value).toBe("# retained after repeated entry\n");
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(onDocumentChange).toHaveBeenCalledWith("# retained after repeated entry\n");
   });
 
   it("ignores structurally equal ProseMirror document replacements", async () => {
