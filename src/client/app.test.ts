@@ -82,10 +82,48 @@ import {
 } from "./app";
 
 const browser = app as unknown as {
+  createSourceAdapter(source: Pick<HTMLTextAreaElement, "value">): Pick<HTMLTextAreaElement, "value">;
+  currentPasteContent(): string | null;
   currentPastePassword(): string | null;
   setPastePassword(password: string | null): void;
   startApp(): void;
 };
+
+function sourceFixture(encoded: string) {
+  let input: (() => void) | undefined;
+  let value = "";
+  const source = {
+    get value(): string {
+      return value;
+    },
+    set value(next: string) {
+      value = next.replace(/\r\n?|\n/g, "\n");
+    },
+    addEventListener(type: string, listener: () => void): void {
+      if (type === "input") input = listener;
+    },
+    input(): void {
+      input?.();
+    },
+  } as unknown as HTMLTextAreaElement & { input(): void };
+  const node = {
+    textContent: encoded,
+    getAttribute(name: string): string | null {
+      return name === "data-source-encoding" ? "utf-8-base64" : null;
+    },
+    remove: vi.fn(),
+  };
+  const view = { textContent: "" } as HTMLPreElement;
+  const document = {
+    querySelector(selector: string): unknown {
+      if (selector.includes("source-data")) return node;
+      if (selector.includes("source-view")) return view;
+      if (selector.includes("#source")) return source;
+      return null;
+    },
+  } as unknown as Document;
+  return { document, node, source, view };
+}
 
 class FakeClock {
   private time = 0;
@@ -574,6 +612,54 @@ describe("browser document state", () => {
     expect(withoutPassword.searchParams.get("keep")).toBe("yes");
     expect(localStorage.setItem).not.toHaveBeenCalled();
     expect(sessionStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("hydrates source into views while retaining exact canonical text", async () => {
+    const exact = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
+    const { decodeSourceData, encodeSourceData } = await import("../source-data");
+    const { document, node, source, view } = sourceFixture(encodeSourceData(exact));
+    const autosave = { input: vi.fn() };
+    vi.stubGlobal("document", document);
+    vi.stubGlobal("location", { href: "https://paste.example/a" });
+
+    browser.startApp();
+
+    expect(view.textContent).toBe(exact);
+    expect(source.value).toBe(exact.replace(/\r\n?|\n/g, "\n"));
+    expect(browser.currentPasteContent()).toBe(exact);
+    expect(node.remove).toHaveBeenCalledOnce();
+    expect(autosave.input).not.toHaveBeenCalled();
+
+    const adapter = browser.createSourceAdapter(source);
+    const modeSource = adapter.value;
+    expect(modeSource).toBe(exact);
+    expect(autosave.input).not.toHaveBeenCalled();
+
+    source.value = "textarea\r\ninput";
+    source.input();
+    expect(browser.currentPasteContent()).toBe("textarea\ninput");
+
+    adapter.value = "programmatic\r\nmode";
+    expect(adapter.value).toBe("programmatic\r\nmode");
+    expect(source.value).toBe("programmatic\nmode");
+    expect(autosave.input).not.toHaveBeenCalled();
+    expect(decodeSourceData(node.textContent!)).toBe(exact);
+  });
+
+  it("does not replace document state with corrupt source transport", async () => {
+    const { document, node, source, view } = sourceFixture("/w==");
+    vi.stubGlobal("document", document);
+    vi.stubGlobal("location", { href: "https://paste.example/a" });
+    const adapter = browser.createSourceAdapter(source);
+    adapter.value = "existing\r\nsource";
+    view.textContent = "existing view";
+
+    browser.startApp();
+
+    expect(adapter.value).toBe("existing\r\nsource");
+    expect(source.value).toBe("existing\nsource");
+    expect(view.textContent).toBe("existing view");
+    expect(node.remove).not.toHaveBeenCalled();
   });
 });
 

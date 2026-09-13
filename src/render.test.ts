@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
+import { decodeSourceData, sourceDataEncoding } from "./source-data";
 import {
   applicationHeaders,
   dictionaries,
@@ -40,8 +41,20 @@ const paste: PasteSummary = {
 
 function executableScriptSources(document: string): string[] {
   return [...document.matchAll(/<script\b([^>]*)>/gi)]
-    .filter((match) => !/\btype=(?:"application\/json"|'application\/json')/i.test(match[1] ?? ""))
+    .filter((match) => !/\btype=(?:"application\/(?:json|octet-stream)"|'application\/(?:json|octet-stream)')/i.test(match[1] ?? ""))
     .map((match) => /\bsrc=(?:"([^"]+)"|'([^']+)')/i.exec(match[1] ?? "")?.[1] ?? "");
+}
+
+function sourceData(document: string): string {
+  const match = document.match(new RegExp(`<script id="source-data" type="application/octet-stream" data-source-encoding="${sourceDataEncoding}">([A-Za-z0-9+/=]*)<\\/script>`));
+  if (!match) throw new Error("expected source data node");
+  return match[1]!;
+}
+
+function bootstrapData(document: string): Record<string, unknown> {
+  const match = document.match(/<script id="bootstrap" type="application\/json">(.*?)<\/script>/);
+  if (!match) throw new Error("expected bootstrap data");
+  return JSON.parse(match[1]!);
 }
 
 describe("renderMarkdown", () => {
@@ -114,10 +127,51 @@ describe("application documents", () => {
       content: "## Heading\n\n<script>literal</script>",
     });
 
-    expect(text).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><pre class="paste-content">exact\r\n&lt;script&gt;literal&lt;/script&gt;\n  </pre></section>');
+    expect(text).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><pre class="paste-content" data-source-view></pre></section>');
     expect(text).not.toContain("<script>literal</script>");
     expect(markdown).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><article class="paste-content"><h2>Heading</h2>\n&lt;script&gt;literal&lt;/script&gt;</article></section>');
     expect(markdown).not.toContain("<script>literal</script>");
+  });
+
+  it("carries exact source once in inert UTF-8 base64 data", () => {
+    const content = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
+    const model = {
+      locale: "en" as const,
+      paste: { ...paste, format: "text" as const },
+      content,
+      password: "not-for-bootstrap",
+    };
+    const html = renderPastePage(model);
+    const bootstrap = bootstrapData(html);
+
+    expect([...html.matchAll(/<script id="source-data" type="application\/octet-stream" data-source-encoding="utf-8-base64">/g)]).toHaveLength(1);
+    expect(decodeSourceData(sourceData(html))).toBe(content);
+    expect(bootstrap).not.toHaveProperty("content");
+    expect(bootstrap).not.toHaveProperty("password");
+    expect(html).not.toContain("not-for-bootstrap");
+    expect(html).toContain('<pre class="paste-content" data-source-view></pre>');
+    expect(html).toContain('<textarea id="source" class="editor-input" name="source" readonly spellcheck="false"></textarea>');
+  });
+
+  it.each([
+    ["ordinary paste", () => renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content: "ordinary\r\nsource" })],
+    ["restricted paste", () => renderPastePage({ locale: "en", paste: { ...paste, format: "text", viewOnce: true }, content: "restricted\r\nsource", consumed: true })],
+    ["ordinary Markdown document", () => renderMarkdownDocument({ locale: "en", paste, content: "# ordinary\r\nsource" })],
+    ["view-once Markdown document", () => renderMarkdownDocument({ locale: "en", paste: { ...paste, viewOnce: true }, content: "# restricted\r\nsource" })],
+  ])("keeps %s source out of bootstrap while retaining one transport node", (_name, render) => {
+    const html = render();
+
+    expect([...html.matchAll(/<script id="source-data" type="application\/octet-stream" data-source-encoding="utf-8-base64">/g)]).toHaveLength(1);
+    expect(bootstrapData(html)).not.toHaveProperty("content");
+    expect(decodeSourceData(sourceData(html))).toContain("source");
+  });
+
+  it("keeps a megabyte of text source near base64 expansion", () => {
+    const content = "<".repeat(1_048_576);
+    const html = renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content });
+
+    expect(html.length).toBeLessThan(content.length * 1.38 + 20_000);
+    expect(decodeSourceData(sourceData(html))).toBe(content);
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import "./styles.css";
+import { decodeSourceData, sourceDataEncoding } from "../source-data";
 import { createMarkdownModes, type MarkdownModes, type MarkdownModesOptions } from "./markdown";
 import type { DiffId, DiffLine, DiffRequest, DiffResponse } from "./diff";
 
@@ -419,6 +420,53 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
 }
 
 let pastePassword: string | null = null;
+let pasteContent: string | null = null;
+
+export interface SourceAdapter {
+  value: string;
+}
+
+export function currentPasteContent(): string | null {
+  return pasteContent;
+}
+
+export function createSourceAdapter(source: Pick<HTMLTextAreaElement, "value">): SourceAdapter {
+  return {
+    get value(): string {
+      return pasteContent ?? source.value;
+    },
+    set value(content: string) {
+      pasteContent = content;
+      source.value = content;
+    },
+  };
+}
+
+function hydratePasteSource(): void {
+  if (typeof document === "undefined" || typeof document.querySelector !== "function") return;
+
+  const transport = document.querySelector<HTMLScriptElement>("script#source-data[data-source-encoding]");
+  if (transport === null || transport.getAttribute("data-source-encoding") !== sourceDataEncoding) return;
+
+  let content: string;
+  try {
+    content = decodeSourceData(transport.textContent ?? "");
+  } catch {
+    return;
+  }
+
+  pasteContent = content;
+  const sourceView = document.querySelector<HTMLPreElement>("pre[data-source-view]");
+  if (sourceView !== null) sourceView.textContent = content;
+  const source = document.querySelector<HTMLTextAreaElement>("textarea#source");
+  if (source !== null) {
+    source.value = content;
+    source.addEventListener("input", () => {
+      pasteContent = source.value;
+    });
+  }
+  transport.remove();
+}
 
 function currentDocumentUrl(): URL | null {
   if (typeof document === "undefined" || typeof location === "undefined") return null;
@@ -441,10 +489,11 @@ export function setPastePassword(password: string | null): void {
 
 export function startApp(): void {
   const url = currentDocumentUrl();
-  if (url === null) return;
-
-  const passwords = url.searchParams.getAll("password");
-  pastePassword = passwords.length === 1 ? passwords[0] ?? null : null;
+  if (url !== null) {
+    const passwords = url.searchParams.getAll("password");
+    pastePassword = passwords.length === 1 ? passwords[0] ?? null : null;
+  }
+  hydratePasteSource();
 }
 
 if (typeof document !== "undefined") startApp();

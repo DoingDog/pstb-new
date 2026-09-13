@@ -2,6 +2,7 @@ import { micromark } from "micromark";
 import { gfm, gfmHtml } from "micromark-extension-gfm";
 import { validateTitle } from "./pastes";
 import { assetPaths } from "./generated/assets";
+import { encodeSourceData, sourceDataEncoding } from "./source-data";
 import type { PasteSummary } from "./types";
 
 export type Locale = "en" | "zh-CN";
@@ -229,7 +230,11 @@ function documentTitle(locale: Locale, paste: PasteSummary): string {
   return paste.title === "" ? `${labels(locale).paste} ${paste.id}` : paste.title;
 }
 
-function pageDocument(locale: Locale, page: string, title: string, body: string, bootstrap: unknown): string {
+function sourceData(content: string): string {
+  return `<script id="source-data" type="application/octet-stream" data-source-encoding="${sourceDataEncoding}">${encodeSourceData(content)}</script>`;
+}
+
+function pageDocument(locale: Locale, page: string, title: string, body: string, bootstrap: unknown, content?: string): string {
   return `<!doctype html>
 <html lang="${locale}">
 <head>
@@ -240,14 +245,15 @@ function pageDocument(locale: Locale, page: string, title: string, body: string,
 </head>
 <body data-page="${page}">
 ${body}
+${content === undefined ? "" : sourceData(content)}
 <script id="bootstrap" type="application/json">${escapeBootstrapJson(bootstrap)}</script>
 <script type="module" src="${escapeText(assetPaths.appJs)}"></script>
 </body>
 </html>`;
 }
 
-function sourceTextarea(content: string): string {
-  return `<textarea id="source" class="editor-input" name="source" readonly spellcheck="false">${escapeText(content)}</textarea>`;
+function sourceTextarea(): string {
+  return `<textarea id="source" class="editor-input" name="source" readonly spellcheck="false"></textarea>`;
 }
 
 function localActions(copy: Labels): string {
@@ -300,7 +306,7 @@ export function renderMarkdown(source: string): string {
 function pasteContentView(content: string, format: PasteSummary["format"]): string {
   return format === "markdown"
     ? `<article class="paste-content">${renderMarkdown(content)}</article>`
-    : `<pre class="paste-content">${escapeText(content)}</pre>`;
+    : `<pre class="paste-content" data-source-view></pre>`;
 }
 
 export function escapeBootstrapJson(value: unknown): string {
@@ -363,7 +369,7 @@ export function renderPastePage(model: PastePageModel): string {
     ? `<button type="button" data-action="copy">${copy.copy}</button>`
     : `<button type="button" data-action="copy">${copy.copy}</button><a data-action="raw" href="${escapeText(paste.links.raw)}">${copy.raw}</a><a data-action="file" href="${escapeText(paste.links.file)}">${copy.file}</a>`;
   const header = siteHeader(copy, pasteLocation(copy, paste), headerActions, restricted ? copy.create : copy.brand);
-  const source = `<div data-panel="source" hidden>${sourceTextarea(model.content)}</div>`;
+  const source = `<div data-panel="source" hidden>${sourceTextarea()}</div>`;
   const panels = `<nav class="tab-navigation" aria-label="${copy.pasteViews}"><div role="tablist" aria-label="${copy.pasteViews}"><button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view">${copy.view}</button><button id="tab-edit" type="button" role="tab" aria-selected="false" aria-controls="panel-edit" tabindex="-1" data-tab="edit">${copy.edit}</button><button id="tab-markdown" type="button" role="tab" aria-selected="false" aria-controls="panel-markdown" tabindex="-1" data-tab="markdown">${copy.markdown}</button><button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history">${copy.history}</button><button id="tab-settings" type="button" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" data-tab="settings">${copy.settings}</button></div></nav><section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">${contentView}</section><section id="panel-edit" role="tabpanel" tabindex="0" aria-labelledby="tab-edit" data-panel="edit" hidden>${source}</section><section id="panel-markdown" role="tabpanel" tabindex="0" aria-labelledby="tab-markdown" data-panel="markdown" hidden></section><section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section><section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>`;
   const restrictedBody = `<p class="consumed-notice" role="status">${copy.consumed}</p><section data-panel="view">${contentView}</section>${source}${localActions(copy)}`;
   const ordinaryBody = `${panels}<div class="context-actions">${localActions(copy)}<div class="representations" aria-label="${copy.representations}"><a data-action="raw" href="${escapeText(paste.links.raw)}">${copy.raw}</a><a data-action="html" href="${escapeText(paste.links.html)}">${copy.html}</a><a data-action="markdown-document" href="${escapeText(paste.links.markdown)}">${copy.markdown}</a><a data-action="file" href="${escapeText(paste.links.file)}">${copy.file}</a></div><button class="danger-action" type="button" data-action="delete">${copy.delete}</button></div><dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title"><form method="dialog"><h2 id="delete-dialog-title">${copy.delete}</h2><p>${copy.deleteDescription}</p><div class="dialog-actions"><button type="submit" data-action="cancel-delete">${copy.cancel}</button><button class="danger-action" type="button" data-action="confirm-delete">${copy.delete}</button></div></form></dialog>`;
@@ -373,9 +379,9 @@ ${pasteLifecycleRail(copy, paste)}
 <section class="workbench-surface" aria-labelledby="page-title"><h1 id="page-title">${escapeText(title)}</h1>${restricted ? restrictedBody : ordinaryBody}<p id="paste-status" aria-live="polite"></p></section>
 </main>`;
   const bootstrap = restricted
-    ? { page: "paste", locale: model.locale, content: model.content, consumed: true }
-    : { page: "paste", paste, content: model.content, consumed: false };
-  return pageDocument(model.locale, "paste", title, body, bootstrap);
+    ? { page: "paste", locale: model.locale, consumed: true }
+    : { page: "paste", paste, consumed: false };
+  return pageDocument(model.locale, "paste", title, body, bootstrap, model.content);
 }
 
 export function renderPasswordPage(model: PasswordPageModel): string {
@@ -415,9 +421,9 @@ ${pasteLifecycleRail(copy, paste)}
 <section class="workbench-surface markdown-document" aria-labelledby="page-title"><article><h1 id="page-title">${escapeText(title)}</h1>${renderMarkdown(model.content)}</article></section>
 </main>`;
   const bootstrap = restricted
-    ? { page: "markdown", locale: model.locale, content: model.content, consumed: true }
-    : { page: "markdown", paste, content: model.content, consumed: false };
-  return pageDocument(model.locale, "markdown", title, body, bootstrap);
+    ? { page: "markdown", locale: model.locale, consumed: true }
+    : { page: "markdown", paste, consumed: false };
+  return pageDocument(model.locale, "markdown", title, body, bootstrap, model.content);
 }
 
 function rfc5987(value: string): string {
