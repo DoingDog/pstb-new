@@ -99,13 +99,11 @@ async function visitLimitedBytes(
   visit: (chunk: Uint8Array) => void,
   onNonEmpty?: () => void,
 ): Promise<boolean> {
-  if (onNonEmpty === undefined) {
-    try {
-      validateContentLength(request, maxBytes);
-    } catch (error) {
-      await cancelBody(request.body);
-      throw error;
-    }
+  try {
+    validateContentLength(request, maxBytes);
+  } catch (error) {
+    await cancelBody(request.body);
+    throw error;
   }
 
   if (request.body === null) return false;
@@ -118,7 +116,6 @@ async function visitLimitedBytes(
       const { done, value } = await reader.read();
       if (done) return hasBytes;
       if (!hasBytes && value.byteLength > 0) {
-        validateContentLength(request, maxBytes);
         onNonEmpty?.();
         hasBytes = true;
       }

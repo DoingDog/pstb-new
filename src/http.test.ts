@@ -640,6 +640,47 @@ describe("HTTP slice 1", () => {
     }
   });
 
+  it("rejects an oversized DELETE Content-Length before the delayed first byte", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    let releaseFirstByte!: () => void;
+    const firstByte = new Promise<void>((resolve) => { releaseFirstByte = resolve; });
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        pulls += 1;
+        await firstByte;
+        controller.enqueue(new TextEncoder().encode("{}"));
+      },
+      cancel() {
+        cancelled = true;
+        return Promise.reject(new Error("cancel failed"));
+      },
+    }, { highWaterMark: 0 });
+    const responsePromise = createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing", {
+      method: "DELETE",
+      headers: { "content-length": "67108865" },
+      body,
+    }));
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      const response = await Promise.race([
+        responsePromise,
+        new Promise<Response>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error("DELETE waited for its first byte")), 100); }),
+      ]);
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "REQUEST_TOO_LARGE", details: { maxBytes: 67_108_864 } },
+      });
+      expect(pulls).toBe(0);
+      expect(cancelled).toBe(true);
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
+      releaseFirstByte();
+      await responsePromise;
+    }
+  });
+
   it("parses a nonempty streaming DELETE JSON body without awaiting a tee branch cancellation", async () => {
     const id = `http-${crypto.randomUUID()}`;
     const createdResponse = await request("/api/pastes", {

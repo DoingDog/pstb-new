@@ -126,6 +126,24 @@ describe("strict JSON boundary", () => {
     expect(nonEmpty).toBe(1);
   });
 
+  it("rejects an oversized Content-Length before handling null or zero-byte bodies", async () => {
+    const headers = { "content-length": String(wireBodyLimit + 1) };
+    const nullBody = { body: null, headers: new Headers(headers) } as Request;
+    await expect(parseStrictJsonObjectOrEmpty(nullBody, new Set())).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: wireBodyLimit },
+    });
+
+    const { body, state } = trackedBody(0, 1, true);
+    await expect(parseStrictJsonObjectOrEmpty(streamedRequest(body, headers), new Set())).rejects.toMatchObject({
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+      details: { maxBytes: wireBodyLimit },
+    });
+    expect(state).toEqual({ cancels: 1, pulls: 0 });
+  });
+
   it("rejects duplicate credential keys before JSON.parse can overwrite them", async () => {
     await expect(
       parseStrictJsonObject(request('{"password":"right","password":"wrong"}'), new Set(["password"])),
