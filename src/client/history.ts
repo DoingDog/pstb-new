@@ -2,8 +2,6 @@ import type { ApiFailure } from "./api";
 import type { BaselineCapture, HistoryList, RevisionResource } from "./contracts";
 import type { DiffId, DiffLine, DiffRequest, DiffResponse } from "./diff";
 
-declare const __DIFF_WORKER_URL__: string;
-
 export const AUTOMATIC_DIFF_MAX_BYTES = 1_048_576;
 export const AUTOMATIC_DIFF_MAX_LINES = 50_000;
 
@@ -57,7 +55,7 @@ function lineCount(source: string): number {
 }
 
 function defaultDiffWorker(): DiffWorker {
-  return new Worker(__DIFF_WORKER_URL__, { type: "module" });
+  return new Worker(new URL("./diff.ts", import.meta.url), { type: "module" });
 }
 
 function isDiffResponse(value: unknown): value is DiffResponse {

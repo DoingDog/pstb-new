@@ -9,6 +9,11 @@
     "moduleResolution": "Bundler",
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest/globals"]
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest/globals"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@/components/*": ["./src/client/components/*"],
+      "@/hooks/*": ["./src/client/hooks/*"]
+    }
   }
 }

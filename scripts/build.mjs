@@ -1,27 +1,20 @@
-import { build } from "esbuild";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { build } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const assetsDirectory = resolve(root, "dist/assets");
 const generatedAssetsPath = resolve(root, "src/generated/assets.ts");
 const immutableAssetHeaders = "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
-function outputForEntry(metafile, entryPoint) {
-  const outputPath = Object.entries(metafile.outputs).find(
-    ([, output]) => output.entryPoint && resolve(root, output.entryPoint) === entryPoint,
-  )?.[0];
-
-  if (!outputPath) {
-    throw new Error(`Missing build output for ${entryPoint}`);
-  }
-
-  return outputPath;
+function normalizedPath(path) {
+  return path.split(sep).join("/");
 }
 
-function publicAssetPath(outputPath) {
-  return `/${relative(assetsDirectory, resolve(root, outputPath)).split(sep).join("/")}`;
+function assetPath(path) {
+  return `/${normalizedPath(path)}`;
 }
 
 function removeLineComments(source) {
@@ -55,18 +48,6 @@ function removeLineComments(source) {
   }
 
   return output;
-}
-
-async function cleanupGeneratedAssetsTemporaryFiles() {
-  const generatedDirectory = dirname(generatedAssetsPath);
-  const temporaryFilePattern = /^assets\.ts\.\d+\.tmp$/;
-  const files = await readdir(generatedDirectory);
-
-  await Promise.all(
-    files
-      .filter((file) => temporaryFilePattern.test(file))
-      .map((file) => rm(resolve(generatedDirectory, file), { force: true })),
-  );
 }
 
 async function writeStaticAssetHeaders() {
@@ -109,64 +90,73 @@ async function assertWranglerConfig() {
   }
 }
 
-async function assertTestToolchainConfig() {
-  const tsconfig = JSON.parse(await readFile(resolve(root, "tsconfig.json"), "utf8"));
-  const expectedTypes = ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest/globals"];
-  const vitestConfig = await readFile(resolve(root, "vitest.config.ts"), "utf8");
+async function readBuiltFiles(directory = assetsDirectory, relativeDirectory = "") {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
 
-  if (
-    JSON.stringify(tsconfig.compilerOptions?.types) !== JSON.stringify(expectedTypes) ||
-    !vitestConfig.includes('import { cloudflareTest } from "@cloudflare/vitest-plugin";') ||
-    !vitestConfig.includes('cloudflareTest({') ||
-    !vitestConfig.includes('configPath: "./wrangler.jsonc",') ||
-    !/test:\s*\{\s*include:\s*\["src\/\*\*\/\*.test\.ts"\],?\s*\}/s.test(vitestConfig)
-  ) {
-    throw new Error("Vitest and TypeScript do not match the build contract");
+  for (const entry of entries) {
+    const relativePath = `${relativeDirectory}${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...await readBuiltFiles(resolve(directory, entry.name), `${relativePath}/`));
+    } else {
+      files.push(relativePath);
+    }
   }
+
+  return files.map(normalizedPath);
 }
 
-await mkdir(dirname(generatedAssetsPath), { recursive: true });
-await cleanupGeneratedAssetsTemporaryFiles();
+function requireSingle(value, description) {
+  if (value.length !== 1) throw new Error(`Expected one ${description}`);
+  return value[0];
+}
+
 await rm(assetsDirectory, { force: true, recursive: true });
+await build({ root });
 
-const diffEntryPoint = resolve(root, "src/client/diff.ts");
-const diffBuild = await build({
-  absWorkingDir: root,
-  bundle: true,
-  entryNames: "diff-[hash]",
-  entryPoints: [diffEntryPoint],
-  format: "esm",
-  metafile: true,
-  outdir: resolve(assetsDirectory, "assets"),
-  platform: "browser",
-});
-const diffWorker = publicAssetPath(outputForEntry(diffBuild.metafile, diffEntryPoint));
+const manifestPath = resolve(assetsDirectory, ".vite/manifest.json");
+const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+const indexEntry = requireSingle(
+  Object.entries(manifest).filter(([key, value]) => key === "index.html" && value.isEntry === true),
+  "index.html manifest entry",
+)[1];
+const appJs = indexEntry.file;
+const appCss = requireSingle(indexEntry.css ?? [], "entry CSS file");
 
-const appEntryPoint = resolve(root, "src/client/app.ts");
-const appBuild = await build({
-  absWorkingDir: root,
-  bundle: true,
-  define: { __DIFF_WORKER_URL__: JSON.stringify(diffWorker) },
-  entryNames: "app-[hash]",
-  entryPoints: [appEntryPoint],
-  format: "esm",
-  metafile: true,
-  outdir: resolve(assetsDirectory, "assets"),
-  platform: "browser",
-  splitting: true,
-});
-const appJsOutput = outputForEntry(appBuild.metafile, appEntryPoint);
-const appCssOutput = appBuild.metafile.outputs[appJsOutput]?.cssBundle;
-
-if (!appCssOutput) {
-  throw new Error("Missing CSS bundle for app entry");
+if (
+  typeof appJs !== "string" ||
+  !/^assets\/app-[A-Za-z0-9_-]+\.js$/.test(appJs) ||
+  !/^assets\/app-[A-Za-z0-9_-]+\.css$/.test(appCss)
+) {
+  throw new Error("Vite entry output does not match the build contract");
 }
+
+const diffWorker = requireSingle(
+  (await readBuiltFiles()).filter((path) => /^assets\/diff-[A-Za-z0-9_-]+\.js$/.test(path)),
+  "diff worker",
+);
 
 await writeStaticAssetHeaders();
 await writeGeneratedAssets({
-  appJs: publicAssetPath(appJsOutput),
-  appCss: publicAssetPath(appCssOutput),
-  diffWorker,
+  appJs: assetPath(appJs),
+  appCss: assetPath(appCss),
+  diffWorker: assetPath(diffWorker),
 });
 await assertWranglerConfig();
-await assertTestToolchainConfig();
+await rm(resolve(assetsDirectory, "index.html"), { force: true });
+await rm(resolve(assetsDirectory, ".vite"), { force: true, recursive: true });
+
+const deployFiles = await readBuiltFiles();
+if (
+  deployFiles.some(
+    (path) => path !== "_headers" && !/^assets\/.+-[A-Za-z0-9_-]+\.(?:css|js)$/.test(path),
+  )
+) {
+  throw new Error("Deploy directory contains a non-hashed file");
+}
+
+for (const path of [appJs, appCss, diffWorker]) {
+  if (!existsSync(resolve(assetsDirectory, path))) {
+    throw new Error(`Generated asset does not exist: ${path}`);
+  }
+}

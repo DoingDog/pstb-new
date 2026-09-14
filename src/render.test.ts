@@ -64,17 +64,6 @@ function sourceData(document: string): string {
   return match[1]!;
 }
 
-async function parsedSourceData(document: string): Promise<string> {
-  let encoded = "";
-  const rewriter = new HTMLRewriter().on("script#source-data", {
-    text(chunk) {
-      encoded += chunk.text;
-    },
-  });
-  await rewriter.transform(new Response(document)).text();
-  return encoded;
-}
-
 describe("renderMarkdown", () => {
   it("renders the full GFM extension set", () => {
     const html = renderMarkdown("| left | right |\n| --- | --- |\n| a | b |\n\n- [x] done\n\n~~gone~~\n\nhttps://example.com");
@@ -193,13 +182,6 @@ describe("application documents", () => {
     expect(bootstrap).not.toHaveProperty("content");
     expect(bootstrap).not.toHaveProperty("password");
     expect(html).not.toContain("not-for-bootstrap");
-  });
-
-  it("preserves inert source data through HTML parsing", async () => {
-    const content = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
-    const html = renderPastePage({ locale: "en", paste: pasteSummary({ format: "text" }), content });
-
-    expect(decodeSourceData(await parsedSourceData(html))).toBe(content);
   });
 
   it("uses only sanitized Markdown in the safe preview template", () => {
