@@ -79,6 +79,9 @@ export class AutosaveController implements AutosaveControllerApi {
   private lastInputAt: number | null = null;
   private dueAt: number | null = null;
   private inFlightContent: string | null = null;
+  private activeAttempt: number | null = null;
+  private pendingAttempt: number | null = null;
+  private nextAttempt = 0;
   private dirtyWhileSaving = false;
   private failureStatus: number | null = null;
   private requiresExplicitRetry = false;
@@ -128,6 +131,10 @@ export class AutosaveController implements AutosaveControllerApi {
       this.emit();
       return;
     }
+    if (this.isTerminal() || this.requiresExplicitRetry || this.state === "error") {
+      this.emit();
+      return;
+    }
     if (this.draft === this.acceptedSource) {
       this.cancelTimer();
       this.dueAt = null;
@@ -136,10 +143,6 @@ export class AutosaveController implements AutosaveControllerApi {
       this.requiresExplicitRetry = false;
       this.coalescedIntent = false;
       this.state = "clean";
-      this.emit();
-      return;
-    }
-    if (this.isTerminal() || this.requiresExplicitRetry || this.state === "error") {
       this.emit();
       return;
     }
@@ -170,6 +173,7 @@ export class AutosaveController implements AutosaveControllerApi {
       (this.state !== "error" && this.state !== "password-required") ||
       !this.requiresExplicitRetry ||
       this.inFlightContent !== null ||
+      this.pendingAttempt !== null ||
       this.draft === this.acceptedSource
     ) {
       return;
@@ -180,7 +184,7 @@ export class AutosaveController implements AutosaveControllerApi {
   }
 
   overwrite(): void {
-    if (this.disposed || this.composing || this.state !== "conflict" || this.inFlightContent !== null) return;
+    if (this.disposed || this.composing || this.state !== "conflict" || this.inFlightContent !== null || this.pendingAttempt !== null) return;
     this.cancelTimer();
     this.dueAt = null;
     this.dispatch("overwrite", false, this.state);
@@ -197,7 +201,7 @@ export class AutosaveController implements AutosaveControllerApi {
         this.version = transition.version;
         this.lastInputAt = null;
         this.dueAt = null;
-        this.inFlightContent = null;
+        this.retireActiveAttempt();
         this.dirtyWhileSaving = false;
         this.failureStatus = null;
         this.requiresExplicitRetry = false;
@@ -218,7 +222,7 @@ export class AutosaveController implements AutosaveControllerApi {
         this.cancelTimer();
         this.acceptedSource = transition.acceptedSource;
         this.version = transition.version;
-        this.inFlightContent = null;
+        this.retireActiveAttempt();
         this.dirtyWhileSaving = false;
         this.failureStatus = null;
         this.requiresExplicitRetry = false;
@@ -232,7 +236,7 @@ export class AutosaveController implements AutosaveControllerApi {
         this.cancelTimer();
         this.acceptedSource = transition.acceptedSource;
         this.version = transition.version;
-        this.inFlightContent = null;
+        this.retireActiveAttempt();
         this.dirtyWhileSaving = false;
         this.dueAt = null;
         this.requiresExplicitRetry = true;
@@ -255,6 +259,7 @@ export class AutosaveController implements AutosaveControllerApi {
       this.disposed ||
       this.composing ||
       this.inFlightContent !== null ||
+      this.pendingAttempt !== null ||
       this.timer !== undefined ||
       this.draft === this.acceptedSource ||
       this.isTerminal() ||
@@ -320,6 +325,10 @@ export class AutosaveController implements AutosaveControllerApi {
 
   private dispatch(action: AutosaveSaveRequest["action"], timerDriven: boolean, priorState: AutosaveState = this.state): void {
     if (this.disposed || this.composing || this.inFlightContent !== null || (this.isTerminal() && action !== "overwrite" && action !== "save-retry")) return;
+    if (this.pendingAttempt !== null) {
+      if (timerDriven) this.emit();
+      return;
+    }
     if (action !== "overwrite" && this.draft === this.acceptedSource) {
       this.dueAt = null;
       this.dirtyWhileSaving = false;
@@ -347,6 +356,9 @@ export class AutosaveController implements AutosaveControllerApi {
       return;
     }
 
+    const attempt = ++this.nextAttempt;
+    this.activeAttempt = attempt;
+    this.pendingAttempt = attempt;
     this.inFlightContent = content;
     this.dirtyWhileSaving = false;
     this.dueAt = null;
@@ -356,20 +368,22 @@ export class AutosaveController implements AutosaveControllerApi {
     this.state = "saving";
     this.emit();
     void dispatched.completion.then(
-      (result) => this.completeSave(content, result),
-      () => this.failSave(content, null),
+      (result) => this.completeSave(attempt, content, result),
+      () => this.failSave(attempt, null),
     );
   }
 
-  private completeSave(content: string, result: AutosaveSaveResult): void {
-    if (this.disposed || this.inFlightContent !== content) return;
+  private completeSave(attempt: number, content: string, result: AutosaveSaveResult): void {
+    this.releasePendingAttempt(attempt);
+    if (this.disposed || this.activeAttempt !== attempt) return;
     if (result.status !== 200 || !("paste" in result)) {
-      this.failSave(content, result.status, "paste" in result ? false : result.mutationMayHaveApplied ?? false);
+      this.failSave(attempt, result.status, "paste" in result ? false : result.mutationMayHaveApplied ?? false);
       return;
     }
 
     this.acceptedSource = content;
     this.version = result.paste.version;
+    this.activeAttempt = null;
     this.inFlightContent = null;
     this.dirtyWhileSaving = false;
     this.failureStatus = null;
@@ -386,9 +400,11 @@ export class AutosaveController implements AutosaveControllerApi {
     this.emit();
   }
 
-  private failSave(content: string, status: number | null, mutationMayHaveApplied = false): void {
-    if (this.disposed || this.inFlightContent !== content) return;
+  private failSave(attempt: number, status: number | null, mutationMayHaveApplied = false): void {
+    this.releasePendingAttempt(attempt);
+    if (this.disposed || this.activeAttempt !== attempt) return;
 
+    this.activeAttempt = null;
     this.inFlightContent = null;
     this.dirtyWhileSaving = false;
     this.cancelTimer();
@@ -410,6 +426,15 @@ export class AutosaveController implements AutosaveControllerApi {
       this.state = "error";
     }
     this.emit();
+  }
+
+  private retireActiveAttempt(): void {
+    this.activeAttempt = null;
+    this.inFlightContent = null;
+  }
+
+  private releasePendingAttempt(attempt: number): void {
+    if (this.pendingAttempt === attempt) this.pendingAttempt = null;
   }
 
   private isTerminal(): boolean {

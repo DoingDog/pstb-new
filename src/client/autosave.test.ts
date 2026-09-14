@@ -73,6 +73,11 @@ const visual = vi.hoisted(() => {
       this.doc = fakeDocument(markdown);
       this.documentView?.update?.({ state: { doc: this.doc } }, previous);
     }
+
+    sameDocumentUpdate(): void {
+      const previous = { doc: this.doc };
+      this.documentView?.update?.({ state: { doc: fakeDocument(this.markdown) } }, previous);
+    }
   }
 
   return { state, Crepe: FakeCrepe };
@@ -357,6 +362,58 @@ describe("AutosaveController", () => {
     });
   });
 
+  it.each([500, 503])("preserves the exact draft and confirmed version after HTTP %i", async (status) => {
+    const { clock, controller, save, states } = autosaveFixture();
+
+    controller.input("exact draft\nwith whitespace  ", clock.now());
+    clock.advance(1_000);
+    save.pending[0]!.resolve({ status });
+    await settle();
+
+    expect(lastState(states)).toMatchObject({
+      state: "error",
+      failureStatus: status,
+      draft: "exact draft\nwith whitespace  ",
+      acceptedSource: "first",
+      lastSavedContent: "first",
+      version: "g.1",
+    });
+    clock.advance(10_000);
+    expect(save.calls).toHaveLength(1);
+  });
+
+  it.each([
+    [403, undefined, "password-required", true],
+    [404, undefined, "not-found", false],
+    [409, undefined, "conflict", false],
+    [413, undefined, "error", true],
+    [422, undefined, "error", true],
+    [413, true, "error", false],
+    [500, undefined, "error", false],
+  ] as const)("retains unresolved HTTP %i when input returns to the accepted source", async (status, mutationMayHaveApplied, state, requiresExplicitRetry) => {
+    const { clock, controller, save, states } = autosaveFixture();
+
+    controller.input("pending", clock.now());
+    clock.advance(1_000);
+    save.pending[0]!.resolve({ status, ...(mutationMayHaveApplied === undefined ? {} : { mutationMayHaveApplied }) });
+    await settle();
+    controller.input("first", clock.now());
+
+    expect(lastState(states)).toMatchObject({
+      state,
+      draft: "first",
+      acceptedSource: "first",
+      lastSavedContent: "first",
+      version: "g.1",
+      failureStatus: status,
+      requiresExplicitRetry,
+      lastInputAt: 1_000,
+      dueAt: 2_000,
+    });
+    clock.advance(10_000);
+    expect(save.calls).toHaveLength(1);
+  });
+
   it("requires explicit retry after 403 and reads the re-entered opaque password", async () => {
     let password: string | null = "old password";
     const { clock, controller, save, states } = autosaveFixture({ getPassword: () => password });
@@ -489,6 +546,35 @@ describe("AutosaveController", () => {
     expect(lastState(states)).toMatchObject({ state: "saved", acceptedSource: "newer local draft", version: "g.3" });
   });
 
+  it("overwrites a conflicted in-flight edit after reverting to accepted content", async () => {
+    const { clock, controller, save, states } = autosaveFixture();
+
+    controller.input("in-flight draft B", clock.now());
+    clock.advance(1_000);
+    controller.input("first", clock.now());
+    save.pending[0]!.resolve({ status: 409 });
+    await settle();
+
+    expect(lastState(states)).toMatchObject({
+      state: "conflict",
+      failureStatus: 409,
+      draft: "first",
+      acceptedSource: "first",
+      lastSavedContent: "first",
+      version: "g.1",
+      inFlightContent: null,
+    });
+    clock.advance(10_000);
+    expect(save.calls).toHaveLength(1);
+
+    controller.overwrite();
+
+    expect(save.calls).toEqual([
+      { action: "autosave", content: "in-flight draft B", version: "g.1" },
+      { action: "overwrite", content: "first" },
+    ]);
+  });
+
   it("coalesces one latest source intent while the page mutation slot is occupied", () => {
     const dispatches: AutosaveSaveRequest[] = [];
     let blocked = true;
@@ -511,6 +597,52 @@ describe("AutosaveController", () => {
     blocked = false;
     fixture.controller.slotAvailable();
     expect(dispatches).toEqual([{ action: "autosave", content: "latest", version: "g.1" }]);
+  });
+
+  it("waits for a retired same-content attempt before the caller releases the next slot", async () => {
+    const { clock, controller, save } = autosaveFixture();
+
+    controller.input("same content", clock.now());
+    clock.advance(1_000);
+    controller.applyAuthoritative({ kind: "reconciled-applied", acceptedSource: "server content", version: "g.2" });
+    controller.input("same content", clock.now());
+    clock.advance(1_000);
+
+    expect(save.calls).toEqual([{ action: "autosave", content: "same content", version: "g.1" }]);
+    expect(save.maxActive).toBe(1);
+
+    save.pending[0]!.resolve({ status: 200, changed: true, paste: summary({ version: "stale.g.3" }) });
+    await settle();
+
+    expect(save.calls).toHaveLength(1);
+    expect(save.maxActive).toBe(1);
+    expect(controller.snapshot()).toMatchObject({
+      state: "waiting",
+      draft: "same content",
+      acceptedSource: "server content",
+      lastSavedContent: "server content",
+      version: "g.2",
+      inFlightContent: null,
+    });
+
+    controller.slotAvailable();
+
+    expect(save.calls).toEqual([
+      { action: "autosave", content: "same content", version: "g.1" },
+      { action: "autosave", content: "same content", version: "g.2" },
+    ]);
+    expect(save.maxActive).toBe(1);
+
+    save.pending[1]!.resolve({ status: 200, changed: true, paste: summary({ version: "g.4" }) });
+    await settle();
+
+    expect(controller.snapshot()).toMatchObject({
+      state: "saved",
+      draft: "same content",
+      acceptedSource: "same content",
+      lastSavedContent: "same content",
+      version: "g.4",
+    });
   });
 
   it("restores explicit retry state without coalescing when the page slot is blocked", async () => {
@@ -789,7 +921,14 @@ describe("createAutosaveMarkdownModes", () => {
     expect(onCrepeChange).not.toHaveBeenCalled();
     expect(autosave.input).not.toHaveBeenCalled();
 
-    visual.state.instances.at(-1)!.documentChanged("second");
+    const editor = visual.state.instances.at(-1)!;
+    editor.sameDocumentUpdate();
+
+    expect(now).not.toHaveBeenCalled();
+    expect(onCrepeChange).not.toHaveBeenCalled();
+    expect(autosave.input).not.toHaveBeenCalled();
+
+    editor.documentChanged("second");
 
     expect(now).toHaveBeenCalledTimes(1);
     expect(onCrepeChange).toHaveBeenCalledWith("second", 123);
