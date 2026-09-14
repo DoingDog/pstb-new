@@ -1,4 +1,5 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source ".";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is([data-theme="dark"] *));
@@ -151,14 +152,52 @@ h1 {
   line-height: 1.2;
 }
 
-:where([data-slot="tabs-trigger"], [data-slot="sheet-content"], [data-slot="dialog-content"], [role="status"]) {
-  transition: color 120ms;
+*,
+*::before,
+*::after {
+  --tw-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  transition-delay: 0s !important;
+  transition-duration: 0s !important;
+}
+
+[data-slot="tabs-trigger"],
+[data-slot="tabs-trigger"]::before,
+[data-slot="tabs-trigger"]::after,
+[data-slot^="sheet-"],
+[data-slot^="sheet-"]::before,
+[data-slot^="sheet-"]::after,
+[data-slot^="dialog-"],
+[data-slot^="dialog-"]::before,
+[data-slot^="dialog-"]::after,
+[role="status"],
+[role="status"]::before,
+[role="status"]::after {
+  --tw-duration: 120ms !important;
+  animation-delay: 0s !important;
+  animation-duration: 120ms !important;
+  transition-delay: 0s !important;
+  transition-duration: 120ms !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
-  *::after {
+  *::after,
+  [data-slot="tabs-trigger"],
+  [data-slot="tabs-trigger"]::before,
+  [data-slot="tabs-trigger"]::after,
+  [data-slot^="sheet-"],
+  [data-slot^="sheet-"]::before,
+  [data-slot^="sheet-"]::after,
+  [data-slot^="dialog-"],
+  [data-slot^="dialog-"]::before,
+  [data-slot^="dialog-"]::after,
+  [role="status"],
+  [role="status"]::before,
+  [role="status"]::after {
+    --tw-duration: 0s !important;
     animation-delay: 0s !important;
     animation-duration: 0s !important;
     transition-delay: 0s !important;

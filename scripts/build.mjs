@@ -111,52 +111,87 @@ function requireSingle(value, description) {
   return value[0];
 }
 
-await rm(assetsDirectory, { force: true, recursive: true });
-await build({ root });
-
-const manifestPath = resolve(assetsDirectory, ".vite/manifest.json");
-const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const indexEntry = requireSingle(
-  Object.entries(manifest).filter(([key, value]) => key === "index.html" && value.isEntry === true),
-  "index.html manifest entry",
-)[1];
-const appJs = indexEntry.file;
-const appCss = requireSingle(indexEntry.css ?? [], "entry CSS file");
-
-if (
-  typeof appJs !== "string" ||
-  !/^assets\/app-[A-Za-z0-9_-]+\.js$/.test(appJs) ||
-  !/^assets\/app-[A-Za-z0-9_-]+\.css$/.test(appCss)
-) {
-  throw new Error("Vite entry output does not match the build contract");
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const diffWorker = requireSingle(
-  (await readBuiltFiles()).filter((path) => /^assets\/diff-[A-Za-z0-9_-]+\.js$/.test(path)),
-  "diff worker",
-);
+export function resolveManifestAssets(manifest) {
+  if (!isRecord(manifest)) throw new Error("Vite manifest must be an object");
 
-await writeStaticAssetHeaders();
-await writeGeneratedAssets({
-  appJs: assetPath(appJs),
-  appCss: assetPath(appCss),
-  diffWorker: assetPath(diffWorker),
-});
-await assertWranglerConfig();
-await rm(resolve(assetsDirectory, "index.html"), { force: true });
-await rm(resolve(assetsDirectory, ".vite"), { force: true, recursive: true });
+  const entryKeys = Object.entries(manifest)
+    .filter(([, value]) => isRecord(value) && value.isEntry === true)
+    .map(([key]) => key);
+  const expectedEntryKeys = ["index.html", "src/client/diff.ts"];
 
-const deployFiles = await readBuiltFiles();
-if (
-  deployFiles.some(
-    (path) => path !== "_headers" && !/^assets\/.+-[A-Za-z0-9_-]+\.(?:css|js)$/.test(path),
-  )
-) {
-  throw new Error("Deploy directory contains a non-hashed file");
-}
-
-for (const path of [appJs, appCss, diffWorker]) {
-  if (!existsSync(resolve(assetsDirectory, path))) {
-    throw new Error(`Generated asset does not exist: ${path}`);
+  if (
+    entryKeys.length !== expectedEntryKeys.length ||
+    entryKeys.some((key) => !expectedEntryKeys.includes(key))
+  ) {
+    throw new Error("Vite manifest must contain exactly the approved entry records");
   }
+
+  const indexEntry = manifest["index.html"];
+  const diffEntry = manifest["src/client/diff.ts"];
+  if (
+    !isRecord(indexEntry) ||
+    !isRecord(diffEntry) ||
+    indexEntry.src !== "index.html" ||
+    diffEntry.src !== "src/client/diff.ts"
+  ) {
+    throw new Error("Vite manifest entry sources do not match the build contract");
+  }
+
+  const appJs = indexEntry.file;
+  const appCss = requireSingle(Array.isArray(indexEntry.css) ? indexEntry.css : [], "entry CSS file");
+  const diffWorker = diffEntry.file;
+  if (
+    typeof appJs !== "string" ||
+    typeof appCss !== "string" ||
+    typeof diffWorker !== "string" ||
+    !/^assets\/app-[A-Za-z0-9_-]+\.js$/.test(appJs) ||
+    !/^assets\/app-[A-Za-z0-9_-]+\.css$/.test(appCss) ||
+    !/^assets\/diff-[A-Za-z0-9_-]+\.js$/.test(diffWorker)
+  ) {
+    throw new Error("Vite entry output does not match the build contract");
+  }
+
+  return { appJs, appCss, diffWorker };
+}
+
+export async function buildClient() {
+  await rm(assetsDirectory, { force: true, recursive: true });
+  await build({ root });
+
+  const manifestPath = resolve(assetsDirectory, ".vite/manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const { appJs, appCss, diffWorker } = resolveManifestAssets(manifest);
+
+  await writeStaticAssetHeaders();
+  await writeGeneratedAssets({
+    appJs: assetPath(appJs),
+    appCss: assetPath(appCss),
+    diffWorker: assetPath(diffWorker),
+  });
+  await assertWranglerConfig();
+  await rm(resolve(assetsDirectory, "index.html"), { force: true });
+  await rm(resolve(assetsDirectory, ".vite"), { force: true, recursive: true });
+
+  const deployFiles = await readBuiltFiles();
+  if (
+    deployFiles.some(
+      (path) => path !== "_headers" && !/^assets\/.+-[A-Za-z0-9_-]+\.(?:css|js)$/.test(path),
+    )
+  ) {
+    throw new Error("Deploy directory contains a non-hashed file");
+  }
+
+  for (const path of [appJs, appCss, diffWorker]) {
+    if (!existsSync(resolve(assetsDirectory, path))) {
+      throw new Error(`Generated asset does not exist: ${path}`);
+    }
+  }
+}
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await buildClient();
 }

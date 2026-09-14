@@ -14,10 +14,10 @@ function PageContent({ initialPage }: AppProps) {
     case false: {
       const copy = labels(initialPage.locale);
       return (
-        <main>
+        <>
           <h1>{copy.error}</h1>
           <p role="alert">{errorMessage(initialPage.locale, initialPage.errorCode)}</p>
-        </main>
+        </>
       );
     }
     case true: {
@@ -47,7 +47,7 @@ function PageContent({ initialPage }: AppProps) {
         }
       }
 
-      return <main><h1>{title}</h1></main>;
+      return <h1>{title}</h1>;
     }
   }
 }
@@ -60,7 +60,7 @@ export function App({ initialPage }: AppProps) {
     <SidebarProvider>
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
+          <SidebarTrigger className="-ml-1 !size-11" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
           <Breadcrumb>
             <BreadcrumbList>
