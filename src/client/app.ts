@@ -1,7 +1,7 @@
 import "./styles.css";
 import { dictionaries, formatDate, resolveBrowserLocale, type ErrorMessageCode, type LabelKey, type Locale } from "../i18n";
-import { decodeSourceData, sourceDataEncoding } from "../source-data";
 import type { DiffId, DiffLine, DiffRequest, DiffResponse } from "./diff";
+import { createThemeController, type ResolvedTheme, type ThemeController } from "./theme";
 
 declare const __DIFF_WORKER_URL__: string;
 
@@ -121,127 +121,6 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
   };
 }
 
-let pastePassword: string | null = null;
-let pasteContent: string | null = null;
-
-export interface SourceAdapter {
-  value: string;
-}
-
-export function currentPasteContent(): string | null {
-  return pasteContent;
-}
-
-export function createSourceAdapter(source: Pick<HTMLTextAreaElement, "value">): SourceAdapter {
-  return {
-    get value(): string {
-      return pasteContent ?? source.value;
-    },
-    set value(content: string) {
-      pasteContent = content;
-      source.value = content;
-    },
-  };
-}
-
-function hydratePasteSource(): void {
-  if (typeof document === "undefined" || typeof document.querySelector !== "function") return;
-
-  const transport = document.querySelector<HTMLScriptElement>("script#source-data[data-source-encoding]");
-  if (transport === null || transport.getAttribute("data-source-encoding") !== sourceDataEncoding) return;
-
-  let content: string;
-  try {
-    content = decodeSourceData(transport.textContent ?? "");
-  } catch {
-    transport.remove();
-    return;
-  }
-
-  pasteContent = content;
-  const sourceView = document.querySelector<HTMLPreElement>("pre[data-source-view]");
-  if (sourceView !== null) sourceView.textContent = content;
-  const source = document.querySelector<HTMLTextAreaElement>("textarea#source");
-  if (source !== null) {
-    source.value = content;
-    source.addEventListener("input", () => {
-      pasteContent = source.value;
-    });
-  }
-  transport.remove();
-}
-
-export type Theme = "light" | "dark";
-
-export interface ThemeRoot {
-  dataset: { theme?: string };
-  style: { colorScheme: string };
-}
-
-export interface ThemeMediaQueryList {
-  readonly matches: boolean;
-  addEventListener?(type: "change", listener: (event: { matches: boolean }) => void): void;
-  removeEventListener?(type: "change", listener: (event: { matches: boolean }) => void): void;
-  addListener?(listener: (event: { matches: boolean }) => void): void;
-  removeListener?(listener: (event: { matches: boolean }) => void): void;
-}
-
-export interface ThemeController {
-  readonly theme: Theme;
-  toggle(): void;
-  dispose(): void;
-}
-
-export interface ThemeControllerOptions {
-  root: ThemeRoot;
-  media: ThemeMediaQueryList;
-  onThemeChange?(theme: Theme): void;
-}
-
-export function createThemeController(options: ThemeControllerOptions): ThemeController {
-  let theme: Theme = options.media.matches ? "dark" : "light";
-  let override: Theme | undefined;
-  let disposed = false;
-  let removeListener: (() => void) | undefined;
-
-  const apply = (next: Theme): void => {
-    theme = next;
-    options.root.dataset.theme = next;
-    options.root.style.colorScheme = next;
-    options.onThemeChange?.(next);
-  };
-  const change = (event: { matches: boolean }): void => {
-    if (disposed || override !== undefined) return;
-    apply(event.matches ? "dark" : "light");
-  };
-
-  if (options.media.addEventListener !== undefined) {
-    options.media.addEventListener("change", change);
-    removeListener = () => options.media.removeEventListener?.("change", change);
-  } else if (options.media.addListener !== undefined) {
-    options.media.addListener(change);
-    removeListener = () => options.media.removeListener?.(change);
-  }
-  apply(theme);
-
-  return {
-    get theme(): Theme {
-      return theme;
-    },
-    toggle(): void {
-      if (disposed) return;
-      override = theme === "dark" ? "light" : "dark";
-      apply(override);
-    },
-    dispose(): void {
-      if (disposed) return;
-      disposed = true;
-      removeListener?.();
-      removeListener = undefined;
-    },
-  };
-}
-
 interface LocalizedElement {
   textContent: string | null;
   getAttribute(name: string): string | null;
@@ -254,17 +133,17 @@ export interface LocaleDocument {
   querySelectorAll(selector: string): Iterable<LocalizedElement>;
 }
 
-function themeLabel(locale: Locale, theme: Theme): string {
+function themeLabel(locale: Locale, theme: ResolvedTheme): string {
   return dictionaries[locale].labels[theme === "dark" ? "switchToLightTheme" : "switchToDarkTheme"];
 }
 
-function updateThemeControls(root: LocaleDocument, locale: Locale, theme: Theme): void {
+function updateThemeControls(root: LocaleDocument, locale: Locale, theme: ResolvedTheme): void {
   const label = themeLabel(locale, theme);
   for (const element of root.querySelectorAll("[data-i18n-theme]")) element.textContent = label;
   for (const element of root.querySelectorAll("[data-theme-control]")) element.setAttribute("aria-label", label);
 }
 
-function documentTheme(root: LocaleDocument): Theme | undefined {
+function documentTheme(root: LocaleDocument): ResolvedTheme | undefined {
   const theme = root.documentElement.dataset?.theme;
   return theme === "light" || theme === "dark" ? theme : undefined;
 }
@@ -323,55 +202,27 @@ function initializeDocumentLocale(): void {
 }
 
 function initializeDocumentTheme(): void {
-  if (typeof document === "undefined" || document.documentElement === undefined || themeDocuments.has(document)) return;
+  if (
+    typeof document === "undefined" ||
+    document.documentElement === undefined ||
+    themeDocuments.has(document) ||
+    typeof globalThis.matchMedia !== "function"
+  ) return;
 
-  const media: ThemeMediaQueryList = typeof globalThis.matchMedia === "function"
-    ? globalThis.matchMedia("(prefers-color-scheme: dark)")
-    : { matches: false };
-  const controller = createThemeController({
-    root: document.documentElement,
-    media,
-    onThemeChange: (theme) => updateThemeControls(document, document.documentElement.lang === "zh-CN" ? "zh-CN" : "en", theme),
-  });
+  const controller = createThemeController(
+    document.documentElement,
+    globalThis.matchMedia("(prefers-color-scheme: dark)"),
+    (theme) => updateThemeControls(document, document.documentElement.lang === "zh-CN" ? "zh-CN" : "en", theme),
+  );
   for (const control of document.querySelectorAll('[data-action="theme"]')) {
-    control.addEventListener("click", () => controller.toggle());
+    control.addEventListener("click", () => controller.setPreference(controller.snapshot().resolved === "dark" ? "light" : "dark"));
   }
   themeDocuments.set(document, controller);
-}
-
-function currentDocumentUrl(): URL | null {
-  if (typeof document === "undefined" || typeof location === "undefined") return null;
-  return new URL(location.href);
-}
-
-export function withPastePassword(target: URL, password: string | null): URL {
-  const url = new URL(target.href);
-  url.searchParams.delete("password");
-  if (password !== null) url.searchParams.append("password", password);
-  return url;
-}
-
-export function currentPastePassword(): string | null {
-  return pastePassword;
-}
-
-export function setPastePassword(password: string | null): void {
-  pastePassword = password;
-  const target = currentDocumentUrl();
-  if (target === null || typeof history === "undefined") return;
-
-  history.replaceState(history.state, "", withPastePassword(target, password).toString());
 }
 
 export function startApp(): void {
   initializeDocumentLocale();
   initializeDocumentTheme();
-  const url = currentDocumentUrl();
-  if (url !== null) {
-    const passwords = url.searchParams.getAll("password");
-    pastePassword = passwords.length === 1 ? passwords[0] ?? null : null;
-  }
-  hydratePasteSource();
 }
 
 if (typeof document !== "undefined") startApp();
