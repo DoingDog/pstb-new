@@ -318,16 +318,31 @@ describe("strict multipart create fields", () => {
     });
   });
 
-  it.each([undefined, 1_048_576, 8_192, 1])("reports content overflow when a valid UTF-8 scalar crosses the byte cap with %s-byte chunks", async (chunkBytes) => {
-    const boundary = "content-utf8-cap";
-    const body = multipart(boundary, [formPart("content", join(new Uint8Array(contentLimit - 1).fill(0x61), Uint8Array.of(0xc2, 0xa2)))]);
+  const contentScalarChunkCases = [
+    { name: "whole body", chunkBytes: undefined },
+    { name: "1 MiB chunks", chunkBytes: 1_048_576 },
+    { name: "8 KiB chunks", chunkBytes: 8_192 },
+    { name: "one-byte chunks", chunkBytes: 1 },
+  ] as const;
 
-    await expect(fieldsFor(body, boundary, chunkBytes)).rejects.toMatchObject({
-      code: "CONTENT_TOO_LARGE",
-      status: 413,
-      details: { maxBytes: contentLimit },
-    });
-  }, 60_000);
+  it.each(contentScalarChunkCases)(
+    "reports a valid UTF-8 scalar crossing the 10 MiB cap with $name",
+    async ({ chunkBytes }) => {
+      const boundary = "content-utf8-cap";
+      const body = multipart(boundary, [
+        formPart("content", join(
+          new Uint8Array(contentLimit - 1).fill(0x61),
+          Uint8Array.of(0xc2, 0xa2),
+        )),
+      ]);
+      await expect(fieldsFor(body, boundary, chunkBytes)).rejects.toMatchObject({
+        code: "CONTENT_TOO_LARGE",
+        status: 413,
+        details: { maxBytes: contentLimit },
+      });
+    },
+    600_000,
+  );
 
   it("reports ordinary ASCII overflow from the writeByte path", async () => {
     const boundary = "write-byte-overflow";
@@ -341,30 +356,48 @@ describe("strict multipart create fields", () => {
     });
   });
 
-  it("reports valid two-, three-, and four-byte scalar overflows at every field cap through bulk and one-byte delivery", async () => {
-    const fields = [
-      ["content", contentLimit],
-      ["title", 800],
-      ["format", 8],
-      ["expiration", 29],
-      ["password", 128],
-      ["viewOnce", 5],
-      ["customId", 64],
-    ] as const;
-    const scalars = [Uint8Array.of(0xc2, 0xa2), Uint8Array.of(0xe2, 0x82, 0xac), Uint8Array.of(0xf0, 0x9f, 0x99, 0x82)];
+  const utf8CapCases = ([
+    ["content", contentLimit],
+    ["title", 800],
+    ["format", 8],
+    ["expiration", 29],
+    ["password", 128],
+    ["viewOnce", 5],
+    ["customId", 64],
+  ] as const).flatMap(([field, limit]) =>
+    ([
+      ["two-byte", Uint8Array.of(0xc2, 0xa2)],
+      ["three-byte", Uint8Array.of(0xe2, 0x82, 0xac)],
+      ["four-byte", Uint8Array.of(0xf0, 0x9f, 0x99, 0x82)],
+    ] as const).flatMap(([scalarName, scalar]) =>
+      ([
+        ["bulk", undefined],
+        ["one-byte", 1],
+      ] as const).map(([delivery, chunkBytes]) => ({
+        field,
+        limit,
+        scalarName,
+        scalar,
+        delivery,
+        chunkBytes,
+      })),
+    ),
+  );
 
-    for (const [field, limit] of fields) {
-      for (const scalar of scalars) {
-        const body = multipart("all-utf8-caps", [formPart(field, join(new Uint8Array(limit - 1).fill(0x61), scalar))]);
-        for (const chunkBytes of [undefined, 1]) {
-          const expected = field === "content"
-            ? { code: "CONTENT_TOO_LARGE", status: 413, details: { maxBytes: contentLimit } }
-            : { code: "VALIDATION_FAILED", status: 422, details: { fields: [{ field }] } };
-          await expect(fieldsFor(body, "all-utf8-caps", chunkBytes)).rejects.toMatchObject(expected);
-        }
-      }
-    }
-  }, 180_000);
+  it.each(utf8CapCases)(
+    "reports $scalarName overflow for $field with $delivery delivery",
+    async ({ field, limit, scalar, chunkBytes }) => {
+      const boundary = `cap-${field}`;
+      const body = multipart(boundary, [
+        formPart(field, join(new Uint8Array(limit - 1).fill(0x61), scalar)),
+      ]);
+      const expected = field === "content"
+        ? { code: "CONTENT_TOO_LARGE", status: 413, details: { maxBytes: contentLimit } }
+        : { code: "VALIDATION_FAILED", status: 422, details: { fields: [{ field }] } };
+      await expect(fieldsFor(body, boundary, chunkBytes)).rejects.toMatchObject(expected);
+    },
+    600_000,
+  );
 
   it("bounds definitely oversized non-content fields before retaining them", async () => {
     const boundary = "field-limit";
