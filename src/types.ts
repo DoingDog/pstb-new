@@ -97,6 +97,27 @@ export interface PasteSummary {
   links: PasteLinks;
 }
 
+export type AppLocale = "en" | "zh-CN";
+
+export type AppBootstrap =
+  | { page: "create"; locale: AppLocale }
+  | { page: "paste"; locale: AppLocale; paste: PasteSummary; consumed: false }
+  | {
+      page: "paste";
+      locale: AppLocale;
+      consumed: true;
+      hasInitialMarkdownPreview: boolean;
+    }
+  | {
+      page: "markdown";
+      locale: AppLocale;
+      id: string;
+      title: string;
+      hasInitialMarkdownPreview: true;
+    }
+  | { page: "password"; locale: AppLocale; errorCode: null | "FORBIDDEN" }
+  | { page: "error"; locale: AppLocale; status: number; errorCode: string };
+
 export interface PasteResource extends PasteSummary {
   content: string;
 }

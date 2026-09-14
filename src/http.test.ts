@@ -1,7 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApp } from "./http";
-import { assetPaths } from "./generated/assets";
 import { renderCreatePage } from "./render";
 import type { Env, MutationResult, PasteSummary } from "./types";
 
@@ -22,6 +21,12 @@ declare global {
 
 function request(path: string, init?: RequestInit): Promise<Response> {
   return exports.default.fetch(new Request(`https://paste.test${path}`, init));
+}
+
+function readBootstrap(html: string): unknown {
+  const match = /<script id="bootstrap" type="application\/json">([^<]*)<\/script>/.exec(html);
+  expect(match).not.toBeNull();
+  return JSON.parse(match![1]!);
 }
 
 async function deletePaste(id: string): Promise<void> {
@@ -103,7 +108,9 @@ describe("HTTP slice 1", () => {
     expect(get.status).toBe(200);
     expect(get.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(get.headers.get("cache-control")).toBe("no-store");
-    expect(await get.text()).toContain("创建剪贴板");
+    const getHtml = await get.text();
+    expect(readBootstrap(getHtml)).toEqual({ page: "create", locale: "zh-CN" });
+    expect(getHtml).toContain('<div id="app"></div>');
 
     const head = await request("/", { method: "HEAD" });
     expect(head.status).toBe(200);
@@ -125,10 +132,14 @@ describe("HTTP slice 1", () => {
     expect(method.headers.get("content-security-policy")).toBeTruthy();
     expect(method.headers.get("x-content-type-options")).toBe("nosniff");
     const methodHtml = await method.text();
-    expect(methodHtml).toContain(`href="${assetPaths.appCss}"`);
-    expect(methodHtml).toContain(`src="${assetPaths.appJs}"`);
-    expect(methodHtml).toContain('data-workbench="error"');
-    expect(methodHtml).toContain('data-i18n-error="METHOD_NOT_ALLOWED">请求方法不被允许。请返回创建页面。');
+    expect(readBootstrap(methodHtml)).toEqual({
+      page: "error",
+      locale: "zh-CN",
+      status: 405,
+      errorCode: "METHOD_NOT_ALLOWED",
+    });
+    expect(methodHtml).toContain('<div id="app"></div>');
+    expect(methodHtml).not.toContain("请求方法不被允许。请返回创建页面。");
   });
 
   it("does not render the create page for HEAD", async () => {

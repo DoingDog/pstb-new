@@ -13,7 +13,6 @@ import {
   renderPasswordPage,
   renderPastePage,
 } from "./render";
-import { dictionaries, formatDate } from "./i18n";
 import type { PasteSummary } from "./types";
 
 const paste: PasteSummary = {
@@ -39,6 +38,20 @@ const paste: PasteSummary = {
   },
 };
 
+function occurrenceCount(source: string, needle: string): number {
+  return source.split(needle).length - 1;
+}
+
+function readBootstrap(html: string): unknown {
+  const match = /<script id="bootstrap" type="application\/json">([^<]*)<\/script>/.exec(html);
+  expect(match).not.toBeNull();
+  return JSON.parse(match![1]!);
+}
+
+function pasteSummary(overrides: Partial<PasteSummary> = {}): PasteSummary {
+  return { ...paste, ...overrides };
+}
+
 function executableScriptSources(document: string): string[] {
   return [...document.matchAll(/<script\b([^>]*)>/gi)]
     .filter((match) => !/\btype=(?:"application\/(?:json|octet-stream)"|'application\/(?:json|octet-stream)')/i.test(match[1] ?? ""))
@@ -60,12 +73,6 @@ async function parsedSourceData(document: string): Promise<string> {
   });
   await rewriter.transform(new Response(document)).text();
   return encoded;
-}
-
-function bootstrapData(document: string): Record<string, unknown> {
-  const match = document.match(/<script id="bootstrap" type="application\/json">(.*?)<\/script>/);
-  if (!match) throw new Error("expected bootstrap data");
-  return JSON.parse(match[1]!);
 }
 
 describe("renderMarkdown", () => {
@@ -110,314 +117,137 @@ describe("bootstrap and application headers", () => {
 });
 
 describe("application documents", () => {
-  it("uses the exact ordered expiration values with one day selected by default", () => {
-    const html = renderCreatePage("en");
-    const options = html.match(/<select id="expiration"[^>]*>(.*?)<\/select>/)?.[1];
+  it("renders an ordinary Markdown paste as inert transport only", () => {
+    const html = renderPastePage({ locale: "en", paste: pasteSummary({ format: "markdown" }), content: "# exact\r\n", consumed: false });
 
-    expect(options).toBeDefined();
-    expect([...options!.matchAll(/<option value="([^"]+)"([^>]*)>/g)].map((match) => [match[1], (match[2] ?? "").includes("selected")])).toEqual([
-      ["60", false],
-      ["3600", false],
-      ["86400", true],
-      ["604800", false],
-      ["2592000", false],
-      ["31104000", false],
-      ["permanent", false],
-    ]);
+    expect(html).toContain('<div id="app"></div>');
+    expect(readBootstrap(html)).toEqual({
+      page: "paste",
+      locale: "en",
+      paste: pasteSummary({ format: "markdown" }),
+      consumed: false,
+    });
+    expect(occurrenceCount(html, 'id="source-data"')).toBe(1);
+    expect(occurrenceCount(html, 'id="initial-markdown-preview"')).toBe(1);
+    expect(html).not.toMatch(/<(?:form|article|aside|nav|button|textarea)\b/);
+    expect(html).not.toContain("# exact");
   });
 
-  it("renders the initial View as exact text or sanitized Markdown", () => {
-    const text = renderPastePage({
-      locale: "en",
-      paste: { ...paste, format: "text" },
-      content: "exact\r\n<script>literal</script>\n  ",
-    });
-    const markdown = renderPastePage({
-      locale: "en",
-      paste: { ...paste, format: "markdown" },
-      content: "## Heading\n\n<script>literal</script>",
-    });
-
-    expect(text).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><pre class="paste-content" data-source-view></pre></section>');
-    expect(text).not.toContain("<script>literal</script>");
-    expect(markdown).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view"><article class="paste-content"><h2>Heading</h2>\n&lt;script&gt;literal&lt;/script&gt;</article></section>');
-    expect(markdown).not.toContain("<script>literal</script>");
+  it.each([
+    [renderCreatePage("en"), { page: "create", locale: "en" }],
+    [renderPasswordPage({ locale: "en", errorCode: null }), { page: "password", locale: "en", errorCode: null }],
+    [renderPasswordPage({ locale: "en", errorCode: "FORBIDDEN" }), { page: "password", locale: "en", errorCode: "FORBIDDEN" }],
+    [renderErrorPage({ locale: "en", status: 503, errorCode: "STORAGE_READ_FAILED" }), { page: "error", locale: "en", status: 503, errorCode: "STORAGE_READ_FAILED" }],
+  ])("renders non-content variants without source or preview nodes", (html, bootstrap) => {
+    expect(readBootstrap(html)).toEqual(bootstrap);
+    expect(occurrenceCount(html, 'id="source-data"')).toBe(0);
+    expect(occurrenceCount(html, 'id="initial-markdown-preview"')).toBe(0);
   });
 
-  it("carries exact source once in inert UTF-8 base64 data", () => {
+  it.each([
+    [
+      "ordinary text",
+      () => renderPastePage({ locale: "en", paste: pasteSummary({ format: "text" }), content: "exact\r\n", consumed: false }),
+      { page: "paste", locale: "en", paste: pasteSummary({ format: "text" }), consumed: false },
+      0,
+    ],
+    [
+      "ordinary Markdown",
+      () => renderPastePage({ locale: "en", paste: pasteSummary({ format: "markdown" }), content: "# exact\r\n", consumed: false }),
+      { page: "paste", locale: "en", paste: pasteSummary({ format: "markdown" }), consumed: false },
+      1,
+    ],
+    [
+      "consumed text",
+      () => renderPastePage({ locale: "en", paste: pasteSummary({ format: "text", viewOnce: true }), content: "exact\r\n", consumed: true }),
+      { page: "paste", locale: "en", consumed: true, hasInitialMarkdownPreview: false },
+      0,
+    ],
+    [
+      "consumed Markdown",
+      () => renderPastePage({ locale: "en", paste: pasteSummary({ format: "markdown", viewOnce: true }), content: "# exact\r\n", consumed: true }),
+      { page: "paste", locale: "en", consumed: true, hasInitialMarkdownPreview: true },
+      1,
+    ],
+  ])("preserves source and preview cardinality for %s", (_name, render, bootstrap, previews) => {
+    const html = render();
+
+    expect(readBootstrap(html)).toEqual(bootstrap);
+    expect(occurrenceCount(html, 'id="source-data"')).toBe(1);
+    expect(occurrenceCount(html, 'id="initial-markdown-preview"')).toBe(previews);
+  });
+
+  it("keeps exact source once in inert UTF-8 base64 data", () => {
     const content = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
     const model = {
       locale: "en" as const,
-      paste: { ...paste, format: "text" as const },
+      paste: pasteSummary({ format: "text" }),
       content,
       password: "not-for-bootstrap",
     };
     const html = renderPastePage(model);
-    const bootstrap = bootstrapData(html);
+    const bootstrap = readBootstrap(html) as Record<string, unknown>;
 
-    expect([...html.matchAll(/<script id="source-data" type="application\/octet-stream" data-source-encoding="utf-8-base64">/g)]).toHaveLength(1);
+    expect(occurrenceCount(html, 'id="source-data"')).toBe(1);
     expect(decodeSourceData(sourceData(html))).toBe(content);
     expect(bootstrap).not.toHaveProperty("content");
     expect(bootstrap).not.toHaveProperty("password");
     expect(html).not.toContain("not-for-bootstrap");
-    expect(html).toContain('<pre class="paste-content" data-source-view></pre>');
-    expect(html).toContain('<textarea id="source" class="editor-input" name="source" readonly spellcheck="false"></textarea>');
   });
 
   it("preserves inert source data through HTML parsing", async () => {
     const content = "\nleading\rstandalone\r\ncrlf\0replacement:� <>&  ﻿ non-BMP:\u{1F642}";
-    const html = renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content });
+    const html = renderPastePage({ locale: "en", paste: pasteSummary({ format: "text" }), content });
 
     expect(decodeSourceData(await parsedSourceData(html))).toBe(content);
   });
 
-  it.each([
-    ["ordinary paste", () => renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content: "ordinary\r\nsource" })],
-    ["restricted paste", () => renderPastePage({ locale: "en", paste: { ...paste, format: "text", viewOnce: true }, content: "restricted\r\nsource", consumed: true })],
-    ["ordinary Markdown document", () => renderMarkdownDocument({ locale: "en", paste, content: "# ordinary\r\nsource" })],
-    ["view-once Markdown document", () => renderMarkdownDocument({ locale: "en", paste: { ...paste, viewOnce: true }, content: "# restricted\r\nsource" })],
-  ])("keeps %s source out of bootstrap while retaining one transport node", (_name, render) => {
-    const html = render();
+  it("uses only sanitized Markdown in the safe preview template", () => {
+    const content = '<script>alert(1)</script>\n\nReference[^1]\n\n[^1]: note';
+    const html = renderPastePage({ locale: "en", paste: pasteSummary({ format: "markdown" }), content });
 
-    expect([...html.matchAll(/<script id="source-data" type="application\/octet-stream" data-source-encoding="utf-8-base64">/g)]).toHaveLength(1);
-    expect(bootstrapData(html)).not.toHaveProperty("content");
-    expect(decodeSourceData(sourceData(html))).toContain("source");
-  });
-
-  it("keeps a megabyte of text source near base64 expansion", () => {
-    const content = "<".repeat(1_048_576);
-    const html = renderPastePage({ locale: "en", paste: { ...paste, format: "text" }, content });
-
-    expect(html.length).toBeLessThan(content.length * 1.38 + 20_000);
     expect(decodeSourceData(sourceData(html))).toBe(content);
+    expect(html).toContain('<template id="initial-markdown-preview">');
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).toContain("user-content-");
+    expect(html).not.toContain("<script>alert(1)</script>");
   });
 
-  it.each([
-    ["en", ["Optional. Up to 200 characters.", "Select the default view for this paste.", "Choose when this paste expires.", "Optional. Use 1 to 128 visible ASCII characters.", "Optional. Start with an ASCII letter or number; use up to 64 ASCII letters, numbers, underscores, or hyphens."]],
-    ["zh-CN", ["可选。最多 200 个字符。", "选择此剪贴板默认打开的视图。", "选择剪贴板何时过期。", "可选。使用 1 到 128 个可见 ASCII 字符。", "可选。以 ASCII 字母或数字开头，最多 64 个 ASCII 字母、数字、下划线或连字符。"]],
-  ] as const)("renders %s create fields in reading order with visible descriptions", (locale, descriptions) => {
-    const html = renderCreatePage(locale);
-    const ids = ["title", "format", "expiration", "content", "password", "custom-id", "view-once"];
-    const positions = ids.map((id) => html.indexOf(`id="${id}"`));
+  it("renders Markdown documents with only local source and preview transport", () => {
+    const html = renderMarkdownDocument({ locale: "en", paste: pasteSummary({ viewOnce: true }), content: "# exact\r\n" });
 
-    expect(positions.every((position) => position >= 0)).toBe(true);
-    expect(positions).toEqual([...positions].sort((left, right) => left - right));
-    for (const [id, key, description] of [
-      ["title", "titleDescription", descriptions[0]],
-      ["format", "formatDescription", descriptions[1]],
-      ["expiration", "expirationDescription", descriptions[2]],
-      ["password", "passwordDescription", descriptions[3]],
-      ["custom-id", "customIdDescription", descriptions[4]],
-    ]) {
-      expect(html).toContain(`aria-describedby="${id}-description ${id}-error"`);
-      expect(html).toContain(`<p id="${id}-description"><span data-i18n="${key}">${description}</span></p>`);
-    }
-    expect(html).toContain('<input id="title" name="title" type="text" aria-describedby="title-description title-error">');
-    expect(html).not.toContain("maxlength=");
+    expect(readBootstrap(html)).toEqual({
+      page: "markdown",
+      locale: "en",
+      id: "example",
+      title: "Example paste",
+      hasInitialMarkdownPreview: true,
+    });
+    expect(occurrenceCount(html, 'id="source-data"')).toBe(1);
+    expect(occurrenceCount(html, 'id="initial-markdown-preview"')).toBe(1);
+    expect(html).not.toMatch(/<(?:form|article|aside|nav|button|textarea)\b/);
   });
 
-  it("renders a workbench shell with an accessible tab workspace and empty deferred panels", () => {
-    const create = renderCreatePage("en");
-    const html = renderPastePage({ locale: "en", paste, content: "source" });
-
-    expect(create).toContain('<main class="workbench" data-workbench="create">');
-    expect(create).toContain('<aside class="lifecycle-rail" aria-labelledby="lifecycle-title">');
-    expect(create).toContain('class="form-section editor-surface"');
-    expect(html).toContain('<main class="workbench" data-workbench="paste" data-consumed="false">');
-    expect(html).toContain('<button id="tab-view" type="button" role="tab" aria-selected="true" aria-controls="panel-view" tabindex="0" data-tab="view" data-i18n="view">View</button>');
-    expect(html).toContain('<button id="tab-history" type="button" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1" data-tab="history" data-i18n="history">History</button>');
-    expect(html).toContain('<section id="panel-view" role="tabpanel" tabindex="0" aria-labelledby="tab-view" data-panel="view">');
-    expect(html).toContain('<section id="panel-history" role="tabpanel" tabindex="0" aria-labelledby="tab-history" data-panel="history" hidden><div class="history-workbench"><div class="history-list" data-history-list></div><div class="history-detail" data-history-detail></div></div></section>');
-    expect(html).toContain('<section id="panel-settings" role="tabpanel" tabindex="0" aria-labelledby="tab-settings" data-panel="settings" hidden></section>');
-  });
-
-  it("derives every paste lifecycle rail entry from the paste summary", () => {
+  it("omits unknown server-only paste properties from bootstrap data", () => {
     const html = renderPastePage({
       locale: "en",
-      paste: { ...paste, protected: false, viewOnce: false, expiresAt: "2026-09-14T00:00:00.000Z", contentRevision: 4, contentBytes: 321 },
+      paste: { ...pasteSummary(), password: "server-only" } as PasteSummary,
       content: "source",
     });
 
-    expect(html).toContain('<code>example</code>');
-    expect(html).toContain('Not protected');
-    expect(html).toContain('Standard');
-    expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
-    expect(html).toContain('<code>4</code>');
-    expect(html).toContain('321 <span data-i18n="bytes">bytes</span>');
-  });
-
-  it("annotates all rendered labels and dates for document-only locale updates", () => {
-    const html = [
-      renderCreatePage("en"),
-      renderPastePage({ locale: "en", paste: { ...paste, expiresAt: "2026-09-14T00:00:00.000Z" }, content: "source" }),
-      renderPastePage({ locale: "en", paste: { ...paste, protected: false }, content: "source" }),
-      renderPastePage({ locale: "en", paste: { ...paste, viewOnce: true }, content: "source", consumed: true }),
-      renderPasswordPage({ locale: "en" }),
-      renderErrorPage({ locale: "en", errorCode: "METHOD_NOT_ALLOWED" }),
-      renderMarkdownDocument({ locale: "en", paste, content: "source" }),
-    ].join("\n");
-    const annotated = [...html.matchAll(/data-i18n(?:-aria-label)?="([^"]+)"/g)].map((match) => match[1]).sort();
-
-    expect([...new Set(annotated)]).toEqual(Object.keys(dictionaries.en.labels).filter((key) => ![
-      "themeSystem",
-      "switchToDarkTheme",
-      "switchToLightTheme",
-    ].includes(key)).sort());
-    expect(html).toContain('data-i18n-aria-label="application"');
-    expect(html).toContain('data-i18n-aria-label="reveal"');
-    expect(html).toContain(`data-theme-control aria-label="${dictionaries.en.labels.themeSystem}"`);
-    expect(html).toContain(`<span data-i18n-theme>${dictionaries.en.labels.themeSystem}</span>`);
-    expect(html).toContain(`<time datetime="2026-09-14T00:00:00.000Z" data-i18n-date>${formatDate("en", "2026-09-14T00:00:00.000Z")}</time>`);
-  });
-
-  it("marks locale-derived titles and untitled paste headings for document updates", () => {
-    const create = renderCreatePage("en");
-    const untitledPaste = renderPastePage({ locale: "zh-CN", paste: { ...paste, title: "" }, content: "source" });
-    const untitledMarkdown = renderMarkdownDocument({ locale: "zh-CN", paste: { ...paste, title: "" }, content: "source" });
-    const titledPaste = renderPastePage({ locale: "zh-CN", paste: { ...paste, title: "User title" }, content: "source" });
-
-    expect(create).toContain('<title data-i18n-title="create">Create a paste</title>');
-    for (const html of [untitledPaste, untitledMarkdown]) {
-      expect(html).toContain('<title data-i18n-title="paste" data-i18n-title-suffix="example">剪贴板 example</title>');
-      expect(html).toContain('<h1 id="page-title"><span data-i18n="paste">剪贴板</span> example</h1>');
-    }
-    expect(titledPaste).toContain("<title>User title</title>");
-    expect(titledPaste).toContain('<h1 id="page-title">User title</h1>');
-  });
-
-  it("renders CSS hooks for the responsive workbench, history, and dialog primitives", () => {
-    const html = renderPastePage({ locale: "en", paste, content: "source" });
-
-    expect(html).toContain('class="workbench"');
-    expect(html).toContain('class="lifecycle-rail"');
-    expect(html).toContain('class="workbench-surface"');
-    expect(html).toContain('class="history-workbench"');
-    expect(html).toContain('class="history-list" data-history-list');
-    expect(html).toContain('class="history-detail" data-history-detail');
-    expect(html).toContain('<dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title">');
-  });
-
-  it("escapes user text and never puts a supplied password in bootstrap data", () => {
-    const model = {
-      locale: "en" as const,
-      paste: { ...paste, title: '<img src=x onerror=alert(1)>' },
-      content: "</textarea><img src=x onerror=alert(1)>",
-      password: "not-for-bootstrap",
-    };
-    const html = renderPastePage(model);
-
-    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
-    expect(html).not.toContain('<img src=x onerror=alert(1)>');
-    expect(html).not.toContain("not-for-bootstrap");
-  });
-
-  it("renders consumed view-once pages with only a root create link and local actions", () => {
-    const ordinary = renderPastePage({ locale: "en", paste, content: "source" });
-    const consumed = renderPastePage({ locale: "en", paste: { ...paste, viewOnce: true }, content: "source", consumed: true });
-    const links = [...consumed.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
-
-    expect(ordinary).toContain('role="tablist"');
-    expect(ordinary).toContain('data-action="delete"');
-    expect(consumed).toContain('data-consumed="true"');
-    expect(consumed).toContain('<a href="/"><span data-i18n="create">Create a paste</span></a>');
-    expect(links).toEqual(["/"]);
-    expect(consumed).toContain('data-action="copy"');
-    expect(consumed).toContain('data-action="download"');
-    expect(consumed).not.toContain('data-action="delete"');
-    expect(consumed).not.toContain('data-tab="edit"');
-    expect(consumed).not.toContain('data-tab="history"');
-    expect(consumed).not.toContain('data-tab="settings"');
-    expect(consumed).not.toContain('"links"');
-    expect(consumed).not.toContain('href="/example"');
-    expect(consumed).not.toContain('href="/raw/example"');
-    expect(consumed).not.toContain('href="/html/example"');
-    expect(consumed).not.toContain('href="/md/example"');
-    expect(consumed).not.toContain('href="/file/example"');
-  });
-
-  it("keeps a view-once Markdown document local after its content is loaded", () => {
-    const html = renderMarkdownDocument({ locale: "en", paste: { ...paste, viewOnce: true }, content: "# source" });
-    const links = [...html.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
-
-    expect(links).toEqual(["/"]);
-    expect(html).toContain('data-consumed="true"');
-    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy" data-i18n="copy">Copy</button>');
-    expect(html).not.toContain('data-action="open-source"');
-    expect(html).not.toContain('"links"');
-  });
-
-  it("marks ordinary Markdown document actions for narrow screens", () => {
-    const html = renderMarkdownDocument({ locale: "en", paste, content: "# source" });
-
-    expect(html).toContain('<a class="markdown-document-action" data-action="open-source" href="/example" data-i18n="openSource">Open source</a>');
-    expect(html).toContain('<button class="markdown-document-action" type="button" data-action="copy" data-i18n="copy">Copy</button>');
-  });
-
-  it("keeps English and Chinese dictionary keys in parity", () => {
-    expect(Object.keys(dictionaries.en.labels).sort()).toEqual(Object.keys(dictionaries["zh-CN"].labels).sort());
-  });
-
-  it.each(["en", "zh-CN"] as const)("renders every %s dictionary entry across representative whole pages", (locale) => {
-    const localizedPaste = { ...paste, title: "" };
-    const pages = [
-      renderCreatePage(locale),
-      renderPastePage({ locale, paste: localizedPaste, content: "source" }),
-      renderPastePage({ locale, paste: { ...localizedPaste, protected: false }, content: "source" }),
-      renderPastePage({ locale, paste: { ...localizedPaste, viewOnce: true }, content: "source", consumed: true }),
-      renderPasswordPage({ locale, errorCode: "FORBIDDEN" }),
-      renderErrorPage({ locale, errorCode: "PASTE_NOT_FOUND" }),
-      renderMarkdownDocument({ locale, paste: localizedPaste, content: "source" }),
-    ].join("\n");
-
-    expect(pages).toContain(`<html lang="${locale}">`);
-    for (const [key, value] of Object.entries(dictionaries[locale].labels)) {
-      if (key === "switchToDarkTheme" || key === "switchToLightTheme") continue;
-      expect(pages, key).toContain(value);
-    }
-  });
-
-  it("renders only normalized dictionary errors", () => {
-    const error = renderErrorPage({ locale: "zh-CN", errorCode: "UNKNOWN_ERROR" as never });
-    const password = renderPasswordPage({ locale: "zh-CN", errorCode: "UNKNOWN_ERROR" as never });
-
-    for (const html of [error, password]) {
-      expect(html).toContain('data-i18n-error="INTERNAL_ERROR"');
-      expect(html).toContain(dictionaries["zh-CN"].errors.INTERNAL_ERROR);
-      expect(html).not.toContain("UNKNOWN_ERROR");
-    }
-  });
-
-  it("renders generic password and dictionary error pages without paste data", () => {
-    const password = renderPasswordPage({ locale: "en", errorCode: "FORBIDDEN" });
-    const error = renderErrorPage({ locale: "en", errorCode: "PASTE_NOT_FOUND" });
-
-    expect(password).toContain('data-page="password"');
-    expect(password).toContain(dictionaries.en.errors.FORBIDDEN);
-    expect(password).not.toContain("Example paste");
-    expect(password).not.toContain('"content"');
-    expect(error).toContain('role="alert"');
-    expect(error).toContain(dictionaries.en.errors.PASTE_NOT_FOUND);
-  });
-
-  it("wraps safe Markdown in a semantic application article", () => {
-    const html = renderMarkdownDocument({ locale: "en", paste, content: '<script>alert(1)</script>\n\nReference[^1]\n\n[^1]: note' });
-
-    expect(html).toContain("<article>");
-    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
-    expect(html).toContain("user-content-");
-    expect(html).toContain('href="/example"');
+    expect(JSON.stringify(readBootstrap(html))).not.toContain("server-only");
   });
 
   it.each([
     ["create", () => renderCreatePage("en")],
-    ["paste", () => renderPastePage({ locale: "en", paste, content: "source" })],
-    ["password", () => renderPasswordPage({ locale: "en" })],
-    ["error", () => renderErrorPage({ locale: "en", errorCode: "INTERNAL_ERROR" })],
-    ["markdown", () => renderMarkdownDocument({ locale: "en", paste, content: "source" })],
-  ])("loads hashed assets without inline executable scripts on %s pages", (_name, render) => {
+    ["paste", () => renderPastePage({ locale: "en", paste: pasteSummary(), content: "source" })],
+    ["password", () => renderPasswordPage({ locale: "en", errorCode: null })],
+    ["error", () => renderErrorPage({ locale: "en", status: 500, errorCode: "INTERNAL_ERROR" })],
+    ["markdown", () => renderMarkdownDocument({ locale: "en", paste: pasteSummary(), content: "source" })],
+  ])("loads exactly one stylesheet and external module script on %s pages", (_name, render) => {
     const html = render();
 
-    expect(html).toContain(`href="${assetPaths.appCss}"`);
+    expect(occurrenceCount(html, `<link rel="stylesheet" href="${assetPaths.appCss}">`)).toBe(1);
     expect(executableScriptSources(html)).toEqual([assetPaths.appJs]);
   });
 });
@@ -450,7 +280,7 @@ describe("deriveDownloadHeaders", () => {
     );
   });
 
-  it.each(["bad\rtitle", "bad\ntitle", "bad title"])("rejects control characters in download titles", (title) => {
+  it.each(["bad\rtitle", "bad\ntitle", "bad\0title"])("rejects control characters in download titles", (title) => {
     try {
       deriveDownloadHeaders({ ...paste, title });
       throw new Error("Expected title validation to reject control characters.");

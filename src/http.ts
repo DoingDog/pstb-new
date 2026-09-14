@@ -563,6 +563,7 @@ function rootMethodNotAllowed(request: Request): Response {
   const requestLocale = resolveServerLocale(request.headers.get("accept-language"));
   const response = new Response(renderErrorPage({
     locale: requestLocale,
+    status: 405,
     errorCode: "METHOD_NOT_ALLOWED",
   }), { status: 405, headers: applicationHeaders() });
   response.headers.set("Allow", "GET,HEAD,OPTIONS");
