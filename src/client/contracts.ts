@@ -11,3 +11,13 @@ export type {
 } from "../types";
 
 export type RemoteSnapshot = PasteResource;
+
+export interface BaselineCapture {
+  acceptedApplyGeneration: number;
+  localGeneration: number;
+  generation: string | "legacy";
+  version: string;
+  contentRevision: number;
+  updatedAt: string;
+  acceptedSource: string;
+}

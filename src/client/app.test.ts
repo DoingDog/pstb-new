@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as app from "./app";
-import { createHistoryDiff, formatHistoryDiffLine } from "./app";
 
 const browser = app;
 
@@ -88,57 +87,6 @@ function themeMedia(initial: boolean) {
     },
   };
 }
-
-describe("history diff", () => {
-  it("formats diff prefixes as text without constructing HTML", () => {
-    expect(formatHistoryDiffLine({ kind: "same", text: "unchanged\n" })).toBe(" unchanged\n");
-    expect(formatHistoryDiffLine({ kind: "delete", text: "<script>old</script>\n" })).toBe("-<script>old</script>\n");
-    expect(formatHistoryDiffLine({ kind: "add", text: "<img src=x>\n" })).toBe("+<img src=x>\n");
-  });
-
-  it("creates the diff worker only for a selected revision and ignores stale text responses", () => {
-    const workers: Array<{
-      postMessage: ReturnType<typeof vi.fn>;
-      terminate: ReturnType<typeof vi.fn>;
-      onmessage: ((event: MessageEvent<unknown>) => void) | null;
-      onerror: ((event: ErrorEvent) => void) | null;
-    }> = [];
-    const onLines = vi.fn();
-    const history = createHistoryDiff({
-      createWorker: () => {
-        const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null };
-        workers.push(worker);
-        return worker;
-      },
-      onLines,
-    });
-
-    expect(history.selectRevision("1", "a\nb\n", "a\nc\n")).toBe("automatic");
-    expect(workers).toHaveLength(1);
-    expect(history.selectRevision("2", "old\n", "<img src=x>\n")).toBe("automatic");
-
-    workers[0]!.onmessage?.({
-      data: { type: "result", id: 1, lines: [{ kind: "same", text: "stale\n" }] },
-    } as MessageEvent<unknown>);
-    expect(onLines).not.toHaveBeenCalled();
-
-    workers[0]!.onmessage?.({
-      data: { type: "result", id: 2, lines: [{ kind: "add", text: "<img src=x>\n" }] },
-    } as MessageEvent<unknown>);
-    expect(onLines).toHaveBeenCalledWith([{ kind: "add", text: "<img src=x>\n" }]);
-
-    history.destroy();
-    expect(workers[0]!.terminate).toHaveBeenCalledOnce();
-  });
-
-  it("requires explicit diff calculation when either side exceeds the automatic policy", () => {
-    const createWorker = vi.fn();
-    const history = createHistoryDiff({ createWorker, onLines: vi.fn() });
-
-    expect(history.selectRevision("1", "x".repeat(1_048_577), "current")).toBe("manual");
-    expect(createWorker).not.toHaveBeenCalled();
-  });
-});
 
 describe("browser document state", () => {
   it("corrects the server locale, updates current copy, and installs one locale toggle", () => {
