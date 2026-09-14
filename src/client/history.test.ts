@@ -56,6 +56,49 @@ function settleHistory(controller = createHistoryController(), capture = baselin
   return { capture, controller };
 }
 
+const captureMismatches: ReadonlyArray<readonly [string, BaselineCapture]> = [
+  ["acceptedApplyGeneration", baseline({ acceptedApplyGeneration: 4 })],
+  ["localGeneration", baseline({ localGeneration: 6 })],
+  ["generation", baseline({ generation: "g.2" })],
+  ["version", baseline({ version: "g.2" })],
+  ["contentRevision", baseline({ contentRevision: 2 })],
+  ["updatedAt", baseline({ updatedAt: "2026-09-15T00:00:01.000Z" })],
+  ["acceptedSource", baseline({ acceptedSource: "two" })],
+];
+
+type RequestCallbackCase = {
+  name: string;
+  start(controller: ReturnType<typeof createHistoryController>, capture: BaselineCapture): { token: number };
+  settle(
+    controller: ReturnType<typeof createHistoryController>,
+    request: { token: number },
+    capture: BaselineCapture,
+  ): boolean;
+};
+
+const requestCallbackCases: readonly RequestCallbackCase[] = [
+  {
+    name: "acceptList",
+    start: (controller, capture) => controller.open(capture),
+    settle: (controller, request, capture) => controller.acceptList(request.token, capture, historyList()),
+  },
+  {
+    name: "failList",
+    start: (controller, capture) => controller.open(capture),
+    settle: (controller, request, capture) => controller.failList(request.token, capture, { status: 500, code: "INTERNAL_ERROR" }),
+  },
+  {
+    name: "acceptSnapshot",
+    start: (controller, capture) => controller.select(1, capture),
+    settle: (controller, request, capture) => controller.acceptSnapshot(request.token, capture, revision()),
+  },
+  {
+    name: "failSnapshot",
+    start: (controller, capture) => controller.select(1, capture),
+    settle: (controller, request, capture) => controller.failSnapshot(request.token, capture, { status: 500, code: "INTERNAL_ERROR" }),
+  },
+];
+
 describe("history diff", () => {
   it("formats diff prefixes as text without constructing HTML", () => {
     expect(formatHistoryDiffLine({ kind: "same", text: "unchanged\n" })).toBe(" unchanged\n");
@@ -144,31 +187,16 @@ describe("history lifecycle arbitration", () => {
     expect(controller.snapshot()).toEqual(afterSecond);
   });
 
-  it("requires every BaselineCapture field to match before accepting a list", () => {
+  it.each(requestCallbackCases)("T7-R1-03 $name rejects every isolated baseline mismatch without changing presentation", ({ start, settle }) => {
     const controller = createHistoryController();
     const capture = baseline();
-    const request = controller.open(capture);
-    const mismatches: BaselineCapture[] = [
-      baseline({ acceptedApplyGeneration: 4 }),
-      baseline({ localGeneration: 6 }),
-      baseline({ generation: "g.2" }),
-      baseline({ version: "g.2" }),
-      baseline({ contentRevision: 2 }),
-      baseline({ updatedAt: "2026-09-15T00:00:01.000Z" }),
-      baseline({ acceptedSource: "two" }),
-    ];
+    const request = start(controller, capture);
+    const before = controller.snapshot();
 
-    for (const mismatch of mismatches) {
-      expect(controller.acceptList(request.token, mismatch, historyList())).toBe(false);
+    for (const [, mismatch] of captureMismatches) {
+      expect(settle(controller, request, mismatch)).toBe(false);
+      expect(controller.snapshot()).toEqual(before);
     }
-    expect(controller.snapshot()).toEqual({
-      epoch: 0,
-      listState: "loading",
-      snapshotState: "idle",
-      list: null,
-      selected: null,
-      failure: null,
-    });
   });
 
   it("captures an immutable baseline for list callbacks", () => {
@@ -281,5 +309,212 @@ describe("history lifecycle arbitration", () => {
     expect(snapshot.signal.aborted).toBe(true);
     expect(controller.acceptList(list.token, capture, historyList())).toBe(false);
     expect(controller.acceptSnapshot(snapshot.token, capture, revision())).toBe(false);
+  });
+
+  it("T7-R1-03 keeps list and snapshot ownership independent", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const firstList = controller.open(capture);
+    const firstSnapshot = controller.select(1, capture);
+    const secondList = controller.open(capture);
+
+    expect(firstList.signal.aborted).toBe(true);
+    expect(firstSnapshot.signal.aborted).toBe(false);
+    expect(controller.acceptSnapshot(firstSnapshot.token, capture, revision())).toBe(true);
+
+    const secondSnapshot = controller.select(2, capture);
+    expect(secondList.signal.aborted).toBe(false);
+    expect(controller.acceptList(secondList.token, capture, historyList())).toBe(true);
+    expect(controller.acceptSnapshot(firstSnapshot.token, capture, revision())).toBe(false);
+    expect(controller.acceptSnapshot(secondSnapshot.token, capture, revision({ revision: 2 }))).toBe(true);
+    expect(controller.snapshot()).toMatchObject({
+      listState: "ready",
+      snapshotState: "ready",
+      list: historyList(),
+      selected: revision({ revision: 2 }),
+    });
+  });
+
+  it("T7-R1-03 copies the baseline passed to select", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const request = controller.select(1, capture);
+    capture.acceptedSource = "two";
+
+    expect(controller.acceptSnapshot(request.token, baseline(), revision())).toBe(true);
+  });
+
+  it.each(["remote-apply", "reload", "mutation", "terminal", "delete"] as const)("T7-R1-03 invalidates both streams for %s", (reason) => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const list = controller.open(capture);
+    const snapshot = controller.select(1, capture);
+    const before = controller.snapshot();
+
+    controller.invalidate(reason);
+
+    expect(list.signal.aborted).toBe(true);
+    expect(snapshot.signal.aborted).toBe(true);
+    expect(controller.acceptList(list.token, capture, historyList())).toBe(false);
+    expect(controller.failSnapshot(snapshot.token, capture, { status: 500, code: "INTERNAL_ERROR" })).toBe(false);
+    expect(controller.snapshot()).toEqual({ ...before, epoch: before.epoch + 1 });
+  });
+
+  it.each([
+    ["all", baseline({ version: "g.2", updatedAt: "2026-09-15T00:00:01.000Z" })],
+    ["snapshot-only", baseline({ acceptedSource: "two" })],
+    ["none", baseline({ generation: "g.2", version: "g.2" })],
+  ] as const)("T7-R1-03 retires in-flight streams for %s retention", (expected, next) => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const list = controller.open(capture);
+    const snapshot = controller.select(1, capture);
+
+    expect(controller.retainAfterApply(capture, next)).toBe(expected);
+    expect(list.signal.aborted).toBe(true);
+    expect(snapshot.signal.aborted).toBe(true);
+    expect(controller.acceptList(list.token, capture, historyList())).toBe(false);
+    expect(controller.acceptSnapshot(snapshot.token, capture, revision())).toBe(false);
+    expect(controller.snapshot()).toEqual({
+      epoch: 1,
+      listState: "idle",
+      snapshotState: "idle",
+      list: null,
+      selected: null,
+      failure: null,
+    });
+  });
+
+  it("T7-R1-02 treats an acceptedSource-only change as snapshot-only retention", () => {
+    const { capture, controller } = settleHistory();
+    const selected = controller.snapshot().selected;
+
+    expect(controller.retainAfterApply(capture, baseline({ acceptedSource: "two" }))).toBe("snapshot-only");
+    expect(controller.snapshot()).toMatchObject({
+      listState: "stale",
+      snapshotState: "ready",
+      list: historyList(),
+      selected,
+      failure: null,
+    });
+  });
+
+  it("T7-R1-01 retires an outer list replacement when its abort listener starts a newer request", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const first = controller.open(capture);
+    let nested: ReturnType<typeof controller.open> | undefined;
+    first.signal.addEventListener("abort", () => {
+      nested = controller.open(capture);
+    });
+
+    const outer = controller.open(capture);
+    if (nested === undefined) throw new Error("replacement did not run from the abort listener");
+
+    expect(outer.signal.aborted).toBe(true);
+    expect(nested.signal.aborted).toBe(false);
+    expect(controller.acceptList(outer.token, capture, historyList())).toBe(false);
+    expect(controller.acceptList(nested.token, capture, historyList())).toBe(true);
+  });
+
+  it("T7-R1-01 retires an outer snapshot replacement when its abort listener starts a newer request", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const first = controller.select(1, capture);
+    let nested: ReturnType<typeof controller.select> | undefined;
+    first.signal.addEventListener("abort", () => {
+      nested = controller.select(2, capture);
+    });
+
+    const outer = controller.select(3, capture);
+    if (nested === undefined) throw new Error("replacement did not run from the abort listener");
+
+    expect(outer.signal.aborted).toBe(true);
+    expect(nested.signal.aborted).toBe(false);
+    expect(controller.acceptSnapshot(outer.token, capture, revision({ revision: 3 }))).toBe(false);
+    expect(controller.acceptSnapshot(nested.token, capture, revision({ revision: 2 }))).toBe(true);
+  });
+
+  it("T7-R1-01 prevents invalidation and retention listeners from accepting stale data", () => {
+    const capture = baseline();
+    const invalidationController = createHistoryController();
+    const invalidated = invalidationController.open(capture);
+    let invalidationAccepted: boolean | undefined;
+    invalidated.signal.addEventListener("abort", () => {
+      invalidationAccepted = invalidationController.acceptList(invalidated.token, capture, historyList());
+    });
+
+    invalidationController.invalidate("remote-apply");
+
+    expect(invalidationAccepted).toBe(false);
+    expect(invalidationController.snapshot()).toEqual({
+      epoch: 1,
+      listState: "loading",
+      snapshotState: "idle",
+      list: null,
+      selected: null,
+      failure: null,
+    });
+
+    const retentionController = createHistoryController();
+    const retained = retentionController.open(capture);
+    let retentionAccepted: boolean | undefined;
+    retained.signal.addEventListener("abort", () => {
+      retentionAccepted = retentionController.acceptList(retained.token, capture, historyList());
+    });
+
+    expect(retentionController.retainAfterApply(capture, baseline({ version: "g.2", updatedAt: "2026-09-15T00:00:01.000Z" }))).toBe("all");
+    expect(retentionAccepted).toBe(false);
+    expect(retentionController.snapshot()).toEqual({
+      epoch: 1,
+      listState: "idle",
+      snapshotState: "idle",
+      list: null,
+      selected: null,
+      failure: null,
+    });
+  });
+
+  it("T7-R1-01 installs terminal presentation before destroy abort listeners run", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    const list = controller.open(capture);
+    const snapshot = controller.select(1, capture);
+    let listAbortState: ReturnType<typeof controller.snapshot> | undefined;
+    let snapshotAbortState: ReturnType<typeof controller.snapshot> | undefined;
+    list.signal.addEventListener("abort", () => {
+      listAbortState = controller.snapshot();
+    });
+    snapshot.signal.addEventListener("abort", () => {
+      snapshotAbortState = controller.snapshot();
+    });
+
+    controller.destroy();
+
+    const terminal = controller.snapshot();
+    expect(terminal).toEqual({
+      epoch: 1,
+      listState: "idle",
+      snapshotState: "idle",
+      list: null,
+      selected: null,
+      failure: null,
+    });
+    expect(listAbortState).toEqual(terminal);
+    expect(snapshotAbortState).toEqual(terminal);
+  });
+
+  it("T7-R1-03 returns aborted signals without changing state after destroy", () => {
+    const controller = createHistoryController();
+    const capture = baseline();
+    controller.destroy();
+    const terminal = controller.snapshot();
+
+    const list = controller.open(capture);
+    const snapshot = controller.select(1, capture);
+
+    expect(list.signal.aborted).toBe(true);
+    expect(snapshot.signal.aborted).toBe(true);
+    expect(controller.snapshot()).toEqual(terminal);
   });
 });

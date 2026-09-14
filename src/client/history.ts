@@ -189,12 +189,15 @@ export function createHistoryController(): HistoryController {
   let snapshotRequest: PendingRequest | undefined;
   let destroyed = false;
 
-  const retireRequests = (): void => {
-    listRequest?.abort.abort();
-    snapshotRequest?.abort.abort();
+  const retireRequests = (finalize: (current: HistoryControllerSnapshot) => HistoryControllerSnapshot): void => {
+    const current = state;
+    const listAbort = listRequest?.abort;
+    const snapshotAbort = snapshotRequest?.abort;
     listRequest = undefined;
     snapshotRequest = undefined;
-    state = { ...state, epoch: state.epoch + 1 };
+    state = { ...finalize(current), epoch: current.epoch + 1 };
+    listAbort?.abort();
+    snapshotAbort?.abort();
   };
 
   const matches = (request: PendingRequest | undefined, token: number, capture: BaselineCapture): boolean => (
@@ -215,7 +218,7 @@ export function createHistoryController(): HistoryController {
       const token = ++listToken;
       if (destroyed) return retiredRequest(token);
 
-      listRequest?.abort.abort();
+      const previous = listRequest;
       const abort = new AbortController();
       listRequest = { token, epoch: state.epoch, capture: { ...capture }, abort };
       state = {
@@ -224,6 +227,7 @@ export function createHistoryController(): HistoryController {
         list: null,
         failure: state.failure?.target === "list" ? null : state.failure,
       };
+      previous?.abort.abort();
       return { token, signal: abort.signal };
     },
     acceptList(token, capture, value) {
@@ -247,7 +251,7 @@ export function createHistoryController(): HistoryController {
       const token = ++snapshotToken;
       if (destroyed) return retiredRequest(token);
 
-      snapshotRequest?.abort.abort();
+      const previous = snapshotRequest;
       const abort = new AbortController();
       snapshotRequest = { token, epoch: state.epoch, capture: { ...capture }, abort };
       state = {
@@ -256,6 +260,7 @@ export function createHistoryController(): HistoryController {
         selected: null,
         failure: state.failure?.target === "snapshot" ? null : state.failure,
       };
+      previous?.abort.abort();
       return { token, signal: abort.signal };
     },
     acceptSnapshot(token, capture, value) {
@@ -277,7 +282,7 @@ export function createHistoryController(): HistoryController {
     },
     invalidate(_reason) {
       if (destroyed) return;
-      retireRequests();
+      retireRequests((current) => current);
     },
     retainAfterApply(previous, next) {
       if (destroyed) return "none";
@@ -288,17 +293,16 @@ export function createHistoryController(): HistoryController {
       const retainedSnapshot = state.selected;
       const retention = previous.generation !== next.generation
         ? "none"
-        : previous.contentRevision !== next.contentRevision
+        : previous.contentRevision !== next.contentRevision || previous.acceptedSource !== next.acceptedSource
           ? "snapshot-only"
           : "all";
-
-      retireRequests();
+      let finalState: HistoryControllerSnapshot;
 
       if (retention === "none") {
-        state = { ...state, listState: "idle", snapshotState: "idle", list: null, selected: null, failure: null };
+        finalState = { ...state, listState: "idle", snapshotState: "idle", list: null, selected: null, failure: null };
       } else if (retention === "snapshot-only") {
         const retainSnapshot = snapshotState === "ready" && retainedSnapshot !== null;
-        state = {
+        finalState = {
           ...state,
           listState: retainedList === null ? "idle" : "stale",
           snapshotState: retainSnapshot ? "ready" : "idle",
@@ -307,7 +311,7 @@ export function createHistoryController(): HistoryController {
           failure: null,
         };
       } else {
-        state = {
+        finalState = {
           ...state,
           listState,
           snapshotState,
@@ -316,13 +320,20 @@ export function createHistoryController(): HistoryController {
         };
       }
 
+      retireRequests(() => finalState);
       return retention;
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      retireRequests();
-      state = { ...state, listState: "idle", snapshotState: "idle", list: null, selected: null, failure: null };
+      retireRequests((current) => ({
+        ...current,
+        listState: "idle",
+        snapshotState: "idle",
+        list: null,
+        selected: null,
+        failure: null,
+      }));
     },
   };
 }
