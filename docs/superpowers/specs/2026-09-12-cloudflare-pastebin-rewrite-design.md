@@ -6,6 +6,7 @@
 
 修订记录：
 
+* 2026-09-14：落实 canonical plan review round 1 的 binding corrections：受控 React state 保持唯一 form state方案，删除未使用的 `react-hook-form`/`@hookform/resolvers` pins；password form接受零或一个字段；加入唯一 automated axe runner `@axe-core/playwright@4.13.0`；明确 browser/direct OPTIONS 405、branded browser evidence与四类 manual accessibility release gates；补入 ordinary lazy adapter ownership。此前全部修订、既定 research choices及未受影响的 KV/password/view-once/active-HTML/API/MCP contract不变。
 * 2026-09-14：落实 React/sync spec review round 3 的 R3-01..R3-02：为每个 derived-surface Retry补齐 local/source/display/host/parent/retry generation publication guard；让完整且严格验证的 terminal view-once response在 initial terminal commit恰好一次 settle originating action。此前全部修订、既定 research choices及未受影响的 KV/password/view-once/active-HTML/API/MCP contract不变。
 * 2026-09-14：落实 React/sync spec review round 2 的 R2-01..R2-08：分离 Use remote、autosync、confirmed Reload与 consumed local apply guards；让完整且严格验证的 retired view-once 200优先进入 terminal；补齐 derived-surface rollback、content mutation reconciliation、Delete result table、relative expiration uncertain rewrite与 password retry credential precedence。F01-F22、既定 research choices及未受影响的 KV/password/view-once/active-HTML/API/MCP contract不变。
 * 2026-09-14：落实 React/sync spec review round 1 的 F01-F22：删除 repeated-candidate 自动应用；补齐 terminal view-once、exact active deadline、local mutation failure、page-level mutation arbitration、history request invalidation、staged derived-surface apply、credential replacement、status timestamp、delete handoff与 `/md/:id` React ownership；补齐 `/read` ETag、bootstrap shape、pinned `use-mobile` source及 requirement traceability。既定 shadcn commit、Cloudflare non-push结论和所有未受影响的冻结 contract不变。
@@ -68,18 +69,17 @@ shadcn/ui source identity 固定如下，不能用 live registry output 替换 p
 ```json
 {
   "dependencies": {
-    "@hookform/resolvers": "5.9.1",
     "class-variance-authority": "0.7.1",
     "cn": "0.3.0",
     "lucide-react": "1.45.0",
     "radix-ui": "1.6.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-hook-form": "7.88.0",
     "tw-animate-css": "1.4.0",
     "zod": "4.6.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "26.4.1",
     "@types/react": "19.3.0",
@@ -94,6 +94,10 @@ shadcn/ui source identity 固定如下，不能用 live registry output 替换 p
 
 已有 test、Worker、Milkdown、Markdown、diff、Hono 和 MCP packages 仍按 lockfile 固定；不得以本表为理由删除它们。Node build environment 最低为 `22.12.0`。不直接增加 `clsx` 或 `tailwind-merge`，`cn@0.3.0` 是该 shadcn release 的固定直接 dependency。
 
+全部 form 使用受控 React state，`react-hook-form`、`@hookform/resolvers`、`useForm`、`Controller`和 `zodResolver`不属于本实现。只有未来出现受控 state 无法直接满足的具体 form/schema need，并先修改 binding spec 证明该需要时，才可考虑加入这些 packages 或 APIs。
+
+`@axe-core/playwright@4.13.0` 是唯一直接 axe runner devDependency，只用于 Playwright accessibility acceptance，不进入 production graph。2026-09-14 npm registry metadata记录其 license为 MPL-2.0、peer dependency为 `playwright-core >=1.0.0`；lockfile必须保留该 exact version并由现有 Playwright graph满足 peer。不得增加第二个 accessibility runner。
+
 ### 4.2 最小模块与文件 ownership
 
 | 文件或目录 | 唯一职责与 disposition |
@@ -107,7 +111,8 @@ shadcn/ui source identity 固定如下，不能用 live registry output 替换 p
 | `components.json` | shadcn materialization配置，style固定 `new-york-v4`、TSX和本地 aliases；它不替代 commit provenance pin，也不在 build时访问 registry。 |
 | `src/i18n.ts`、`src/source-data.ts` | 分别保留 dictionary/locale/date helpers与 exact UTF-8/base64 codec；React imports它们，不复制实现。 |
 | `src/client/main.tsx` | 在 mount前一次性解析 validated discriminated bootstrap、提取 exact source与 optional server-produced safe preview、读取当前 URL password，然后调用 `createRoot`；除 delete成功的 root handoff外，page identity变化依赖 full navigation。 |
-| `src/client/App.tsx` | 按 `create`、`paste`、`markdown`、`password`、`error` bootstrap variant选择唯一可见 React page tree；ordinary、consumed与 read-only `/md`是结构不同的 branch。 |
+| `src/client/App.tsx` | 按 `create`、`paste`、`markdown`、`password`、`error` bootstrap variant选择唯一 lazy React page tree；ordinary、consumed与 read-only `/md`是结构不同的 branch。App不调用 ordinary hook。 |
+| `src/client/pages/OrdinaryPage.tsx` | ordinary lazy branch的唯一 adapter；调用 `usePastePage`并把返回的 state/actions/panels传给 `OrdinaryPastePage`。非 ordinary branch不得 import它。 |
 | `src/client/components/app-sidebar.tsx` | 从 pinned `sidebar-11` 改造的 Document Workbench sidebar；只呈现真实 document modes、metadata 与操作，不保留 sample file tree。 |
 | `src/client/components/ui/{sidebar,sheet,breadcrumb,collapsible,dialog,tooltip,tabs,field,label,input,textarea,button,separator}.tsx` | 从同一 pinned registry materialize 的唯一官方 primitive source。`sidebar.tsx`删除未使用的 `SidebarMenuSkeleton` export及其 `Skeleton` import，因此不 materialize `skeleton.tsx`。未列出的 shadcn block/component 不得加入；内部 Radix composition 可保留这些 source 必需的 helper。 |
 | `src/client/hooks/use-mobile.tsx` | `sidebar.tsx`唯一允许的 product hook dependency，exact source为 pinned commit中的 `apps/v4/registry/new-york-v4/hooks/use-mobile.tsx`；只负责 mobile media query。 |
@@ -469,8 +474,8 @@ percent encoding 只是 URL wire representation，不是 password encryption。�
 ### 9.3 Browser page 与 direct representation
 
 * `GET /:id` 发现 protected paste 且 query 中完全没有 `password` 时，返回 200 password input page，不返回 title、format、expiry、content 或 protected 状态之外的信息。
-* input form `POST /:id` 使用 `application/x-www-form-urlencoded`，server 校验 body password。成功返回 HTTP 302，`Location` 是同一路径，仅带一个由 `URLSearchParams` 生成的 `?password=...`。该 POST 不消费 view-once。
-* form password missing/wrong 返回 403 并重新渲染带 inline error 的 input page。
+* input form `POST /:id` 使用 `application/x-www-form-urlencoded`。body只允许零或一个 `password` field；duplicate `password`或任何 unknown field返回422。零个 field时把 absent credential传给 authorization，不把它判为 schema error。成功返回 HTTP 302，`Location` 是同一路径，仅带一个由 `URLSearchParams` 生成的 `?password=...`。该 POST 不消费 view-once。
+* absent或一个 present wrong/empty form password返回403并重新渲染带 inline error 的 input page。
 * `GET /:id?password=`或一个 present wrong query返回403，不退回无错误 input page。任何 duplicate `password` query在既定 route、ID、coherent-read与 logical-expiry顺序后、credential comparison前统一返回 `400 AMBIGUOUS_PASSWORD`，无论 paste是否 protected，也不把其中任一值当作 credential。
 * protected `/raw/:id`、`/html/:id`、`/md/:id`、`/file/:id` 只接受唯一 query password。缺失或一个 present wrong/empty credential都直接返回403 plaintext error，不接受 header替代；`/md/:id`成功时仍返回 React shell。
 * unprotected paste 在确认 query 中至多有一个 `password` 后忽略其值；duplicate query同样返回 `400 AMBIGUOUS_PASSWORD`。API和所有 direct representation使用完全相同的 duplicate-query rule。
@@ -551,7 +556,7 @@ KV read-then-delete 不建立全球 ownership。两个 region 可能都读到 st
 * dynamic application shell、API 和 representation response，包括 304 与所有 error，使用 `Cache-Control: no-store`。Vite assets 使用 content-hashed filename 与 `Cache-Control: public, max-age=31536000, immutable`。
 * API success/error 为 `application/json; charset=utf-8`。React application shell 和 `/md` document 为 `text/html; charset=utf-8`。除 `/html/:id` 外的 browser HTML response 增加 `X-Content-Type-Options: nosniff`。
 * 注册 route 的 unsupported method 返回 405 并带准确 `Allow`。不存在 route 返回 404。
-* 每个 GET route 都显式支持 HEAD。HEAD 执行 existence、schema、expiry 与 password 校验并返回同 GET 的 status 和 representation headers，不返回 body、不消费 view-once。只有 `GET|HEAD /api/pastes/:id` 为计算 strong response ETag 而序列化 selected representation bytes；其他 HEAD 不生成 representation body。OPTIONS 不校验 password、不消费。
+* 每个 GET route 都显式支持 HEAD。HEAD 执行 existence、schema、expiry 与 password 校验并返回同 GET 的 status 和 representation headers，不返回 body、不消费 view-once。只有 `GET|HEAD /api/pastes/:id` 为计算 strong response ETag 而序列化 selected representation bytes；其他 HEAD 不生成 representation body。Browser/direct routes `/`、`/:id`、`/raw/:id`、`/html/:id`、`/md/:id`和 `/file/:id`不注册 OPTIONS success；OPTIONS不读取、授权或消费，直接返回405。其准确 `Allow`分别为 `GET,HEAD`、`GET,HEAD,POST`及四个 direct routes的 `GET,HEAD`。API OPTIONS仍按12.5返回204，`/ip-trace` OPTIONS按第14节返回200，`/mcp` OPTIONS按15.1返回204。
 * 除 `/ip-trace` 外不发送 wildcard CORS。API 是 same-origin browser API，curl 不受 CORS 限制。
 
 `GET|HEAD /api/pastes/:id` 是 autosync 唯一 read route，不增加 sync endpoint、query mode、SSE 或 socket interface。它的 conditional contract 固定如下：
@@ -570,7 +575,7 @@ KV read-then-delete 不建立全球 ownership。两个 region 可能都读到 st
 |---|---|---|---|---|---|
 | `/` | `GET`,`HEAD` | 无 | 200 minimal React create shell，HEAD 无 body | 否 | 405；旧 `POST /` 不创建 |
 | `/:id` | `GET`,`HEAD` | optional unique `password` query | 200 minimal React paste shell；protected 且 query absent 时为 React password shell | 仅成功含正文的 GET | 400 duplicate query；403 wrong；404 missing/expired；503 incoherent |
-| `/:id` | `POST` | `application/x-www-form-urlencoded`，唯一 `password` | 302 到同路径的 encoded query | 否 | 403 missing/wrong；404；415；422 duplicate/invalid form |
+| `/:id` | `POST` | `application/x-www-form-urlencoded`，零或一个 `password`，无 unknown field | 302 到同路径的 encoded query | 否 | 403 absent/wrong；404；415；422 duplicate/unknown/invalid form |
 | `/raw/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 exact source，`text/plain; charset=utf-8` | GET | 400、403、404、503 |
 | `/html/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 exact source，`text/html; charset=utf-8` | GET | 400、403、404、503；错误 body 是 `text/plain` |
 | `/md/:id` | `GET`,`HEAD` | protected 时必须 unique query password | 200 minimal read-only React shell，内含 server-produced inert safe Markdown fragment与 exact source；`text/html; charset=utf-8`；不 mount controlled sync或发第二次 content read | GET | 400、403、404、500 render failure、503 |
@@ -1386,7 +1391,7 @@ theme control的 exact preference states为 `system`、`light`、`dark`，初始
 
 ### 17.13 Responsive、keyboard 与 accessibility
 
-支持发布时 Chrome、Edge、Firefox、Safari最近两个 major。自动验收覆盖 Chromium、Firefox和WebKit，另在可用的 current stable Edge和Safari做 smoke。
+支持发布时 Chrome、Edge、Firefox、Safari各最近两个 major。Playwright bundled Chromium、Firefox和WebKit自动验收是 engine coverage，不得记作 actual branded Chrome、Edge或Safari evidence；Playwright Firefox也不得代替 release-time branded Firefox版本行。每次 release必须另有上述四个产品各恰好两个目标 major的 machine-readable rows和版本证据。Chrome、Edge、Firefox任一 row缺失、failed或 unavailable均阻止 release。只有 actual Safari可在对应 macOS runner确实不可用时记录 `not-available`；该例外不把 Windows称为 Safari运行环境，也不替代任何 manual accessibility category。
 
 * semantic heading、form、nav、main、article、button和 label；不得用 clickable `div`；每个 input有visible Label，error由 `aria-describedby`或 `aria-errormessage`关联，explanation只由 HelpTrigger关联；
 * official Tabs遵守 WAI-ARIA automatic activation，Left/Right、Home/End、roving focus和正常 Tab行为；nested tab groups各自拥有 state，unmount清理；
@@ -1397,7 +1402,7 @@ theme control的 exact preference states为 `system`、`light`、`dark`，初始
 * `prefers-reduced-motion: reduce`取消非必要 transition、Sheet/Dialog animation和 status color transition，功能不依赖 motion；
 * Crepe失败时 source Textarea和完整 draft仍可键盘操作并可 retry；large diff仍在 worker执行；
 * 320 CSS px没有 page-level horizontal overflow，document/editor全宽，Sheet关闭后不留 reserved rail space；
-* automated axe、keyboard和 focus-order checks不能替代 manual screen-reader、contrast、zoom/reflow与 touch smoke。
+* `@axe-core/playwright` AxeBuilder、keyboard和 focus-order checks不能替代 manual screen-reader、contrast、200% zoom/reflow与 physical-touch smoke。四类 manual evidence各自必须有 date、environment/tool exact version、tester、artifact和 `passed` status；缺失、failed或 unavailable均阻止 release。Safari `not-available` row不豁免其中任何一类，可改用实际可用的平台、辅助技术和物理 touch设备完成，但不得伪造 pass。
 
 ## 18．Limits 与资源预算
 
@@ -1443,8 +1448,8 @@ Worker upload 必须低于64 MiB uncompressed，top-level startup低于1秒，is
 5. `src/client/autosave.test.ts`保留现有完整 fake-clock suite并加入 acceptedSource acknowledgement；`src/client/paste-sync.test.ts`用同一可注入 fake monotonic clock、controllable promises、fake AbortController和 explicit online/offline events验证第17.7至17.9节每个 transition；mutation coordinator和 history request token另以 controllable responses覆盖第17.10节。不得依赖真实3秒或5分钟 sleep。
 6. React component tests直接 mount `App`全部 bootstrap variants，验证 semantic roles、Tabs keyboard、Sheet/Dialog focus、HelpTrigger hover/focus/click/Escape/outside、OperationStatus、closed ActionKey、controller cleanup、staged remote apply fallback、read-only `/md`和 consumed branch exact local capabilities及零 business hooks。mount -> unmount -> mount模拟 StrictMode lifecycle但 production不依赖 StrictMode。
 7. `src/build.test.ts`读取 Vite manifest和 production bytes，验证第18节 gzip/raw budgets、initial/lazy reachability、hashed filenames、无 sourcemap、没有 eager Crepe/micromark/diff、无 banned package和 duplicate browser copy；同时按 exact materialized source set检查 pinned provenance comments、`use-mobile.tsx`、pruned `SidebarMenuSkeleton`/`skeleton.tsx`、`THIRD_PARTY_NOTICES.md`及 package exact pins。
-8. Playwright必须连接真实 `wrangler dev --local`进程，而不是 mocked page server。Chromium、Firefox、WebKit运行 create、password redirect、ordinary read/edit、所有 React mode refresh、read-only `/md` hard refresh、Crepe、history/diff、settings/password、copy/wrap/download、delete root handoff、view-once local-only、autosync、i18n/theme、keyboard/help和320 px journeys。active HTML test只写 same-origin marker并确认 query visibility，不外发数据。
-9. current-two-major matrix指 release时 Chrome、Edge、Firefox、Safari各最近两个 major。CI自动跑对应可获得的 Playwright engine versions；actual current stable Edge与Safari做 manual smoke并记录 exact version。机器不存在的 actual Safari是唯一允许 skip的 manual row，仍必须有 WebKit覆盖。
+8. Playwright必须连接真实 `wrangler dev --local`进程，而不是 mocked page server。Chromium、Firefox、WebKit运行 create、password redirect、ordinary read/edit、所有 React mode refresh、read-only `/md` hard refresh、Crepe、history/diff、settings/password、copy/wrap/download、delete root handoff、view-once local-only、autosync、i18n/theme、keyboard/help和320 px journeys。`test/e2e/accessibility.spec.ts`必须直接使用 `@axe-core/playwright@4.13.0`的 `AxeBuilder`，对 create、password、error、ordinary text、ordinary Markdown、armed-view-once、consumed text、consumed Markdown、not-found、delete-uncertain和 read-only `/md`每个 application branch执行 WCAG 2 A/AA、2.1 A/AA及2.2 AA tags scan并要求零 violations。active HTML test只写 same-origin marker并确认 query visibility，不外发数据。
+9. current-two-major matrix指 release时 Chrome、Edge、Firefox、Safari各最近两个 major，四个产品各有恰好两个 target rows。实际 Chrome、Edge和 Firefox必须在预置对应 branded binary的 release runner上运行并记录 runtime exact version；历史 branded binary是 release prerequisite，不由 Playwright download提供。实际 Safari只在预置目标 Safari的 macOS runner上运行。bundled Chromium/Firefox/WebKit结果另记为 engine coverage，不能复用为 branded rows。Chrome、Edge、Firefox任一 row缺失或非 `passed`即失败；只有 Safari row可因对应 macOS runner unavailable记为 `not-available`，但仍保留 target major/version/source evidence且不得称为 pass。四类 manual accessibility rows独立要求全部 `passed`。
 
 ### 19.2 必测边界与 race
 
@@ -1490,6 +1495,7 @@ npm ci
 npm run build
 npx vitest run
 npx playwright test
+node scripts/verify-release-evidence.mjs
 npx wrangler types --check
 npx wrangler deploy --dry-run --outdir .wrangler-dist
 ```
@@ -1566,7 +1572,7 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | ID | 冻结需求 | 实现位置 | 可观察验收 |
 |---|---|---|---|
 | C01 | 只用一个 `PASTE_DB` KV，无其他协调存储 | 3、4、6、20 | Wrangler 仅一个 KV binding；dependency/config scan 无 DO、D1、R2、Queue；KV stale-read test明确允许 duplicate |
-| C02 | 第一个授权 content-bearing read 消费；HEAD/OPTIONS/错误不消费 | 10.1、12 | 10.1 所列八个 HTTP content-bearing 操作各测 first 200含 exact content、second 404；MCP `paste_get` 测 first success含 exact content、second `PASTE_NOT_FOUND` tool error；HEAD/OPTIONS/403 后仍可成功读取 |
+| C02 | 第一个授权 content-bearing read 消费；HEAD/OPTIONS/错误不消费 | 10.1、12 | 10.1 所列八个 HTTP content-bearing 操作各测 first 200含 exact content、second 404；MCP `paste_get` 测 first success含 exact content、second `PASTE_NOT_FOUND` tool error；browser/direct OPTIONS 405与准确Allow且零authorization/consume，API `/ip-trace` `/mcp`各自OPTIONS及HEAD/403后仍可成功读取 |
 | C03 | render/validate 后 delete，response 前完成 | 10.2 | injected render failure不 delete；delete rejection不含 content；成功事件顺序断言 render < delete < response |
 | C04 | view-once content response立即进入不可恢复的 local-only React能力边界 | 10.3、17.4、17.5、17.8、17.10 | copy/wrap/raw-source/safe preview/UTF-8 download/Blob HTML逐项通过；autosync、explicit Reload与 content reconcile的 current及 edit/mutation/deadline-retired valid 200均先移除全部 server controls/URLs/hooks，再以独立 terminal-local token apply或保留两个 exact sources；action-bound response在 initial terminal commit恰好一次 settle origin且无 pending；aborted/malformed control不 terminal，之后除 hashed renderer asset外零 business request；API/MCP在首次 read前仍允许 mutation，history禁止 |
 | C05 | custom ID 只做 KV checks，接受 race | 7.2 | fake concurrent negative checks可产生两个 success/last write wins，文案不声称 atomic |
@@ -1593,10 +1599,10 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | C26 | custom ID regex、case-sensitive、reserved、immutable、可复用 | 5.1 | boundary/reserved/case tests；update customId 422；`a`与`A`是不同 keys |
 | C27 | English/简体中文，browser language选择，manual switch | 17.12 | navigator zh/en fixtures与 switch；visible/help/status/action全部 dictionary parity |
 | C28 | `system`/`light`/`dark` document-only theme | 17.12 | matchMedia变化、三态切换与切回system通过；storage为空；new document重置；不影响 `/html` |
-| C29 | 当前四浏览器最近两个 major、responsive/accessibility | 17.13、19 | Playwright三 engine、actual Edge/Safari smoke、320 px Sheet、keyboard、axe/manual checks通过 |
+| C29 | 当前四浏览器最近两个 major、responsive/accessibility | 17.13、19 | Playwright三 engine另行通过；actual branded Chrome/Edge/Firefox/Safari各恰好两个 release-time major rows，Chrome/Edge/Firefox全为passed且只有Safari可not-available；320 px Sheet、keyboard、每个application branch的AxeBuilder scan及四类manual rows通过 |
 | C30 | Wrangler name、唯一 binding、开发 placeholder | 20 | config exact name/main/date/assets；只有一个 `PASTE_DB`，开发 ID 为明确 placeholder；local smoke 与 dry-run exit 0；不执行 deploy |
 | C31 | 不保留 legacy API 与 destructive GET | 3、12.2 | method/path contract tests均为404/405且无 KV mutation |
-| C32 | protected main GET无 password呈 React input；form POST校验并302到 query | 9.3、17.1、17.4 | GET 200 shell无 content；wrong POST 403 React inline error；correct POST 302 Location exact encoded target |
+| C32 | protected main GET无 password呈 React input；form POST校验并302到 query | 9.3、17.1、17.4 | GET 200 shell无 content；POST零 field与一个wrong field均403 React inline error；duplicate/unknown field 422；一个correct field 302 Location exact encoded target |
 | C33 | HTML JavaScript可读取和外传 query password，用户接受 | 9.3、16.2、22 | browser test确认 `location.search` 可读；无 CSP/sandbox阻止 fetch；风险文档存在 |
 | C34 | redirect后 password同时在 URL与 page-scoped memory，请求继续附带 | 9.4、17.1、17.5 | URL query存在；React actions无需再输入；API carrier含 decoded exact password |
 | C35 | `/api/pastes/:id/read`全部成功 method保留 current-version ETag，strong validator只属于 resource GET | 12.1、12.5、13.2 | GET、HEAD、POST `/read`均断言 `ETag: "<version>"`且无304；只有 `GET|HEAD /api/pastes/:id`产生/比较 SHA-256 response ETag |
@@ -1631,7 +1637,7 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | FE06 | 所有 explanation/warning/limitation只在 accessible question-mark help | 17.3、19.2 | closed-page visible text scan无 banned prose；hover/focus/click/touch/Escape/outside/name/relationship和不依赖 help的 form journey通过 |
 | FE07 | 常驻 OperationStatus分开 autosave、autosync、network、last-action并只显示对应真实 event time | 17.11 | initial clean/waiting/idle无 timestamp；stateChangedAt/checkedAt/appliedAt/confirmedAt等选择准确，failure-after-success显示 failure time，remote clean不改 confirmedAt；localized `<time>`与 polite incremental announcement通过 |
 | FE08 | closed ActionKey的 fallible operation有原位持久反馈，pure toggle与不可观测 navigation无伪 outcome | 17.3、17.11 | union/dictionary exhaustiveness含 content-reconcile与 use-consumed-response；non-terminal Reload/Use remote及 terminal local apply按各自 commit settle，valid terminal Reload/Reconcile在 initial terminal commit以对应 localized message恰好一次结束且无 pending；Keep current不 resettle，Use consumed response只写自己的 action；Help/Sidebar/tab/locale/theme/reveal/wrap等不改 Last action；无额外 request或 popup feedback |
-| FE09 | en/zh-CN、document-only theme、reduced motion、WCAG 2.2 AA与 current-two-major matrix | 17.12、17.13、19 | dictionary parity、lang/title/date、storage空、contrast/focus/44 px/reflow、Playwright engines和 actual browser记录通过 |
+| FE09 | en/zh-CN、document-only theme、reduced motion、WCAG 2.2 AA与 current-two-major matrix | 17.12、17.13、19 | dictionary parity、lang/title/date、storage空、contrast/focus/44 px/reflow、Playwright engines、branch-complete AxeBuilder scans、四类manual passed evidence及actual branded browser 8-row matrix通过 |
 | FE10 | exact materialized template/dependency source set履行 license/notice义务 | 4.1、4.2、19 | adapted source和 pinned `apps/v4/registry/new-york-v4/hooks/use-mobile.tsx` provenance准确；`SidebarMenuSkeleton`与 `skeleton.tsx`不存在；`THIRD_PARTY_NOTICES.md` source set、shadcn MIT、direct MIT/ISC、Apache-2.0及 upstream NOTICE完整 |
 
 ## 22．明确接受的风险与平台限制
