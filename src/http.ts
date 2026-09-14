@@ -218,6 +218,7 @@ function jsonStringLimitError(field: string): PasteError {
     case "expiration":
       return validationError("expiration", "Must be permanent, at least 60 seconds, or a timezone-bearing RFC3339 timestamp.");
     case "password":
+    case "newPassword":
       return validationError("password", "Must be empty or 1 to 128 visible ASCII characters.");
     case "customId":
       return validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
@@ -323,6 +324,7 @@ const httpJsonPolicy: StrictJsonParsePolicy = {
     ["format", "markdown".length],
     ["expiration", 29],
     ["password", 128],
+    ["newPassword", 128],
     ["viewOnce", 0],
     ["customId", 64],
   ]),
@@ -634,7 +636,7 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
-function serializePasteResource(loaded: LoadedPaste): Uint8Array {
+function serializePasteResource(loaded: LoadedPaste): Uint8Array<ArrayBuffer> {
   const summary = loaded.summary;
   const value: PasteResource = {
     id: summary.id,
@@ -664,12 +666,8 @@ function serializePasteResource(loaded: LoadedPaste): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(value));
 }
 
-function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
-  return new Uint8Array(new Uint8Array(bytes).buffer);
-}
-
-async function strongResponseEtag(bytes: Uint8Array): Promise<`"sha256-${string}"`> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ownedBytes(bytes)));
+async function strongResponseEtag(bytes: Uint8Array<ArrayBuffer>): Promise<`"sha256-${string}"`> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return `"sha256-${base64Url(digest)}"`;
 }
 
@@ -692,7 +690,7 @@ async function pasteResourceResponse(
   }
   if (request.method === "HEAD") return new Response(null, { headers });
   if (loaded.summary.viewOnce) await service.consume(loaded);
-  return new Response(ownedBytes(bytes), { headers });
+  return new Response(bytes, { headers });
 }
 
 function errorResponse(error: PasteError): Response {

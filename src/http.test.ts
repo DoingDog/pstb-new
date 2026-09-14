@@ -2120,6 +2120,38 @@ describe("HTTP slice 1", () => {
     });
   });
 
+  describe("view-once body ownership", () => {
+    it("prepares final response bytes before consuming a view-once paste", async () => {
+      const paste = await createJsonPaste({ content: "prepared before consume", viewOnce: true, expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      const deleteOriginal = database.delete.bind(database);
+      let consumed = false;
+      const remove = vi.spyOn(database, "delete").mockImplementation(async (...args) => {
+        consumed = true;
+        return deleteOriginal(...args);
+      });
+      const nativeUint8Array = Uint8Array;
+      const guardedUint8Array = new Proxy(nativeUint8Array, {
+        construct(target, argumentsList, newTarget) {
+          if (consumed) throw new Error("response bytes allocated after consume");
+          return Reflect.construct(target, argumentsList, newTarget);
+        },
+      });
+
+      try {
+        vi.stubGlobal("Uint8Array", guardedUint8Array);
+        const response = await request(`/api/pastes/${paste.id}`);
+        vi.unstubAllGlobals();
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ id: paste.id, content: "prepared before consume" });
+      } finally {
+        vi.unstubAllGlobals();
+        remove.mockRestore();
+        await deletePaste(paste.id);
+      }
+    });
+  });
+
   describe("API method matrix", () => {
     it("returns the exact API method matrix and Allow values", async () => {
       const apiAllow = [
@@ -2289,6 +2321,101 @@ describe("HTTP slice 1", () => {
         }
       } finally {
         await deletePaste(paste.id);
+      }
+    });
+
+    it("stops streamed newPassword at its first excess code unit", async () => {
+      let pulls = 0;
+      let cancelled = false;
+      let releaseCompletion!: () => void;
+      const completion = new Promise<void>((resolve) => { releaseCompletion = resolve; });
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          pulls += 1;
+          if (pulls === 1) {
+            controller.enqueue(new TextEncoder().encode(`{"newPassword":"${"x".repeat(128)}`));
+          } else if (pulls === 2) {
+            controller.enqueue(new TextEncoder().encode("x"));
+          } else {
+            await completion;
+            controller.enqueue(new TextEncoder().encode('"}'));
+            controller.close();
+          }
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }, { highWaterMark: 0 });
+      const responsePromise = createHttpApp(env as unknown as Env).fetch(new Request("https://paste.test/api/pastes/missing/password", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body,
+      }));
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        const response = await Promise.race([
+          responsePromise,
+          new Promise<Response>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error("newPassword parser waited past its first excess code unit")), 100); }),
+        ]);
+        expect(response.status).toBe(422);
+        await expect(response.json()).resolves.toEqual({
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "One or more fields are invalid.",
+            details: { fields: [{ field: "password", message: "Must be empty or 1 to 128 visible ASCII characters." }] },
+          },
+        });
+        expect(pulls).toBe(2);
+        expect(cancelled).toBe(true);
+      } finally {
+        if (deadline !== undefined) clearTimeout(deadline);
+        releaseCompletion();
+        await responsePromise;
+      }
+    });
+
+    it("applies password-domain validation to newPassword without validating opaque current-password candidates", async () => {
+      for (const [newPassword, status] of [
+        ["!~".repeat(64), 200],
+        ["x".repeat(129), 422],
+        [String.fromCharCode(0x1f), 422],
+        ["é", 422],
+      ] as const) {
+        const paste = await createJsonPaste({ content: "password candidate", expiration: "permanent" });
+        try {
+          const response = await request(`/api/pastes/${paste.id}/password`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ newPassword }),
+          });
+          expect(response.status).toBe(status);
+          if (status === 422) {
+            await expect(response.json()).resolves.toEqual({
+              error: {
+                code: "VALIDATION_FAILED",
+                message: "One or more fields are invalid.",
+                details: { fields: [{ field: "password", message: "Must be empty or 1 to 128 visible ASCII characters." }] },
+              },
+            });
+          }
+        } finally {
+          await deletePaste(paste.id);
+        }
+      }
+
+      for (const password of [String.fromCharCode(0x1f), "x".repeat(129)]) {
+        const protectedPaste = await createJsonPaste({ content: "protected password candidate", password: "right", expiration: "permanent" });
+        try {
+          const response = await request(`/api/pastes/${protectedPaste.id}/password`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ password, newPassword: "next" }),
+          });
+          expect(response.status).toBe(403);
+        } finally {
+          await deletePaste(protectedPaste.id);
+        }
       }
     });
 
