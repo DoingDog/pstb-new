@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApp } from "./http";
 import { renderCreatePage } from "./render";
-import type { Env, MutationResult, PasteSummary } from "./types";
+import type { Env, MutationResult, PasteResource, PasteSummary } from "./types";
 
 const wireBodyLimit = 67_108_864;
 
@@ -21,6 +21,22 @@ declare global {
 
 function request(path: string, init?: RequestInit): Promise<Response> {
   return exports.default.fetch(new Request(`https://paste.test${path}`, init));
+}
+
+async function createJsonPaste(input: Record<string, unknown>): Promise<PasteSummary> {
+  const response = await request("/api/pastes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  expect(response.status).toBe(201);
+  return await response.json() as PasteSummary;
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 function readBootstrap(html: string): unknown {
@@ -690,16 +706,16 @@ describe("HTTP slice 1", () => {
     });
   });
 
-  it("exposes only the canonical mutation method contract for a paste resource", async () => {
+  it("uses the API method matrix for a paste resource", async () => {
     const options = await request("/api/pastes/example", { method: "OPTIONS" });
     expect(options.status).toBe(204);
-    expect(options.headers.get("allow")).toBe("PUT,PATCH,DELETE,OPTIONS");
+    expect(options.headers.get("allow")).toBe("GET,HEAD,PUT,PATCH,DELETE,OPTIONS");
     expect(options.headers.get("cache-control")).toBe("no-store");
     expect(await options.text()).toBe("");
 
-    const method = await request("/api/pastes/example", { method: "GET" });
+    const method = await request("/api/pastes/example", { method: "POST" });
     expect(method.status).toBe(405);
-    expect(method.headers.get("allow")).toBe("PUT,PATCH,DELETE,OPTIONS");
+    expect(method.headers.get("allow")).toBe("GET,HEAD,PUT,PATCH,DELETE,OPTIONS");
     expect(method.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(method.headers.get("cache-control")).toBe("no-store");
     await expect(method.json()).resolves.toEqual({
@@ -1968,5 +1984,512 @@ describe("HTTP slice 1", () => {
     } finally {
       await Promise.all(ids.map((id) => deletePaste(id)));
     }
+  });
+
+  describe("strong conditional validator", () => {
+    it("uses exact PasteResource bytes as the strong conditional validator", async () => {
+      const paste = await createJsonPaste({ content: "etag\r\n🙂", expiration: "permanent" });
+      try {
+        const first = await request(`/api/pastes/${paste.id}`);
+        expect(first.status).toBe(200);
+        const bytes = new Uint8Array(await first.clone().arrayBuffer());
+        const expected: PasteResource = {
+          id: paste.id,
+          title: paste.title,
+          format: paste.format,
+          viewOnce: paste.viewOnce,
+          protected: paste.protected,
+          createdAt: paste.createdAt,
+          updatedAt: paste.updatedAt,
+          expiresAt: paste.expiresAt,
+          expiration: paste.expiration.kind === "relative"
+            ? { kind: "relative", seconds: paste.expiration.seconds }
+            : { kind: paste.expiration.kind },
+          version: paste.version,
+          contentRevision: paste.contentRevision,
+          contentBytes: paste.contentBytes,
+          createdCountry: paste.createdCountry,
+          links: {
+            view: paste.links.view,
+            raw: paste.links.raw,
+            html: paste.links.html,
+            markdown: paste.links.markdown,
+            file: paste.links.file,
+          },
+          content: "etag\r\n🙂",
+        };
+        const expectedBytes = new TextEncoder().encode(JSON.stringify(expected));
+        expect(bytes).toEqual(expectedBytes);
+        const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        const etag = `"sha256-${base64Url(digest)}"`;
+        expect(first.headers.get("etag")).toBe(etag);
+        expect(await first.json()).toEqual(expected);
+
+        for (const validator of [etag, `W/${etag}`, `"other", W/${etag}`, "*"]) {
+          const response = await request(`/api/pastes/${paste.id}`, { headers: { "if-none-match": validator } });
+          expect(response.status).toBe(304);
+          expect(response.headers.get("etag")).toBe(etag);
+          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(response.headers.has("content-type")).toBe(false);
+          expect(response.headers.has("content-length")).toBe(false);
+          expect(await response.arrayBuffer()).toHaveProperty("byteLength", 0);
+        }
+
+        const headMatch = await request(`/api/pastes/${paste.id}`, {
+          method: "HEAD",
+          headers: { "if-none-match": etag },
+        });
+        expect(headMatch.status).toBe(304);
+        expect(await headMatch.arrayBuffer()).toHaveProperty("byteLength", 0);
+        const headMiss = await request(`/api/pastes/${paste.id}`, {
+          method: "HEAD",
+          headers: { "if-none-match": '"not-the-current-tag"' },
+        });
+        expect(headMiss.status).toBe(200);
+        expect(headMiss.headers.get("etag")).toBe(etag);
+        expect(await headMiss.arrayBuffer()).toHaveProperty("byteLength", 0);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it.each(['*, "tag"', '"a",', ',"a"', 'W/"unterminated', '"bad space"'])(
+      "reports BAD_REQUEST for malformed ordinary validator %s after authorization",
+      async (ifNoneMatch) => {
+        const paste = await createJsonPaste({ content: "protected", password: "right", expiration: "permanent" });
+        try {
+          const response = await request(`/api/pastes/${paste.id}?password=right`, { headers: { "if-none-match": ifNoneMatch } });
+          expect(response.status).toBe(400);
+          await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+        } finally {
+          await deletePaste(paste.id);
+        }
+      },
+    );
+
+    it("parses a literal backslash entity tag as a legal nonmatch", async () => {
+      const paste = await createJsonPaste({ content: "backslash", expiration: "permanent" });
+      try {
+        const response = await request(`/api/pastes/${paste.id}`, { headers: { "if-none-match": '"not\\tag"' } });
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ id: paste.id, content: "backslash" });
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it.each(['*, "tag"', '"a",', ',"a"', 'W/"unterminated', '"bad space"'])(
+      "ignores malformed validator %s while consuming a view-once GET",
+      async (ifNoneMatch) => {
+        const paste = await createJsonPaste({ content: "view once", viewOnce: true, expiration: "permanent" });
+        try {
+          const response = await request(`/api/pastes/${paste.id}`, { headers: { "if-none-match": ifNoneMatch } });
+          expect(response.status).toBe(200);
+          await expect(response.json()).resolves.toMatchObject({ id: paste.id, content: "view once" });
+          expect((await request(`/api/pastes/${paste.id}`)).status).toBe(404);
+        } finally {
+          await deletePaste(paste.id);
+        }
+      },
+    );
+
+    it("keeps view-once HEAD validator-blind without consumption", async () => {
+      const paste = await createJsonPaste({ content: "view once", viewOnce: true, expiration: "permanent" });
+      try {
+        const initialHead = await request(`/api/pastes/${paste.id}`, { method: "HEAD" });
+        const etag = initialHead.headers.get("etag");
+        expect(initialHead.status).toBe(200);
+        expect(etag).toMatch(/^"sha256-[A-Za-z0-9_-]{43}"$/u);
+        expect(await initialHead.arrayBuffer()).toHaveProperty("byteLength", 0);
+        for (const ifNoneMatch of [etag!, '"bad space"']) {
+          const response = await request(`/api/pastes/${paste.id}`, {
+            method: "HEAD",
+            headers: { "if-none-match": ifNoneMatch },
+          });
+          expect(response.status).toBe(200);
+          expect(response.headers.get("etag")).toBe(etag);
+          expect(await response.arrayBuffer()).toHaveProperty("byteLength", 0);
+        }
+        const get = await request(`/api/pastes/${paste.id}`, { headers: { "if-none-match": "*" } });
+        expect(get.status).toBe(200);
+        await expect(get.json()).resolves.toMatchObject({ id: paste.id, content: "view once" });
+        expect((await request(`/api/pastes/${paste.id}`)).status).toBe(404);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+  });
+
+  describe("API method matrix", () => {
+    it("returns the exact API method matrix and Allow values", async () => {
+      const apiAllow = [
+        ["/api/pastes/ID", "GET,HEAD,PUT,PATCH,DELETE,OPTIONS"],
+        ["/api/pastes/ID/settings", "GET,HEAD,PATCH,OPTIONS"],
+        ["/api/pastes/ID/password", "PUT,DELETE,OPTIONS"],
+        ["/api/pastes/ID/history", "GET,HEAD,OPTIONS"],
+        ["/api/pastes/ID/history/1", "GET,HEAD,OPTIONS"],
+        ["/api/pastes/ID/read", "GET,HEAD,POST,OPTIONS"],
+      ] as const;
+
+      for (const [template, allow] of apiAllow) {
+        const path = template.replace("ID", "matrix");
+        const options = await request(path, { method: "OPTIONS" });
+        expect(options.status, path).toBe(204);
+        expect(options.headers.get("allow"), path).toBe(allow);
+        expect(options.headers.get("cache-control"), path).toBe("no-store");
+        expect(await options.text(), path).toBe("");
+
+        const invalidMethod = path.endsWith("/read") ? "PATCH" : "POST";
+        const method = await request(path, { method: invalidMethod });
+        expect(method.status, path).toBe(405);
+        expect(method.headers.get("allow"), path).toBe(allow);
+        await expect(method.json(), path).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+      }
+    });
+  });
+
+  describe("settings API", () => {
+    it("uses strict SettingsBody schema, credentials, versions, and version ETags", async () => {
+      const paste = await createJsonPaste({ content: "settings", password: "right", expiration: "permanent" });
+      try {
+        for (const [body, field] of [
+          [{ password: "right" }, "settings"],
+          [{ password: "right", title: "title", unknown: true }, "unknown"],
+          [{ password: "right", viewOnce: "true" }, "viewOnce"],
+        ] as const) {
+          const response = await request(`/api/pastes/${paste.id}/settings`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          expect(response.status).toBe(422);
+          await expect(response.json()).resolves.toMatchObject({
+            error: { code: "VALIDATION_FAILED", details: { fields: [{ field }] } },
+          });
+        }
+
+        const query = await request(`/api/pastes/${paste.id}/settings?password=right`, {
+          headers: { "x-paste-password": "wrong" },
+        });
+        expect(query.status).toBe(200);
+        expect(query.headers.get("etag")).toBe(`"${paste.version}"`);
+        await expect(query.json()).resolves.toMatchObject({ id: paste.id, protected: true });
+
+        const header = await request(`/api/pastes/${paste.id}/settings`, {
+          headers: { "x-paste-password": "right" },
+        });
+        expect(header.status).toBe(200);
+        expect(header.headers.get("etag")).toBe(`"${paste.version}"`);
+
+        const head = await request(`/api/pastes/${paste.id}/settings?password=right`, { method: "HEAD" });
+        expect(head.status).toBe(200);
+        expect(head.headers.get("etag")).toBe(`"${paste.version}"`);
+        expect(await head.arrayBuffer()).toHaveProperty("byteLength", 0);
+
+        const updated = await request(`/api/pastes/${paste.id}/settings?password=wrong-query`, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            "if-match": `"${paste.version}"`,
+            "x-paste-password": "wrong-header",
+          },
+          body: JSON.stringify({ password: "right", version: paste.version, title: "changed", format: "markdown" }),
+        });
+        expect(updated.status).toBe(200);
+        const result = await updated.json() as MutationResult;
+        expect(result).toMatchObject({ changed: true, paste: { id: paste.id, title: "changed", format: "markdown" } });
+        expect(updated.headers.get("etag")).toBe(`"${result.paste.version}"`);
+
+        const ambiguousVersion = await request(`/api/pastes/${paste.id}/settings`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "if-match": '"legacy"' },
+          body: JSON.stringify({ password: "right", version: result.paste.version, title: "ignored" }),
+        });
+        expect(ambiguousVersion.status).toBe(400);
+        await expect(ambiguousVersion.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_VERSION" } });
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("defers duplicate password errors until coherent resource authority without writes", async () => {
+      const protectedPaste = await createJsonPaste({ content: "protected", password: "right", expiration: "permanent" });
+      const unprotectedPaste = await createJsonPaste({ content: "unprotected", expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      const put = vi.spyOn(database, "put");
+      const erase = vi.spyOn(database, "delete");
+      try {
+        const missing = await request("/api/pastes/missing?password=one&password=two", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: "new", password: "right" }),
+        });
+        expect(missing.status).toBe(404);
+
+        const wrongPassword = await request(`/api/pastes/${protectedPaste.id}?password=one&password=two`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "x-paste-password": "wrong" },
+          body: JSON.stringify({ content: "new", password: "wrong" }),
+        });
+        expect(wrongPassword.status).toBe(403);
+
+        const authorized = await request(`/api/pastes/${protectedPaste.id}?password=one&password=two`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json", "x-paste-password": "wrong" },
+          body: JSON.stringify({ content: "new", password: "right" }),
+        });
+        expect(authorized.status).toBe(400);
+        await expect(authorized.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_PASSWORD" } });
+
+        const duplicatePut = await request(`/api/pastes/${unprotectedPaste.id}?password=one&password=two`, {
+          method: "PUT",
+          headers: { "content-type": "text/plain; charset=utf-8" },
+          body: "changed",
+        });
+        expect(duplicatePut.status).toBe(400);
+        const duplicatePatch = await request(`/api/pastes/${unprotectedPaste.id}?password=one&password=two`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: "changed" }),
+        });
+        expect(duplicatePatch.status).toBe(400);
+        const duplicateDelete = await request(`/api/pastes/${unprotectedPaste.id}?password=one&password=two`, { method: "DELETE" });
+        expect(duplicateDelete.status).toBe(400);
+        expect(put).not.toHaveBeenCalled();
+        expect(erase).not.toHaveBeenCalled();
+        await expect(database.get(unprotectedPaste.id)).resolves.toBe("unprotected");
+      } finally {
+        put.mockRestore();
+        erase.mockRestore();
+        await deletePaste(protectedPaste.id);
+        await deletePaste(unprotectedPaste.id);
+      }
+    });
+  });
+
+  describe("password API", () => {
+    it("uses strict PasswordPutBody and PasswordDeleteBody schemas", async () => {
+      const paste = await createJsonPaste({ content: "password schema", expiration: "permanent" });
+      try {
+        for (const [method, body, field] of [
+          ["PUT", {}, "newPassword"],
+          ["PUT", { newPassword: "next", title: "unexpected" }, "title"],
+          ["PUT", { newPassword: false }, "newPassword"],
+          ["DELETE", { newPassword: "unexpected" }, "newPassword"],
+        ] as const) {
+          const response = await request(`/api/pastes/${paste.id}/password`, {
+            method,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          expect(response.status).toBe(422);
+          await expect(response.json()).resolves.toMatchObject({
+            error: { code: "VALIDATION_FAILED", details: { fields: [{ field }] } },
+          });
+        }
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("sets, changes, and clears passwords with body credential precedence and ETags", async () => {
+      const paste = await createJsonPaste({ content: "password lifecycle", expiration: "permanent" });
+      try {
+        const set = await request(`/api/pastes/${paste.id}/password`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ newPassword: "first", version: paste.version }),
+        });
+        expect(set.status).toBe(200);
+        const setResult = await set.json() as MutationResult;
+        expect(setResult).toMatchObject({ changed: true, paste: { id: paste.id, protected: true } });
+        expect(set.headers.get("etag")).toBe(`"${setResult.paste.version}"`);
+
+        const changed = await request(`/api/pastes/${paste.id}/password?password=wrong-query`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "x-paste-password": "wrong-header" },
+          body: JSON.stringify({ password: "first", newPassword: "second", version: setResult.paste.version }),
+        });
+        expect(changed.status).toBe(200);
+        const changedResult = await changed.json() as MutationResult;
+        expect(changedResult).toMatchObject({ changed: true, paste: { id: paste.id, protected: true } });
+        expect(changed.headers.get("etag")).toBe(`"${changedResult.paste.version}"`);
+
+        const ambiguousVersion = await request(`/api/pastes/${paste.id}/password`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "if-match": '"legacy"' },
+          body: JSON.stringify({ password: "second", newPassword: "third", version: changedResult.paste.version }),
+        });
+        expect(ambiguousVersion.status).toBe(400);
+        await expect(ambiguousVersion.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_VERSION" } });
+
+        const cleared = await request(`/api/pastes/${paste.id}/password`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "second", version: changedResult.paste.version }),
+        });
+        expect(cleared.status).toBe(200);
+        const clearedResult = await cleared.json() as MutationResult;
+        expect(clearedResult).toMatchObject({ changed: true, paste: { id: paste.id, protected: false } });
+        expect(cleared.headers.get("etag")).toBe(`"${clearedResult.paste.version}"`);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+  });
+
+  describe("history API", () => {
+    it("lists and snapshots canonical history revisions with current version ETags", async () => {
+      const paste = await createJsonPaste({ content: "old history", expiration: "permanent" });
+      try {
+        const update = await request(`/api/pastes/${paste.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: "new history", version: paste.version }),
+        });
+        expect(update.status).toBe(200);
+        const updateResult = await update.json() as MutationResult;
+
+        const list = await request(`/api/pastes/${paste.id}/history`);
+        expect(list.status).toBe(200);
+        const history = await list.json() as { id: string; currentRevision: number; currentVersion: string; revisions: Array<{ revision: number }> };
+        expect(history).toMatchObject({ id: paste.id, currentRevision: 2, currentVersion: updateResult.paste.version, revisions: [{ revision: 1 }] });
+        expect(list.headers.get("etag")).toBe(`"${updateResult.paste.version}"`);
+
+        const snapshot = await request(`/api/pastes/${paste.id}/history/1`);
+        expect(snapshot.status).toBe(200);
+        expect(snapshot.headers.get("etag")).toBe(`"${updateResult.paste.version}"`);
+        await expect(snapshot.json()).resolves.toMatchObject({ id: paste.id, revision: 1, content: "old history" });
+
+        for (const path of [`/api/pastes/${paste.id}/history`, `/api/pastes/${paste.id}/history/1`]) {
+          const head = await request(path, { method: "HEAD" });
+          expect(head.status).toBe(200);
+          expect(head.headers.get("etag")).toBe(`"${updateResult.paste.version}"`);
+          expect(await head.arrayBuffer()).toHaveProperty("byteLength", 0);
+        }
+
+        const noncanonical = await request(`/api/pastes/${paste.id}/history/01`);
+        expect(noncanonical.status).toBe(400);
+        await expect(noncanonical.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("forbids history on view-once pastes", async () => {
+      const paste = await createJsonPaste({ content: "view once history", viewOnce: true, expiration: "permanent" });
+      try {
+        for (const path of [`/api/pastes/${paste.id}/history`, `/api/pastes/${paste.id}/history/1`]) {
+          const response = await request(path);
+          expect(response.status).toBe(409);
+          await expect(response.json()).resolves.toMatchObject({ error: { code: "VIEW_ONCE_HISTORY_FORBIDDEN" } });
+        }
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+  });
+
+  describe("read API", () => {
+    it("ignores every If-None-Match value and returns a current version ETag", async () => {
+      const paste = await createJsonPaste({ content: "read resource", expiration: "permanent" });
+      try {
+        for (const ifNoneMatch of [undefined, `"${paste.version}"`, '"bad space"']) {
+          for (const method of ["GET", "HEAD", "POST"] as const) {
+            const response = await request(`/api/pastes/${paste.id}/read`, {
+              method,
+              headers: {
+                ...(method === "POST" ? { "content-type": "application/json" } : {}),
+                ...(ifNoneMatch === undefined ? {} : { "if-none-match": ifNoneMatch }),
+              },
+              ...(method === "POST" ? { body: "{}" } : {}),
+            });
+            expect(response.status, `${method} ${ifNoneMatch}`).toBe(200);
+            expect(response.headers.get("etag"), `${method} ${ifNoneMatch}`).toBe(`"${paste.version}"`);
+            if (method === "HEAD") {
+              expect(await response.arrayBuffer()).toHaveProperty("byteLength", 0);
+            } else {
+              await expect(response.json()).resolves.toMatchObject({ id: paste.id, content: "read resource" });
+            }
+          }
+        }
+
+        for (const [body, field] of [[{ version: paste.version }, "version"], [{ password: false }, "password"]] as const) {
+          const response = await request(`/api/pastes/${paste.id}/read`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          expect(response.status).toBe(422);
+          await expect(response.json()).resolves.toMatchObject({
+            error: { code: "VALIDATION_FAILED", details: { fields: [{ field }] } },
+          });
+        }
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("uses body, unique query, and header credentials in order and defers duplicate query errors", async () => {
+      const protectedPaste = await createJsonPaste({ content: "protected read", password: "right", expiration: "permanent" });
+      const unprotectedPaste = await createJsonPaste({ content: "unprotected read", expiration: "permanent" });
+      try {
+        const body = await request(`/api/pastes/${protectedPaste.id}/read?password=wrong-query`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-paste-password": "wrong-header" },
+          body: JSON.stringify({ password: "right" }),
+        });
+        expect(body.status).toBe(200);
+        expect(body.headers.get("etag")).toBe(`"${protectedPaste.version}"`);
+        await expect(body.json()).resolves.toMatchObject({ content: "protected read" });
+
+        const query = await request(`/api/pastes/${protectedPaste.id}/read?password=right`, {
+          headers: { "x-paste-password": "wrong-header" },
+        });
+        expect(query.status).toBe(200);
+        const header = await request(`/api/pastes/${protectedPaste.id}/read`, { headers: { "x-paste-password": "right" } });
+        expect(header.status).toBe(200);
+
+        const missing = await request("/api/pastes/missing/read?password=one&password=two");
+        expect(missing.status).toBe(404);
+        const wrong = await request(`/api/pastes/${protectedPaste.id}/read?password=one&password=two`, {
+          headers: { "x-paste-password": "wrong" },
+        });
+        expect(wrong.status).toBe(403);
+        const authorized = await request(`/api/pastes/${protectedPaste.id}/read?password=one&password=two`, {
+          headers: { "x-paste-password": "right" },
+        });
+        expect(authorized.status).toBe(400);
+        await expect(authorized.json()).resolves.toMatchObject({ error: { code: "AMBIGUOUS_PASSWORD" } });
+        const bodyAuthorized = await request(`/api/pastes/${protectedPaste.id}/read?password=one&password=two`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-paste-password": "wrong" },
+          body: JSON.stringify({ password: "right" }),
+        });
+        expect(bodyAuthorized.status).toBe(400);
+        const unprotected = await request(`/api/pastes/${unprotectedPaste.id}/read?password=one&password=two`);
+        expect(unprotected.status).toBe(400);
+      } finally {
+        await deletePaste(protectedPaste.id);
+        await deletePaste(unprotectedPaste.id);
+      }
+    });
+
+    it("returns content then consumes a view-once paste after HEAD", async () => {
+      const paste = await createJsonPaste({ content: "view-once read", viewOnce: true, expiration: "permanent" });
+      try {
+        const head = await request(`/api/pastes/${paste.id}/read`, { method: "HEAD", headers: { "if-none-match": '"bad space"' } });
+        expect(head.status).toBe(200);
+        expect(head.headers.get("etag")).toBe(`"${paste.version}"`);
+        expect(await head.arrayBuffer()).toHaveProperty("byteLength", 0);
+
+        const get = await request(`/api/pastes/${paste.id}/read`, { headers: { "if-none-match": "*" } });
+        expect(get.status).toBe(200);
+        await expect(get.json()).resolves.toMatchObject({ id: paste.id, content: "view-once read" });
+        expect((await request(`/api/pastes/${paste.id}/read`)).status).toBe(404);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
   });
 });

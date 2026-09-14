@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { BoundedDecimalNumberAccumulator, impossibleOpaqueMatch, parseStrictJsonObject, parseStrictJsonObjectOrEmpty, type StrictJsonKind, type StrictJsonParsePolicy } from "./json";
 import { parseMultipartBoundary, parseMultipartCreateFields } from "./multipart";
-import { PasteService, type CreateInput, type UpdateContentInput } from "./pastes";
+import { PasteService, type CreateInput, type UpdateContentInput, type UpdateSettingsInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
 import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
-import { isPasteError, PasteError, type Env } from "./types";
+import { isPasteError, PasteError, type Env, type LoadedPaste, type PasteResource } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
 const contentBodyLimit = 10_485_760;
@@ -141,10 +141,10 @@ function textMediaType(request: Request): void {
   }
 }
 
-function queryOrHeaderPassword(request: Request): string | undefined {
+function passwordSelection(request: Request, bodyPassword?: OpaqueMutationValue): PasswordSelection {
   const passwords = new URL(request.url).searchParams.getAll("password");
-  if (passwords.length > 1) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
-  return passwords[0] ?? request.headers.get("x-paste-password") ?? undefined;
+  const password = bodyPassword ?? (passwords.length === 1 ? passwords[0] : request.headers.get("x-paste-password") ?? undefined);
+  return { ...(password === undefined ? {} : { password }), ambiguous: passwords.length > 1 };
 }
 
 function ifMatchVersion(request: Request): string | undefined {
@@ -153,6 +153,46 @@ function ifMatchVersion(request: Request): string | undefined {
   const match = /^"([\x21\x23-\x7e\x80-\xff]*)"$/.exec(value);
   if (match === null) throw new PasteError("AMBIGUOUS_VERSION", 400);
   return match[1]!;
+}
+
+type EntityTagCondition = { any: true } | { any: false; opaqueTags: string[] };
+
+function isEntityTagCharacter(character: string | undefined): boolean {
+  if (character === undefined) return false;
+  const code = character.charCodeAt(0);
+  return code === 0x21 || (code >= 0x23 && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+}
+
+function parseIfNoneMatch(value: string | null): EntityTagCondition | undefined {
+  if (value === null) return undefined;
+  let position = skipHttpOws(value, 0);
+  if (value[position] === "*") {
+    position = skipHttpOws(value, position + 1);
+    if (position !== value.length) throw badRequest();
+    return { any: true };
+  }
+
+  const opaqueTags: string[] = [];
+  while (position < value.length) {
+    if (value.startsWith("W/", position)) position += 2;
+    if (value[position] !== '"') throw badRequest();
+    const start = ++position;
+    while (value[position] !== '"') {
+      if (!isEntityTagCharacter(value[position])) throw badRequest();
+      position += 1;
+    }
+    opaqueTags.push(value.slice(start, position));
+    position = skipHttpOws(value, position + 1);
+    if (position === value.length) return { any: false, opaqueTags };
+    if (value[position] !== ",") throw badRequest();
+    position = skipHttpOws(value, position + 1);
+    if (position === value.length) throw badRequest();
+  }
+  throw badRequest();
+}
+
+function ifNoneMatchMatches(condition: EntityTagCondition | undefined, etag: string): boolean {
+  return condition?.any === true || (condition?.any === false && condition.opaqueTags.includes(etag.slice(1, -1)));
 }
 
 function badRequest(): PasteError {
@@ -199,6 +239,7 @@ function jsonKindError(field: string): PasteError {
     case "format":
     case "password":
     case "version":
+    case "newPassword":
       return validationError(field, "Must be a string.");
     case "customId":
       return validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
@@ -220,6 +261,7 @@ const httpJsonKinds: ReadonlyMap<string, ReadonlySet<StrictJsonKind>> = new Map(
   ["viewOnce", new Set<StrictJsonKind>(["boolean"])],
   ["customId", new Set<StrictJsonKind>(["string"])],
   ["version", new Set<StrictJsonKind>(["string"])],
+  ["newPassword", new Set<StrictJsonKind>(["string"])],
 ]);
 
 function isLowerHexadecimal(character: string): boolean {
@@ -274,7 +316,7 @@ const mutationOpaqueStrings = new Map([
 
 const httpJsonPolicy: StrictJsonParsePolicy = {
   maxRetainedCodeUnits: contentBodyLimit + 4_096,
-  maxTopLevelKeyCodeUnits: "expiration".length,
+  maxTopLevelKeyCodeUnits: "newPassword".length,
   topLevelStringMaxCodeUnits: new Map([
     ["content", contentBodyLimit],
     ["title", 400],
@@ -440,8 +482,11 @@ async function parseTextContent(request: Request): Promise<string> {
 }
 
 type OpaqueMutationValue = string | typeof impossibleOpaqueMatch;
+type PasswordSelection = { password?: OpaqueMutationValue; ambiguous: boolean };
 type MutationCredentials = { password?: OpaqueMutationValue; version?: OpaqueMutationValue };
 type ContentPatch = MutationCredentials & { content: string };
+type PasswordPutBody = MutationCredentials & { newPassword: string };
+type SettingsBody = MutationCredentials & Pick<UpdateSettingsInput, "title" | "format" | "expiration" | "viewOnce">;
 
 function jsonMediaType(request: Request): void {
   if (!hasJsonUtf8MediaType(request)) {
@@ -483,9 +528,53 @@ async function parseDeleteBody(request: Request, ifMatch: string | undefined): P
   return value === undefined ? {} : parseMutationCredentials(value);
 }
 
-function passwordForBodyMutation(request: Request, body: MutationCredentials): OpaqueMutationValue | undefined {
-  const queryOrHeader = queryOrHeaderPassword(request);
-  return body.password ?? queryOrHeader;
+async function parseSettingsBody(request: Request, ifMatch: string | undefined): Promise<SettingsBody> {
+  jsonMediaType(request);
+  const value = await parseStrictJsonObject(
+    request,
+    new Set(["password", "version", "title", "format", "expiration", "viewOnce"]),
+    mutationJsonPolicy(ifMatch),
+  );
+  const result: SettingsBody = parseMutationCredentials(value);
+  if (Object.hasOwn(value, "title")) result.title = value.title as string;
+  if (Object.hasOwn(value, "format") && value.format !== undefined) result.format = value.format as NonNullable<SettingsBody["format"]>;
+  if (Object.hasOwn(value, "expiration") && value.expiration !== undefined) result.expiration = value.expiration as NonNullable<SettingsBody["expiration"]>;
+  if (Object.hasOwn(value, "viewOnce") && value.viewOnce !== undefined) result.viewOnce = value.viewOnce as boolean;
+  if (result.title === undefined && result.format === undefined && result.expiration === undefined && result.viewOnce === undefined) {
+    throw validationError("settings", "Must include at least one setting.");
+  }
+  return result;
+}
+
+async function parsePasswordPutBody(request: Request, ifMatch: string | undefined): Promise<PasswordPutBody> {
+  jsonMediaType(request);
+  const value = await parseStrictJsonObject(request, new Set(["password", "newPassword", "version"]), mutationJsonPolicy(ifMatch));
+  if (typeof value.newPassword !== "string") throw validationError("newPassword", "Must be a string.");
+  return { ...parseMutationCredentials(value), newPassword: value.newPassword };
+}
+
+async function parseReadPostBody(request: Request): Promise<MutationCredentials> {
+  const value = await parseStrictJsonObjectOrEmpty(
+    request,
+    new Set(["password"]),
+    () => jsonMediaType(request),
+    mutationJsonPolicy(undefined),
+  );
+  return value === undefined ? {} : parseMutationCredentials(value);
+}
+
+async function loadWithPassword(service: PasteService, id: string, selection: PasswordSelection): Promise<LoadedPaste> {
+  const loaded = await service.loadContent(id, selection.password);
+  if (selection.ambiguous) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
+  return loaded;
+}
+
+async function rejectAmbiguousPasswordAfterLoad(service: PasteService, id: string, selection: PasswordSelection): Promise<void> {
+  if (selection.ambiguous) await loadWithPassword(service, id, selection);
+}
+
+function currentPassword(selection: PasswordSelection): string | undefined {
+  return typeof selection.password === "string" ? selection.password : undefined;
 }
 
 function mutationVersion(body: MutationCredentials, headerVersion: string | undefined): OpaqueMutationValue | undefined {
@@ -524,7 +613,7 @@ async function parseCreate(request: Request): Promise<CreateInput> {
     : parseMultipartCreate(request, mediaType.boundary);
 }
 
-function jsonResponse(value: unknown, status = 200, headers?: HeadersInit): Response {
+function jsonResponseHeaders(headers?: HeadersInit): Headers {
   const responseHeaders = new Headers({
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
@@ -532,7 +621,78 @@ function jsonResponse(value: unknown, status = 200, headers?: HeadersInit): Resp
   if (headers !== undefined) {
     for (const [name, value] of new Headers(headers)) responseHeaders.set(name, value);
   }
-  return new Response(JSON.stringify(value), { status, headers: responseHeaders });
+  return responseHeaders;
+}
+
+function jsonResponse(value: unknown, status = 200, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(value), { status, headers: jsonResponseHeaders(headers) });
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function serializePasteResource(loaded: LoadedPaste): Uint8Array {
+  const summary = loaded.summary;
+  const value: PasteResource = {
+    id: summary.id,
+    title: summary.title,
+    format: summary.format,
+    viewOnce: summary.viewOnce,
+    protected: summary.protected,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
+    expiresAt: summary.expiresAt,
+    expiration: summary.expiration.kind === "relative"
+      ? { kind: "relative", seconds: summary.expiration.seconds }
+      : { kind: summary.expiration.kind },
+    version: summary.version,
+    contentRevision: summary.contentRevision,
+    contentBytes: summary.contentBytes,
+    createdCountry: summary.createdCountry,
+    links: {
+      view: summary.links.view,
+      raw: summary.links.raw,
+      html: summary.links.html,
+      markdown: summary.links.markdown,
+      file: summary.links.file,
+    },
+    content: loaded.content,
+  };
+  return new TextEncoder().encode(JSON.stringify(value));
+}
+
+function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(new Uint8Array(bytes).buffer);
+}
+
+async function strongResponseEtag(bytes: Uint8Array): Promise<`"sha256-${string}"`> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ownedBytes(bytes)));
+  return `"sha256-${base64Url(digest)}"`;
+}
+
+function notModifiedResponse(etag: string): Response {
+  return new Response(null, { status: 304, headers: { "Cache-Control": "no-store", ETag: etag } });
+}
+
+async function pasteResourceResponse(
+  service: PasteService,
+  loaded: LoadedPaste,
+  request: Request,
+  conditional: boolean,
+  versionEtag: boolean,
+): Promise<Response> {
+  const bytes = serializePasteResource(loaded);
+  const etag = versionEtag ? `"${loaded.summary.version}"` : await strongResponseEtag(bytes);
+  const headers = jsonResponseHeaders({ ETag: etag });
+  if (conditional && !loaded.summary.viewOnce && ifNoneMatchMatches(parseIfNoneMatch(request.headers.get("if-none-match")), etag)) {
+    return notModifiedResponse(etag);
+  }
+  if (request.method === "HEAD") return new Response(null, { headers });
+  if (loaded.summary.viewOnce) await service.consume(loaded);
+  return new Response(ownedBytes(bytes), { headers });
 }
 
 function errorResponse(error: PasteError): Response {
@@ -611,12 +771,23 @@ export function createHttpApp(env: Env): Hono {
   app.options("/api/pastes", () => new Response(null, { status: 204, headers: { Allow: "POST,OPTIONS" } }));
   app.all("/api/pastes", () => methodNotAllowed("POST,OPTIONS"));
 
+  app.on(["GET", "HEAD"], "/api/pastes/:id", async (context) => {
+    const request = context.req.raw;
+    const service = new PasteService(env.PASTE_DB);
+    const loaded = await loadWithPassword(service, context.req.param("id"), passwordSelection(request));
+    return pasteResourceResponse(service, loaded, request, true, false);
+  });
+
   app.put("/api/pastes/:id", async (context) => {
     const request = context.req.raw;
     const version = ifMatchVersion(request);
-    const result = await new PasteService(env.PASTE_DB).updateContent(
+    const content = await parseTextContent(request);
+    const selection = passwordSelection(request);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const result = await service.updateContent(
       context.req.param("id"),
-      contentUpdateInput(await parseTextContent(request), queryOrHeaderPassword(request), version),
+      contentUpdateInput(content, selection.password, version),
     );
     return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
   });
@@ -625,9 +796,12 @@ export function createHttpApp(env: Env): Hono {
     const request = context.req.raw;
     const headerVersion = ifMatchVersion(request);
     const body = await parseContentPatch(request, headerVersion);
-    const result = await new PasteService(env.PASTE_DB).updateContent(
+    const selection = passwordSelection(request, body.password);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const result = await service.updateContent(
       context.req.param("id"),
-      contentUpdateInput(body.content, passwordForBodyMutation(request, body), mutationVersion(body, headerVersion)),
+      contentUpdateInput(body.content, selection.password, mutationVersion(body, headerVersion)),
     );
     return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
   });
@@ -636,15 +810,108 @@ export function createHttpApp(env: Env): Hono {
     const request = context.req.raw;
     const headerVersion = ifMatchVersion(request);
     const body = await parseDeleteBody(request, headerVersion);
-    await new PasteService(env.PASTE_DB).delete(
+    const selection = passwordSelection(request, body.password);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    await service.delete(
       context.req.param("id"),
-      passwordForBodyMutation(request, body),
+      selection.password,
       mutationVersion(body, headerVersion),
     );
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
   });
-  app.options("/api/pastes/:id", () => new Response(null, { status: 204, headers: { Allow: "PUT,PATCH,DELETE,OPTIONS" } }));
-  app.all("/api/pastes/:id", () => methodNotAllowed("PUT,PATCH,DELETE,OPTIONS"));
+  app.options("/api/pastes/:id", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,PUT,PATCH,DELETE,OPTIONS" } }));
+  app.all("/api/pastes/:id", () => methodNotAllowed("GET,HEAD,PUT,PATCH,DELETE,OPTIONS"));
+
+  app.on(["GET", "HEAD"], "/api/pastes/:id/settings", async (context) => {
+    const request = context.req.raw;
+    const loaded = await loadWithPassword(new PasteService(env.PASTE_DB), context.req.param("id"), passwordSelection(request));
+    const headers = jsonResponseHeaders({ ETag: `"${loaded.summary.version}"` });
+    return request.method === "HEAD" ? new Response(null, { headers }) : new Response(JSON.stringify(loaded.summary), { headers });
+  });
+  app.patch("/api/pastes/:id/settings", async (context) => {
+    const request = context.req.raw;
+    const headerVersion = ifMatchVersion(request);
+    const body = await parseSettingsBody(request, headerVersion);
+    const selection = passwordSelection(request, body.password);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const version = mutationVersion(body, headerVersion);
+    const result = await service.updateSettings(context.req.param("id"), {
+      ...body,
+      ...(selection.password === undefined ? {} : { password: selection.password }),
+      ...(version === undefined ? {} : { version }),
+    });
+    return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
+  });
+  app.options("/api/pastes/:id/settings", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,PATCH,OPTIONS" } }));
+  app.all("/api/pastes/:id/settings", () => methodNotAllowed("GET,HEAD,PATCH,OPTIONS"));
+
+  app.put("/api/pastes/:id/password", async (context) => {
+    const request = context.req.raw;
+    const headerVersion = ifMatchVersion(request);
+    const body = await parsePasswordPutBody(request, headerVersion);
+    const selection = passwordSelection(request, body.password);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const version = mutationVersion(body, headerVersion);
+    const result = await service.updatePassword(context.req.param("id"), {
+      newPassword: body.newPassword,
+      ...(selection.password === undefined ? {} : { password: selection.password }),
+      ...(version === undefined ? {} : { version }),
+    });
+    return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
+  });
+  app.delete("/api/pastes/:id/password", async (context) => {
+    const request = context.req.raw;
+    const headerVersion = ifMatchVersion(request);
+    const body = await parseDeleteBody(request, headerVersion);
+    const selection = passwordSelection(request, body.password);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const version = mutationVersion(body, headerVersion);
+    const result = await service.updatePassword(context.req.param("id"), {
+      newPassword: "",
+      ...(selection.password === undefined ? {} : { password: selection.password }),
+      ...(version === undefined ? {} : { version }),
+    });
+    return jsonResponse(result, 200, { ETag: `"${result.paste.version}"` });
+  });
+  app.options("/api/pastes/:id/password", () => new Response(null, { status: 204, headers: { Allow: "PUT,DELETE,OPTIONS" } }));
+  app.all("/api/pastes/:id/password", () => methodNotAllowed("PUT,DELETE,OPTIONS"));
+
+  app.on(["GET", "HEAD"], "/api/pastes/:id/history", async (context) => {
+    const request = context.req.raw;
+    const selection = passwordSelection(request);
+    const service = new PasteService(env.PASTE_DB);
+    await rejectAmbiguousPasswordAfterLoad(service, context.req.param("id"), selection);
+    const history = await service.listHistory(context.req.param("id"), currentPassword(selection));
+    const headers = jsonResponseHeaders({ ETag: `"${history.currentVersion}"` });
+    return request.method === "HEAD" ? new Response(null, { headers }) : new Response(JSON.stringify(history), { headers });
+  });
+  app.on(["GET", "HEAD"], "/api/pastes/:id/history/:revision", async (context) => {
+    const request = context.req.raw;
+    const selection = passwordSelection(request);
+    const service = new PasteService(env.PASTE_DB);
+    const loaded = await loadWithPassword(service, context.req.param("id"), selection);
+    const revision = await service.getHistory(context.req.param("id"), context.req.param("revision"), currentPassword(selection));
+    const headers = jsonResponseHeaders({ ETag: `"${loaded.summary.version}"` });
+    return request.method === "HEAD" ? new Response(null, { headers }) : new Response(JSON.stringify(revision), { headers });
+  });
+  app.options("/api/pastes/:id/history", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,OPTIONS" } }));
+  app.options("/api/pastes/:id/history/:revision", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,OPTIONS" } }));
+  app.all("/api/pastes/:id/history", () => methodNotAllowed("GET,HEAD,OPTIONS"));
+  app.all("/api/pastes/:id/history/:revision", () => methodNotAllowed("GET,HEAD,OPTIONS"));
+
+  app.on(["GET", "HEAD", "POST"], "/api/pastes/:id/read", async (context) => {
+    const request = context.req.raw;
+    const body = request.method === "POST" ? await parseReadPostBody(request) : {};
+    const service = new PasteService(env.PASTE_DB);
+    const loaded = await loadWithPassword(service, context.req.param("id"), passwordSelection(request, body.password));
+    return pasteResourceResponse(service, loaded, request, false, true);
+  });
+  app.options("/api/pastes/:id/read", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,POST,OPTIONS" } }));
+  app.all("/api/pastes/:id/read", () => methodNotAllowed("GET,HEAD,POST,OPTIONS"));
 
   return app;
 }
