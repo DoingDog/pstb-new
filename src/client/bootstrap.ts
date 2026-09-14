@@ -55,6 +55,30 @@ function isLocale(value: unknown): value is Locale {
   return value === "en" || value === "zh-CN";
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
+
+function isNullableTimestamp(value: unknown): value is string | null {
+  return value === null || isTimestamp(value);
+}
+
+function isByteLength(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isMutationToken(value: unknown): value is string {
+  return typeof value === "string" && /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(value);
+}
+
+function isHttpErrorStatus(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 400 && value <= 599;
+}
+
 function parseExpiration(value: unknown): PasteSummary["expiration"] | undefined {
   if (!isRecord(value) || typeof value.kind !== "string") return undefined;
   if (value.kind === "permanent" && hasExactKeys(value, new Set(["kind"]))) return { kind: "permanent" };
@@ -74,11 +98,11 @@ function parseExpiration(value: unknown): PasteSummary["expiration"] | undefined
 function parseLinks(value: unknown): PasteSummary["links"] | undefined {
   if (!hasExactKeys(value, linkKeys)) return undefined;
   if (
-    typeof value.view !== "string" ||
-    typeof value.raw !== "string" ||
-    typeof value.html !== "string" ||
-    typeof value.markdown !== "string" ||
-    typeof value.file !== "string"
+    !isNonEmptyString(value.view) ||
+    !isNonEmptyString(value.raw) ||
+    !isNonEmptyString(value.html) ||
+    !isNonEmptyString(value.markdown) ||
+    !isNonEmptyString(value.file)
   ) {
     return undefined;
   }
@@ -90,21 +114,17 @@ function parseSummary(value: unknown): PasteSummary | undefined {
   const expiration = parseExpiration(value.expiration);
   const links = parseLinks(value.links);
   if (
-    typeof value.id !== "string" ||
+    !isNonEmptyString(value.id) ||
     typeof value.title !== "string" ||
     (value.format !== "text" && value.format !== "markdown") ||
     typeof value.viewOnce !== "boolean" ||
     typeof value.protected !== "boolean" ||
-    (value.createdAt !== null && typeof value.createdAt !== "string") ||
-    typeof value.updatedAt !== "string" ||
-    (value.expiresAt !== null && typeof value.expiresAt !== "string") ||
-    typeof value.version !== "string" ||
-    typeof value.contentRevision !== "number" ||
-    !Number.isSafeInteger(value.contentRevision) ||
-    value.contentRevision < 1 ||
-    typeof value.contentBytes !== "number" ||
-    !Number.isSafeInteger(value.contentBytes) ||
-    value.contentBytes < 0 ||
+    !isNullableTimestamp(value.createdAt) ||
+    !isTimestamp(value.updatedAt) ||
+    !isNullableTimestamp(value.expiresAt) ||
+    !isMutationToken(value.version) ||
+    !isByteLength(value.contentRevision) ||
+    !isByteLength(value.contentBytes) ||
     (value.createdCountry !== null && typeof value.createdCountry !== "string") ||
     expiration === undefined ||
     links === undefined
@@ -141,8 +161,7 @@ function parseBootstrap(value: unknown): AppBootstrap | undefined {
         : undefined;
     case "error":
       return hasExactKeys(value, new Set(["page", "locale", "status", "errorCode"])) &&
-        typeof value.status === "number" &&
-        Number.isSafeInteger(value.status) &&
+        isHttpErrorStatus(value.status) &&
         typeof value.errorCode === "string"
         ? { page: "error", locale: value.locale, status: value.status, errorCode: value.errorCode }
         : undefined;
@@ -159,7 +178,7 @@ function parseBootstrap(value: unknown): AppBootstrap | undefined {
     }
     case "markdown":
       return hasExactKeys(value, new Set(["page", "locale", "id", "title", "hasInitialMarkdownPreview"])) &&
-        typeof value.id === "string" &&
+        isNonEmptyString(value.id) &&
         typeof value.title === "string" &&
         value.hasInitialMarkdownPreview === true
         ? { page: "markdown", locale: value.locale, id: value.id, title: value.title, hasInitialMarkdownPreview: true }

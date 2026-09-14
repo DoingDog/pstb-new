@@ -223,6 +223,52 @@ describe("initial page bootstrap", () => {
     }
   });
 
+  const malformedBootstrapCases: Array<[string, unknown, string[]]> = [
+    ["empty summary ID", { page: "paste", locale: "en", paste: summary({ id: "" }), consumed: false }, ["bootstrap", "source-data"]],
+    ["noncanonical createdAt", { page: "paste", locale: "en", paste: summary({ createdAt: "2026-09-13T00:00:00Z" }), consumed: false }, ["bootstrap", "source-data"]],
+    ["noncanonical updatedAt", { page: "paste", locale: "en", paste: summary({ updatedAt: "2026-09-13T00:00:00Z" }), consumed: false }, ["bootstrap", "source-data"]],
+    ["noncanonical expiresAt", { page: "paste", locale: "en", paste: summary({ expiresAt: "2026-09-13T00:00:00Z" }), consumed: false }, ["bootstrap", "source-data"]],
+    ["invalid mutation token", { page: "paste", locale: "en", paste: summary({ version: "bad token" }), consumed: false }, ["bootstrap", "source-data"]],
+    ["negative content revision", { page: "paste", locale: "en", paste: summary({ contentRevision: -1 }), consumed: false }, ["bootstrap", "source-data"]],
+    ["negative content bytes", { page: "paste", locale: "en", paste: summary({ contentBytes: -1 }), consumed: false }, ["bootstrap", "source-data"]],
+    ["relative expiration below one minute", { page: "paste", locale: "en", paste: summary({ expiration: { kind: "relative", seconds: 59 } }), consumed: false }, ["bootstrap", "source-data"]],
+    ...(["view", "raw", "html", "markdown", "file"] as const).map((link): [string, unknown, string[]] => [
+      `empty ${link} link`,
+      { page: "paste", locale: "en", paste: summary({ links: { ...summary().links, [link]: "" } }), consumed: false },
+      ["bootstrap", "source-data"],
+    ]),
+    ["empty markdown ID", { page: "markdown", locale: "en", id: "", title: "Example", hasInitialMarkdownPreview: true }, ["bootstrap", "source-data"]],
+  ];
+
+  it.each(malformedBootstrapCases)("review round 1: fails closed for invalid bootstrap %s", (_name, bootstrap, removed) => {
+    const fixture = pageFixture({ bootstrap });
+
+    expect(extractInitialPage(fixture.document, new URL("https://paste.test/id"))).toEqual({ ok: false, locale: "en", errorCode: "INTERNAL_ERROR" });
+    expect(fixture.removeCalls()).toEqual(removed);
+  });
+
+  it.each([
+    [99, false],
+    [400, true],
+    [599, true],
+    [600, false],
+  ])("review round 1: accepts only HTTP error status %i", (status, accepted) => {
+    const fixture = pageFixture({ bootstrap: { page: "error", locale: "en", status, errorCode: "INTERNAL_ERROR" } });
+    const result = extractInitialPage(fixture.document, new URL("https://paste.test/id"));
+
+    expect(result.ok).toBe(accepted);
+    expect(fixture.removeCalls()).toEqual(["bootstrap"]);
+  });
+
+  it("review round 1: accepts API-valid summary numeric lower bounds", () => {
+    const fixture = pageFixture({
+      bootstrap: { page: "paste", locale: "en", paste: summary({ contentRevision: 0, contentBytes: 0 }), consumed: false },
+    });
+
+    expect(extractInitialPage(fixture.document, new URL("https://paste.test/id"))).toMatchObject({ ok: true });
+    expect(fixture.removeCalls()).toEqual(["bootstrap", "source-data"]);
+  });
+
   it("rejects duplicate password queries before page-specific results", () => {
     const bootstraps: AppBootstrap[] = [
       { page: "create", locale: "en" },

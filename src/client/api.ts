@@ -144,7 +144,7 @@ function isResourceEtag(value: string | null): value is `"sha256-${string}"` {
 function isExpiration(value: unknown): boolean {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
   if (value.kind === "permanent" || value.kind === "absolute") return hasExactKeys(value, ["kind"]);
-  return value.kind === "relative" && hasExactKeys(value, ["kind", "seconds"]) && typeof value.seconds === "number" && Number.isSafeInteger(value.seconds) && value.seconds > 0;
+  return value.kind === "relative" && hasExactKeys(value, ["kind", "seconds"]) && typeof value.seconds === "number" && Number.isSafeInteger(value.seconds) && value.seconds >= 60;
 }
 
 function isLinks(value: unknown): boolean {
@@ -289,8 +289,20 @@ function getHeaders(ifNoneMatch?: string | null): HeadersInit {
   };
 }
 
+function isJsonMediaType(value: string | null): boolean {
+  if (value === null) return false;
+  const [mediaType, ...parameters] = value.split(";");
+  if (mediaType === undefined || mediaType.trim().toLowerCase() !== "application/json" || parameters.length !== 1) return false;
+  const [name, charset, ...rest] = parameters[0]!.trim().split("=");
+  return rest.length === 0 && name?.trim().toLowerCase() === "charset" && charset?.trim().toLowerCase() === "utf-8";
+}
+
+function isNoStore(value: string | null): boolean {
+  return value !== null && value.split(",").length === 1 && value.trim().toLowerCase() === noStore;
+}
+
 function hasJsonHeaders(response: Response): boolean {
-  return response.headers.get("content-type") === jsonMediaType && response.headers.get("cache-control") === noStore;
+  return isJsonMediaType(response.headers.get("content-type")) && isNoStore(response.headers.get("cache-control"));
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -421,22 +433,17 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
       }
 
       if (response.status === 304) {
-        try {
-          const bytes = await response.arrayBuffer();
-          const etag = response.headers.get("etag");
-          if (!isResourceEtag(input.ifNoneMatch)
-            || etag !== input.ifNoneMatch
-            || response.headers.get("cache-control") !== noStore
-            || response.headers.has("content-type")
-            || response.headers.has("content-length")
-            || response.headers.has("trailer")
-            || bytes.byteLength !== 0) {
-            return { kind: "failure", failure: malformed(304, false) };
-          }
-          return { kind: "not-modified", etag };
-        } catch {
+        const etag = response.headers.get("etag");
+        if (!isResourceEtag(input.ifNoneMatch)
+          || etag !== input.ifNoneMatch
+          || !isNoStore(response.headers.get("cache-control"))
+          || response.headers.has("content-type")
+          || response.headers.has("content-length")
+          || response.headers.has("trailer")
+          || response.body !== null) {
           return { kind: "failure", failure: malformed(304, false) };
         }
+        return { kind: "not-modified", etag };
       }
 
       if (response.status !== 200) {
@@ -469,7 +476,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         },
         status: 200,
         mutationMayHaveApplied: true,
-        parse: isMutationResult,
+        parse: (value): value is MutationResult => isMutationResult(value) && value.paste.id === input.id,
         etag: (value, etag) => expectedMutationEtag(value.paste)(etag),
       });
     },
@@ -480,7 +487,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         init: { method: "GET", headers: getHeaders(), cache: "no-store", signal: input.signal },
         status: 200,
         mutationMayHaveApplied: false,
-        parse: isPasteSummary,
+        parse: (value): value is PasteSummary => isPasteSummary(value) && value.id === input.id,
         etag: (value, etag) => expectedMutationEtag(value)(etag),
       });
     },
@@ -497,7 +504,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         },
         status: 200,
         mutationMayHaveApplied: true,
-        parse: isMutationResult,
+        parse: (value): value is MutationResult => isMutationResult(value) && value.paste.id === input.id,
         etag: (value, etag) => expectedMutationEtag(value.paste)(etag),
       });
     },
@@ -514,7 +521,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         },
         status: 200,
         mutationMayHaveApplied: true,
-        parse: isMutationResult,
+        parse: (value): value is MutationResult => isMutationResult(value) && value.paste.id === input.id,
         etag: (value, etag) => expectedMutationEtag(value.paste)(etag),
       });
     },
@@ -531,7 +538,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         },
         status: 200,
         mutationMayHaveApplied: true,
-        parse: isMutationResult,
+        parse: (value): value is MutationResult => isMutationResult(value) && value.paste.id === input.id,
         etag: (value, etag) => expectedMutationEtag(value.paste)(etag),
       });
     },
@@ -555,18 +562,13 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         return { ok: false, failure: await readError(response, true) };
       }
 
-      try {
-        const bytes = await response.arrayBuffer();
-        if (response.headers.get("cache-control") !== noStore
-          || response.headers.has("content-type")
-          || response.headers.has("content-length")
-          || bytes.byteLength !== 0) {
-          return { ok: false, failure: malformed(204, true) };
-        }
-        return { ok: true, status: 204, value: null, etag: null };
-      } catch {
+      if (!isNoStore(response.headers.get("cache-control"))
+        || response.headers.has("content-type")
+        || response.headers.has("content-length")
+        || response.body !== null) {
         return { ok: false, failure: malformed(204, true) };
       }
+      return { ok: true, status: 204, value: null, etag: null };
     },
 
     async listHistory(input) {
@@ -575,7 +577,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         init: { method: "GET", headers: getHeaders(), cache: "no-store", signal: input.signal },
         status: 200,
         mutationMayHaveApplied: false,
-        parse: isHistoryList,
+        parse: (value): value is HistoryList => isHistoryList(value) && value.id === input.id,
         etag: (value, etag) => etag === `"${value.currentVersion}"` && isStrongMutationEtag(etag),
       });
     },

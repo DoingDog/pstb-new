@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPasteApi, selectCreateEncoding } from "./api";
 
 const jsonMediaType = "application/json; charset=utf-8";
@@ -73,6 +73,15 @@ function jsonResponse(value: unknown, status = 200, headers: HeadersInit = {}): 
 
 function emptyResponse(status: number, headers: HeadersInit = {}): Response {
   return new Response(null, { status, headers: { "Cache-Control": noStore, ...headers } });
+}
+
+function emptyStreamResponse(status: number, headers: HeadersInit = {}): Response & { arrayBuffer: ReturnType<typeof vi.fn> } {
+  return {
+    status,
+    headers: new Headers({ "Cache-Control": noStore, ...headers }),
+    body: new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }),
+    arrayBuffer: vi.fn(async () => new ArrayBuffer(0)),
+  } as unknown as Response & { arrayBuffer: ReturnType<typeof vi.fn> };
 }
 
 function base64Url(bytes: ArrayBuffer): string {
@@ -371,5 +380,112 @@ describe("paste API", () => {
       ok: false,
       failure: { kind: "malformed", status: 204, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: true },
     });
+  });
+
+  it("review round 1: rejects ID-addressed success payloads for another paste", async () => {
+    const otherSummary = { ...summary, id: "paste-2" };
+    const fetch = queuedFetch(
+      jsonResponse(otherSummary, 200, { ETag: '"v1"' }),
+      jsonResponse({ changed: true, paste: otherSummary }, 200, { ETag: '"v1"' }),
+      jsonResponse({ ...history, id: "paste-2" }, 200, { ETag: '"v1"' }),
+    );
+    const client = api(fetch.fetch);
+    const results = await Promise.all([
+      client.getSettings({ id: "paste-1", password: null, signal: signal() }),
+      client.saveContent({ id: "paste-1", content: "next", password: null, version: "v1", signal: signal() }),
+      client.listHistory({ id: "paste-1", password: null, signal: signal() }),
+    ]);
+
+    expect(results).toMatchObject([
+      { ok: false, failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+      { ok: false, failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: true } },
+      { ok: false, failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+    ]);
+  });
+
+  it("review round 1: accepts case-insensitive HTTP header tokens", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const json = queuedFetch(jsonResponse(summary, 200, { ETag: '"v1"', "Content-Type": "Application/JSON; Charset=UTF-8", "Cache-Control": "No-Store" }));
+    const notModified = queuedFetch(emptyResponse(304, { ETag: validator, "Cache-Control": "No-Store" }));
+    const deleted = queuedFetch(emptyResponse(204, { "Cache-Control": "No-Store" }));
+    const results = await Promise.all([
+      api(json.fetch).getSettings({ id: "paste-1", password: null, signal: signal() }),
+      api(notModified.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() }),
+      api(deleted.fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() }),
+    ]);
+
+    expect(results).toEqual([
+      { ok: true, status: 200, value: summary, etag: '"v1"' },
+      { kind: "not-modified", etag: validator },
+      { ok: true, status: 204, value: null, etag: null },
+    ]);
+  });
+
+  it("review round 1: does not read bodyless 304 and 204 responses", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const notModified = emptyResponse(304, { ETag: validator });
+    const deleted = emptyResponse(204);
+    const notModifiedReader = vi.spyOn(notModified, "arrayBuffer").mockImplementation(async () => { throw new Error("304 body read"); });
+    const deletedReader = vi.spyOn(deleted, "arrayBuffer").mockImplementation(async () => { throw new Error("204 body read"); });
+    const results = await Promise.all([
+      api(queuedFetch(notModified).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() }),
+      api(queuedFetch(deleted).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() }),
+    ]);
+
+    expect(results).toEqual([
+      { kind: "not-modified", etag: validator },
+      { ok: true, status: 204, value: null, etag: null },
+    ]);
+    expect(notModifiedReader).not.toHaveBeenCalled();
+    expect(deletedReader).not.toHaveBeenCalled();
+  });
+
+  it("review round 1: rejects present zero-length 304 and 204 streams", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const notModified = emptyStreamResponse(304, { ETag: validator });
+    const deleted = emptyStreamResponse(204);
+    const results = await Promise.all([
+      api(queuedFetch(notModified).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() }),
+      api(queuedFetch(deleted).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() }),
+    ]);
+
+    expect(results).toMatchObject([
+      { kind: "failure", failure: { kind: "malformed", status: 304, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+      { ok: false, failure: { kind: "malformed", status: 204, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: true } },
+    ]);
+    expect(notModified.arrayBuffer).not.toHaveBeenCalled();
+    expect(deleted.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("review round 1: rejects extra response media and cache tokens", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const json = queuedFetch(jsonResponse(summary, 200, { ETag: '"v1"', "Content-Type": "application/json; charset=utf-8; profile=full" }));
+    const notModified = queuedFetch(emptyResponse(304, { ETag: validator, "Cache-Control": "no-store, private" }));
+    const deleted = queuedFetch(emptyResponse(204, { "Cache-Control": "no-store, private" }));
+    const results = await Promise.all([
+      api(json.fetch).getSettings({ id: "paste-1", password: null, signal: signal() }),
+      api(notModified.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() }),
+      api(deleted.fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() }),
+    ]);
+
+    expect(results).toMatchObject([
+      { ok: false, failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+      { kind: "failure", failure: { kind: "malformed", status: 304, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+      { ok: false, failure: { kind: "malformed", status: 204, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: true } },
+    ]);
+  });
+
+  it("review round 1: enforces the one-minute relative expiration boundary", async () => {
+    const tooShort = queuedFetch(jsonResponse({ ...summary, expiration: { kind: "relative", seconds: 59 } }, 200, { ETag: '"v1"' }));
+    const minimum = queuedFetch(jsonResponse({ ...summary, expiration: { kind: "relative", seconds: 60 } }, 200, { ETag: '"v1"' }));
+    const results = await Promise.all([
+      api(tooShort.fetch).getSettings({ id: "paste-1", password: null, signal: signal() }),
+      api(minimum.fetch).getSettings({ id: "paste-1", password: null, signal: signal() }),
+    ]);
+
+    expect(results).toMatchObject([
+      { ok: false, failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
+      { ok: true, status: 200, value: { ...summary, expiration: { kind: "relative", seconds: 60 } }, etag: '"v1"' },
+    ]);
   });
 });
