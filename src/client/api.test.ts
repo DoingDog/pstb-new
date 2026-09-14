@@ -488,4 +488,43 @@ describe("paste API", () => {
       { ok: true, status: 200, value: { ...summary, expiration: { kind: "relative", seconds: 60 } }, etag: '"v1"' },
     ]);
   });
+
+  it.each([
+    ["quoted charset", 'application/json; charset="UTF-8"'],
+    ["quoted-pair charset", 'application/json; charset="UT\\F-8"'],
+  ])("review round 2: accepts %s", async (_name, contentType) => {
+    const fetch = queuedFetch(jsonResponse(summary, 200, { ETag: '"v1"', "Content-Type": contentType }));
+
+    expect(await api(fetch.fetch).getSettings({ id: "paste-1", password: null, signal: signal() })).toEqual({ ok: true, status: 200, value: summary, etag: '"v1"' });
+  });
+
+  it.each([
+    ["leading Content-Type", { "Content-Type": " application/json; charset=utf-8" }],
+    ["trailing Content-Type", { "Content-Type": "application/json; charset=utf-8 " }],
+    ["leading Cache-Control", { "Cache-Control": " no-store" }],
+    ["trailing Cache-Control", { "Cache-Control": "no-store " }],
+  ])("review round 2: rejects %s U+00A0", async (_name, headers) => {
+    const fetch = queuedFetch(jsonResponse(summary, 200, { ETag: '"v1"', ...headers }));
+
+    expect(await api(fetch.fetch).getSettings({ id: "paste-1", password: null, signal: signal() })).toMatchObject({
+      ok: false,
+      failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false },
+    });
+  });
+
+  it.each([
+    ["missing charset", "application/json", noStore],
+    ["wrong charset", "application/json; charset=iso-8859-1", noStore],
+    ["extra media parameter", "application/json; charset=utf-8; profile=full", noStore],
+    ["malformed quoted-string", 'application/json; charset="UTF-8', noStore],
+    ["non-ASCII token", "application/json; charset=utf-8é", noStore],
+    ["extra cache directive", jsonMediaType, "no-store, private"],
+  ])("review round 2: preserves rejection of %s", async (_name, contentType, cacheControl) => {
+    const fetch = queuedFetch(jsonResponse(summary, 200, { ETag: '"v1"', "Content-Type": contentType, "Cache-Control": cacheControl }));
+
+    expect(await api(fetch.fetch).getSettings({ id: "paste-1", password: null, signal: signal() })).toMatchObject({
+      ok: false,
+      failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false },
+    });
+  });
 });

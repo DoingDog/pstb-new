@@ -289,16 +289,89 @@ function getHeaders(ifNoneMatch?: string | null): HeadersInit {
   };
 }
 
+function isOws(value: string | undefined): boolean {
+  return value === " " || value === "\t";
+}
+
+function skipOws(value: string, index: number): number {
+  while (isOws(value[index])) index += 1;
+  return index;
+}
+
+function equalsAsciiIgnoreCase(value: string, expected: string): boolean {
+  if (value.length !== expected.length) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    let code = value.charCodeAt(index);
+    if (code >= 0x41 && code <= 0x5a) code += 0x20;
+    if (code !== expected.charCodeAt(index)) return false;
+  }
+  return true;
+}
+
+const tokenCharacter = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]$/;
+
+function readToken(value: string, index: number): [string, number] | undefined {
+  const start = index;
+  while (index < value.length && tokenCharacter.test(value[index]!)) index += 1;
+  return index === start ? undefined : [value.slice(start, index), index];
+}
+
+function isQuotedTextCharacter(value: string): boolean {
+  const code = value.charCodeAt(0);
+  return code === 0x09 || code === 0x20 || code === 0x21 || (code >= 0x23 && code <= 0x5b) || (code >= 0x5d && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+}
+
+function isQuotedPairCharacter(value: string): boolean {
+  const code = value.charCodeAt(0);
+  return code === 0x09 || code === 0x20 || (code >= 0x21 && code <= 0x7e) || (code >= 0x80 && code <= 0xff);
+}
+
+function readQuotedString(value: string, index: number): [string, number] | undefined {
+  if (value[index] !== '"') return undefined;
+  let result = "";
+  for (index += 1; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === '"') return [result, index + 1];
+    if (character === "\\") {
+      const escaped = value[index + 1];
+      if (escaped === undefined || !isQuotedPairCharacter(escaped)) return undefined;
+      result += escaped;
+      index += 1;
+    } else {
+      if (!isQuotedTextCharacter(character)) return undefined;
+      result += character;
+    }
+  }
+  return undefined;
+}
+
+function readCharset(value: string, index: number): [string, number] | undefined {
+  return value[index] === '"' ? readQuotedString(value, index) : readToken(value, index);
+}
+
 function isJsonMediaType(value: string | null): boolean {
   if (value === null) return false;
-  const [mediaType, ...parameters] = value.split(";");
-  if (mediaType === undefined || mediaType.trim().toLowerCase() !== "application/json" || parameters.length !== 1) return false;
-  const [name, charset, ...rest] = parameters[0]!.trim().split("=");
-  return rest.length === 0 && name?.trim().toLowerCase() === "charset" && charset?.trim().toLowerCase() === "utf-8";
+  let index = skipOws(value, 0);
+  const mediaType = "application/json";
+  if (!equalsAsciiIgnoreCase(value.slice(index, index + mediaType.length), mediaType)) return false;
+  index = skipOws(value, index + mediaType.length);
+  if (value[index] !== ";") return false;
+  index = skipOws(value, index + 1);
+  const parameter = readToken(value, index);
+  if (parameter === undefined || !equalsAsciiIgnoreCase(parameter[0], "charset")) return false;
+  index = skipOws(value, parameter[1]);
+  if (value[index] !== "=") return false;
+  const charset = readCharset(value, skipOws(value, index + 1));
+  if (charset === undefined || !equalsAsciiIgnoreCase(charset[0], "utf-8")) return false;
+  return skipOws(value, charset[1]) === value.length;
 }
 
 function isNoStore(value: string | null): boolean {
-  return value !== null && value.split(",").length === 1 && value.trim().toLowerCase() === noStore;
+  if (value === null) return false;
+  const start = skipOws(value, 0);
+  let end = value.length;
+  while (end > start && isOws(value[end - 1])) end -= 1;
+  return equalsAsciiIgnoreCase(value.slice(start, end), noStore);
 }
 
 function hasJsonHeaders(response: Response): boolean {
