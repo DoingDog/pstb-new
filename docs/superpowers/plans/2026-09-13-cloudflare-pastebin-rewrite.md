@@ -62,7 +62,7 @@
 | Keep | `wrangler.jsonc` | exact Worker/config/single-KV/static-assets contract | 17只读检查 |
 | Modify | `scripts/build.mjs` | Vite orchestration、manifest projection、asset cleanup；release reachability/budget projection | 8，然后17 |
 | Create | `scripts/smoke.ps1` | supervised real Wrangler local smoke与process-tree cleanup | 17 |
-| Create | `scripts/browser-evidence.mjs`, `scripts/verify-release-evidence.mjs` | capture actual branded browser versions/rows；fail closed on browser/manual accessibility evidence | 16 |
+| Create | `scripts/browser-evidence.mjs`, `scripts/verify-release-evidence.mjs` | acquire andnormalize official stable release histories、derive browser targets、capture actual branded/engine versions、record manual rows andfail closed onall release evidence | 16 |
 | Modify generated | `src/generated/assets.ts` | resolved `appJs`、`appCss`、`diffWorker` public URLs；只由build script写 | 8，然后17 |
 | Create | `components.json` | pinned shadcn Vite/TSX/new-york-v4 materialization aliases | 8 |
 | Create | `docs/shadcn-source-integrity.json` | exact upstream/local source set和local SHA-256 bytes | 17 |
@@ -102,10 +102,10 @@
 | Create test | `src/client/components/content-modes.browser.test.tsx` | ordinary view/editor/Crepe/source/preview lifecycle | 13 |
 | Create | `src/client/components/{HistoryPanel,SettingsPanel,PasswordPanel,DeleteFlow}.tsx` | history/diff/settings/password/delete UI against injected callbacks | 14 |
 | Create test | `src/client/components/management.browser.test.tsx` | management forms/races/focus/result-table presentation | 14 |
-| Create test | `src/client/App.browser.test.tsx` | complete branch/controller integration、StrictMode-like remount、request audit | 15 |
+| Create test | `src/client/App.browser.test.tsx`, `src/client/App.module-graph.test.ts` | complete branch/controller integration、StrictMode-like remount、request audit andsource-only lazy/import ownership proof | 15 |
 | Create | `playwright.config.ts`, `test/e2e/helpers.ts` | real Wrangler webServer和bundled Chromium/Firefox/WebKit projects/helpers；不冒充branded browser evidence | 16 |
 | Create | `test/e2e/{create-password,ordinary-sync,view-once-representations,accessibility}.spec.ts` | end-to-end journeys、每个application branch的AxeBuilder scan和engine matrix | 16 |
-| Create | `test/fixtures/external.html`, `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`, `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`, `test/e2e/evidence/**` | same-origin active-HTML marker、exact-two-major branded browser rows/manual commands、tracked release receipts和四类release-blocking accessibility evidence | 16 |
+| Create | `test/fixtures/external.html`, `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`, `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`, `test/e2e/evidence/browser-target-sources/*.json`, `test/e2e/evidence/browser-matrix/**`, `test/e2e/evidence/engine/**`, `test/e2e/evidence/accessibility/**` | same-origin active-HTML marker、official stable release-history snapshots、exact-two-derived-major branded rows/manual commands、tracked engine receipts andfour release-blocking accessibility rows | 16 |
 | Modify | `src/build.test.ts` | exact pins/source set/manifest/hash/budget/no-banned-stack checks | 8，然后17 |
 | Create test | `src/legacy-removal.test.ts` | final proof旧Worker不存在且`aioapi.js`不变 | 18 |
 | Delete | `worker.js` | obsolete Service Worker implementation；仅所有release gates先通过后删除 | 18 |
@@ -1513,7 +1513,7 @@ Scripts must be:
   "dev:local": "wrangler dev --local --port 8787 --show-interactive-dev-session=false",
   "dev:e2e": "npm run build && wrangler dev --local --port 8787 --show-interactive-dev-session=false",
   "smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke.ps1",
-  "verify": "npm run build && vitest run && playwright test && node scripts/verify-release-evidence.mjs && npm run smoke && wrangler types --check && wrangler deploy --dry-run --outdir .wrangler-dist"
+  "verify": "npm run build && vitest run && playwright test && node scripts/browser-evidence.mjs self-test && node scripts/verify-release-evidence.mjs --self-test && node scripts/verify-release-evidence.mjs && npm run smoke && wrangler types --check && wrangler deploy --dry-run --outdir .wrangler-dist"
 }
 ```
 
@@ -2245,7 +2245,7 @@ Independent Opus verifiesno directfetch、history laziness/token presentation、
 - Modify: `src/client/App.tsx`
 - Create: `src/client/pages/OrdinaryPage.tsx`
 - Create: `src/client/hooks/use-paste-page.ts`
-- Create test: `src/client/App.browser.test.tsx`
+- Create tests: `src/client/App.browser.test.tsx`, `src/client/App.module-graph.test.ts`
 
 **Consumes:** approved page/components/controllers only。No child component、i18n、router、generated asset或package edits。
 
@@ -2272,12 +2272,14 @@ it("does not re-read initial ordinary content before the first three-second due"
 });
 ```
 
-In the same RED suite, load the real lazy `OrdinaryPage` while mocking only Task13’s child `OrdinaryPastePage` as a render probe that records `{acceptedSource,version,autosaveAcceptedSource,lastSavedContent,autosaveState}` on every committed render. Resolve one controlled content-save 200. The exact render sequence may contain the complete old tuple and the complete accepted tuple only; it must contain no cross-product frame, and both autosave aliases must be identical in every record. A module-graph assertion must also prove App has one dynamic edge to`OrdinaryPage`，`OrdinaryPage` owns the only ordinary edge to`use-paste-page`/`OrdinaryPastePage`，andallfive nonordinary lazy closures excludeordinary API/autosave/autosync/history/mutation code。
+In the same RED suite, load the real lazy `OrdinaryPage` while mocking only Task13’s child `OrdinaryPastePage` as a render probe that records `{acceptedSource,version,autosaveAcceptedSource,lastSavedContent,autosaveState}` on every committed render. Resolve one controlled content-save 200. The exact render sequence may contain the complete old tuple and the complete accepted tuple only; it must contain no cross-product frame, and both autosave aliases must be identical in every record.
+
+`src/client/App.module-graph.test.ts` is the sole source-level import proof。Usingthe installed TypeScript compiler API，loadtheproject`tsconfig.json` compiler options，parse static import declarations andliteral dynamic`import()` expressions，resolve every relative or`@/` production edge with`ts.resolveModuleName`，andtraverse resolved`src/client` modules recursively whileexcluding`node_modules` andall`*.test.*`/`*.browser.test.*` files，thenassert：App hasexactly one source dynamic edge to`./pages/OrdinaryPage` andno source edge to`./hooks/use-paste-page` or`./components/OrdinaryPastePage`；`OrdinaryPage.tsx` hasdirect static import declarations tobothofthose modules；noother production module imports eitherordinary module；andthefive nonordinary page-root closures exclude`OrdinaryPage`、`use-paste-page`、`OrdinaryPastePage`、`autosave`、`paste-sync`、`paste-controller`、`surface-apply` and`history`。The shared`api.ts` remainsallowed because`CreatePage` uses`api.create`。Task17 build tests do notrepeat orreplace these source-edge assertions。
 
 Run RED:
 
 ```powershell
-npx vitest run src/client/App.browser.test.tsx -t "mounts every branch|one ordinary lifecycle|no immediate GET|accepts autosave atomically"
+npx vitest run src/client/App.browser.test.tsx src/client/App.module-graph.test.ts -t "mounts every branch|one ordinary lifecycle|no immediate GET|accepts autosave atomically|keeps ordinary imports solely in OrdinaryPage"
 ```
 
 Expected RED: `use-paste-page` is absent andthe current temporary App shell does notrender theapproved page components orcontroller lifecycle。
@@ -2311,7 +2313,7 @@ Assertinitial nofake times；alllaterautosync transitions useownstateChangedAt�
 - [ ] **Step 8: Focused and full GREEN checks**
 
 ```powershell
-npx vitest run src/client/App.browser.test.tsx src/client/paste-sync.test.ts src/client/paste-controller.test.ts src/client/surface-apply.test.ts
+npx vitest run src/client/App.browser.test.tsx src/client/App.module-graph.test.ts src/client/paste-sync.test.ts src/client/paste-controller.test.ts src/client/surface-apply.test.ts
 npm run build
 npx vitest run --testTimeout=600000
 ```
@@ -2321,11 +2323,11 @@ Inspectnetwork/import graph underbrowser tests；ordinary source startup hasnoCr
 - [ ] **Step 9: Commit and independent review gate**
 
 ```powershell
-git add src/client/App.tsx src/client/pages/OrdinaryPage.tsx src/client/hooks/use-paste-page.ts src/client/App.browser.test.tsx
+git add src/client/App.tsx src/client/pages/OrdinaryPage.tsx src/client/hooks/use-paste-page.ts src/client/App.browser.test.tsx src/client/App.module-graph.test.ts
 git commit -m "feat: integrate React paste lifecycle"
 ```
 
-Independent Opus performsmax-effort state-machine review againstspec17.5-17.11，runsreverse-promise/fake-clock/component suites，verifies`OrdinaryPage` is the sole hook owner andnonordinary lazy closures excludeordinary code，auditsall token/cleanup/credential/status rules andensuresno child contract workaround。Only`APPROVED` integrates。
+Independent Opus performsmax-effort state-machine review againstspec17.5-17.11，runsreverse-promise/fake-clock/component suites，usesonlyTask15’s TypeScript source-graph test toverify`OrdinaryPage` is the sole direct hook/component import owner andthefive nonordinary source closures excludeordinary code，auditsall token/cleanup/credential/status rules andensuresno child contract workaround。Only`APPROVED` integrates。
 
 ---
 
@@ -2342,7 +2344,7 @@ Independent Opus performsmax-effort state-machine review againstspec17.5-17.11�
 - Create: `test/fixtures/external.html`
 - Create: `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`
 - Create: `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`
-- Create generated release receipts: `test/e2e/evidence/**`
+- Create generated official-source and release receipts: `test/e2e/evidence/browser-target-sources/{chrome,edge,firefox,safari}-stable.json`, `test/e2e/evidence/browser-matrix/**`, `test/e2e/evidence/engine/**`, `test/e2e/evidence/accessibility/**`
 
 - [ ] **Step 1: Capture a real Playwright RED, then configure the minimal GREEN supervised Wrangler server**
 
@@ -2364,17 +2366,31 @@ Run RED beforecreating`playwright.config.ts`：
 npx playwright test test/e2e/create-password.spec.ts --project=chromium
 ```
 
-Expected RED: Playwright reports thatproject`chromium` isnot configured（or cannot reach127.0.0.1:8787 underdefault config）；no test may pass againstan unrelated reused server。
+Expected RED: Playwright reports thatproject`chromium` isnot configured（or cannot reach127.0.0.1:8787 underdefault config）；no test may pass againstan unrelated reused server。Beforecreatingthe evidence scripts，also capturetheir missing-command RED：
 
-Then create `playwright.config.ts` with `webServer.command="npm run dev:e2e"`, URL `http://127.0.0.1:8787/`, timeout 120,000, and `reuseExistingServer:false`. The Task 8-owned command performs a fresh Vite projection and TypeScript check before Wrangler starts, which is mandatory in a clean isolated worktree; no Playwright command may rely on ignored `dist/` bytes or a generated asset projection left by another task. Exact bundled-engine project names are `chromium`, `firefox`, `webkit`, `mobile-320`（Chromium，320×720，touch/mobile）and `reduced-motion`（Chromium）。Do not add or conditionally detect an `msedge` project and do not label these engine projects Chrome、Edge or Safari evidence。Use retries1 withtrace andscreenshot onfirst retry。Eachtest ownsuniquecrypto ID anddoesnotdepend onanother test。The root probe isminimal GREEN onlyafterthe configured Wrangler process serves theReact shell。
+```powershell
+node scripts/browser-evidence.mjs self-test
+node scripts/verify-release-evidence.mjs --self-test
+```
+
+Both commands mustexitnonzero becauseTask16 hasnot createdthem；do notmanufacture passing evidence。Then create `playwright.config.ts` with `webServer.command="npm run dev:e2e"`, URL `http://127.0.0.1:8787/`, timeout 120,000, and `reuseExistingServer:false`. The Task 8-owned command performs a fresh Vite projection and TypeScript check before Wrangler starts, which is mandatory in a clean isolated worktree; no Playwright command may rely on ignored `dist/` bytes or a generated asset projection left by another task. Exact bundled-engine project names are `chromium`, `firefox`, `webkit`, `mobile-320`（Chromium，320×720，touch/mobile）and `reduced-motion`（Chromium）。Do not add or conditionally detect an `msedge` project and do not label these engine projects Chrome、Edge or Safari evidence。Use retries1 withtrace andscreenshot onfirst retry。Eachtest ownsuniquecrypto ID anddoesnotdepend onanother test。The root probe isminimal GREEN onlyafterthe configured Wrangler process serves theReact shell。
 
 `browser-matrix.json` is the release-time machine-readable contract，not a prose checklist。It uses this exact discriminated shape：
 
 ```ts
 type BrowserProduct = "Chrome" | "Edge" | "Firefox" | "Safari";
 type BrowserSlot = "current" | "previous";
+type BrandedEnvironment =
+  | "windows-chrome-current"
+  | "windows-chrome-previous"
+  | "windows-edge-current"
+  | "windows-edge-previous"
+  | "windows-firefox-current"
+  | "windows-firefox-previous"
+  | "macos-safari-current"
+  | "macos-safari-previous";
 type BrowserMatrix = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   releaseDate: string;
   targets: Array<{
     product: BrowserProduct;
@@ -2390,8 +2406,9 @@ type BrowserMatrix = {
         targetMajor: number;
         observedVersion: string;
         mode: "manual-branded";
-        environment: string;
+        environment: BrandedEnvironment;
         status: "passed";
+        testedAt: string;
         versionArtifact: string;
         evidence: string;
       }
@@ -2403,6 +2420,7 @@ type BrowserMatrix = {
         mode: "manual-branded";
         environment: "macos-safari-current" | "macos-safari-previous";
         status: "not-available";
+        testedAt: string;
         versionArtifact: null;
         evidence: string;
       }
@@ -2411,12 +2429,54 @@ type BrowserMatrix = {
     project: "chromium" | "firefox" | "webkit";
     exactVersion: string;
     status: "passed";
+    testedAt: string;
     evidence: string;
+  }>;
+};
+
+type VendorSourceId =
+  | "google-chrome-versionhistory-win-stable"
+  | "microsoft-edge-enterprise-win-x64-stable"
+  | "mozilla-firefox-stability-releases"
+  | "apple-security-releases-safari";
+
+type VendorReleaseSourceArtifact = {
+  schemaVersion: 1;
+  releaseDate: string;
+  product: BrowserProduct;
+  channel: "stable";
+  source: {
+    id: VendorSourceId;
+    url: string;
+    responseCount: number;
+    responseSha256: string;
+  };
+  retrievedAt: string;
+  releases: Array<{
+    sourceReleaseIds: string[];
+    exactVersion: string;
+    major: number;
+    releasedAt: string;
   }>;
 };
 ```
 
-Immediately before evidence acquisition，the release controller fills exactly eight `targets` from dated official vendor stable-release metadata saved at each `sourceArtifact` undertracked`test/e2e/evidence/`：`current` and`previous` for every product，with`previous.major === current.major - 1`。Do not prefill versions from this plan。`scripts/verify-release-evidence.mjs` requires all source artifacts toexist，exactly one target andone row for each product/slot pair，row`targetMajor` equality withits target，andno extra row。It requiresboth Chrome rows、both Edge rows andboth Firefox rows tobe`passed` withnonempty runtime`observedVersion` whose normalized exact version equals`target.exactVersion` andwhose parsed major equals`target.major`，plus existing version/test evidence artifacts。Safari uses the same passed exact-version rule when acquired；only a Safari row may be`not-available`，andthat row must still have target exactVersion/source evidence plus an existing runner-provisioning failure artifact。A Safari unavailable row isnot a pass andnever satisfies manual accessibility evidence。`engineCoverage` must separately contain passed Chromium、Firefox andWebKit reports withversions；the verifier never maps Chromium toChrome/Edge orWebKit toSafari。
+Task16’s`browser-evidence.mjs acquire-targets` is theonly acquisition/normalization owner。It usesNode22 global`fetch` plusstdlib JSON/crypto/fs，calls each URL with`redirect:"error"`，requiresHTTP200 beforeparsing，andhasthese exact built-in source adapters；there isno manual copy orseparate normalization step：
+
+| Product | Required `source.id` and exact official `source.url` | Accepted vendor records and owned normalization |
+|---|---|---|
+| Chrome | `google-chrome-versionhistory-win-stable`；`https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction%3D1&order_by=starttime%20desc&page_size=1000` | Follow`nextPageToken` withthe same query plus`page_token` untilabsent；acceptonly`fraction===1` records withstring`name`、numeric dotted`version` andRFC3339`serving.startTime`。Group same`version`，sort/deduplicate its`name` values into`sourceReleaseIds`，anduse theearliest start instant as`releasedAt`。Conflicting repeats exitnonzero。 |
+| Edge | `microsoft-edge-enterprise-win-x64-stable`；`https://edgeupdates.microsoft.com/api/products?view=enterprise` | Selectthe sole`Product==="Stable"` array，thenonly`Platform==="Windows"` and`Architecture==="x64"`；map`String(ReleaseId)` asits sole`sourceReleaseIds` member，`ProductVersion` as`exactVersion` and`PublishedTime` asrelease time。The source’s timezone-free exact`YYYY-MM-DDTHH:mm:ss` value isdefined bythis adapter asUTC andnormalized byappending`Z` beforecanonical timestamp parsing。 |
+| Firefox | `mozilla-firefox-stability-releases`；`https://product-details.mozilla.org/1.0/firefox_history_stability_releases.json` | Map everyown object entry whosekey is numeric dottedversion andwhosevalue isavalid Gregorian`YYYY-MM-DD`；use theversion key asits sole`sourceReleaseIds` member andnormalize thedate to`T00:00:00.000Z`。 |
+| Safari | `apple-security-releases-safari`；`https://support.apple.com/en-us/100100` | Parse everyHTML table row whosefirst text cell isexactly`Safari <numeric-dotted-version>` andwhose release-date cell is`DD Mon YYYY`；use thecanonical stripped row text asits sole`sourceReleaseIds` member andnormalize thedate toUTC midnight。Any duplicate Safari version withdifferent date orrow identity exitsnonzero。 |
+
+Forall adapters，`source.responseSha256` islowercase SHA-256 ofthe exact response-body bytes inrequest order separated byone LF byte，mustmatch`^[0-9a-f]{64}$`，and`responseCount` isapositive safe integer equal tothatbody count。After vendor filtering，the artifact containsone canonical record perexact version andatleastthree distinct stable majors，notonly thetwo selected targets。`exactVersion` mustmatch`^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$`；`major` isapositive safe integer equal tothefirst numeric component；each`sourceReleaseIds` array isnonempty/sorted/unique andno ID occurs inanother record；each`releasedAt` iscanonical UTC andnotlater than`retrievedAt`。Duplicate exact versions、duplicate source IDs、field disagreement orunexpected response shape makesacquisition exitnonzero andwrite nothing。Allfour successful artifacts arewritten atomically to`test/e2e/evidence/browser-target-sources/{chrome,edge,firefox,safari}-stable.json`，withthe fixed product/channel/source identity shownabove。
+
+`releaseDate` hasexact grammar`YYYY-MM-DD`：it mustmatch`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$` and，with`midnight = releaseDate + "T00:00:00.000Z"`，satisfy`Number.isFinite(Date.parse(midnight)) && new Date(Date.parse(midnight)).toISOString() === midnight`。Every`retrievedAt`、`releasedAt` and`testedAt` inany source、browser、Safari-unavailable、engine oraccessibility artifact mustbe canonical RFC3339 UTC`YYYY-MM-DDTHH:mm:ss.sssZ`，match`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$`，parse toafinite instant，andround-trip exactly through`new Date(value).toISOString()`。Let`D=Date.parse(releaseDate+"T00:00:00.000Z")`；theone freshness interval forall evidence is`[D - 7 * 86_400_000, D + 86_400_000)`。Every`retrievedAt` and`testedAt` mustfallinsideit。Historical`releasedAt` values mayprecede theinterval butmustnotexceed theirartifact’s`retrievedAt`。Thus acquisition maystart seven days beforethe UTC release date，and evidence maycomplete throughthat release date butnotafterits nextUTC midnight。
+
+`acquire-targets --release-date` validatesits explicit argument andcurrent time againstthat interval beforeandafterfetching，sets each`retrievedAt` fromthe post-fetch current instant，then derives targets independently perartifact fromrecords whose`releasedAt <= retrievedAt`：sortdistinct majors numerically descending，mapthehighest to`current` andsecond-highest to`previous`，andwithin each selected major choose thegreatest numeric dot-component tuple paddedwithzero components，usinglater`releasedAt` onlyto breakanequal tuple；anequal tuple/timestamp fromdifferent exact strings isambiguous andfails。The selected majors may beconsecutive ornonconsecutive；the script performsno arithmetic relation check betweenthem。The command writesexactlytwo targets perproduct andresets`rows`/`engineCoverage` toempty in`browser-matrix.json`；it alsoinitializes`accessibility-manual.json` withthe same exact`releaseDate` andempty rows。A failure writesnoneofthese files。
+
+`scripts/verify-release-evidence.mjs` reparses allfour fixed source-artifact paths andrejects schema/product/channel/source ID/source URL/releaseDate mismatches、stale`retrievedAt`、malformed/repeated/inconsistent release records orfewerthanthree distinct majors。It independently repeats the selection above andrequires exactlyone matching target andone final row foreachofthe eight product/slot pairs，withthe target’s`major`、`exactVersion` andfixed`sourceArtifact` equal tothederived values andthe row’s`targetMajor` equal tothe target。Both Chrome rows、both Edge rows andboth Firefox rows mustbe`passed` witha fresh`testedAt` andnonempty runtime`observedVersion` whose normalized exact version equals`target.exactVersion` andwhose parsed major equals`target.major`，plus existing matching version/test evidence artifacts。Safari uses thesame passed exact-version/freshness rule whenacquired；onlya Safari row may be`not-available`，andit muststill bindthederived target andfresh runner-provisioning failure artifact。A Safari unavailable row isnotapass andnever satisfiesmanual accessibility evidence。`engineCoverage` mustseparately containexactlyone fresh passed Chromium、Firefox andWebKit report withversions；the verifier nevermapsChromium toChrome/Edge orWebKit toSafari。Finally itrequires`browser-matrix.json` and`accessibility-manual.json` tohaveexactly thesame valid`releaseDate`，requires theverifier’s owncurrent instant inside thesame interval，andapplies thatinterval toevery`retrievedAt`/`testedAt`。Implement both self-test modes with`fs.mkdtemp` under`os.tmpdir()` and`finally` cleanup，no network andno tracked writes。`browser-evidence.mjs self-test` feedsminimal raw payloads throughallfour adapters，including Chrome duplicate-fraction grouping、Edge timezone conversion、Firefox UTC-midnight conversion、Safari nonadjacent majors，andproves atomic no-write onone source failure orinterval crossing。`verify-release-evidence.mjs --self-test` first accepts onecomplete synthetic campaign whose twohighest majors arenonadjacent，thenrequires rejection aftereach independent mutation：wrong product/channel/source ID/source URL，duplicate exact version，duplicate source release ID，version/major disagreement，malformed/future release time，fewerthanthree majors，wrong target/slot/exact version/source path，aggregate date disagreement，one out-of-window evidence timestamp，andanout-of-window verifier clock。
 
 - [ ] **Step 2: Write RED create/password/edit/history/delete journey**
 
@@ -2449,38 +2509,54 @@ async function expectNoAxeViolations(page: Page): Promise<void> {
 
 Create real-Wrangler fixtures and callthis helper aftereach branch reaches settled visible state：create、password、application error、ordinary text、ordinary Markdown、armed-view-once、consumed text、consumed Markdown、not-found、delete-uncertain andread-only`/md`。The delete-uncertain fixture may abort the real app’s already-dispatched DELETE in thepage，butmust notmock thedocument orserver response；allother branch setup usesreal routes/mutations。Run thebranch table in`chromium`、`firefox` and`webkit` focused commands。Do not addanother axe/accessibility runner。
 
-`accessibility-manual.md` defines four separate execution checklists，and`accessibility-manual.json` stores exactly four release rows withthis shape：
+`accessibility-manual.md` defines four separate execution checklists。Each tracked input receipt under`test/e2e/evidence/accessibility/` hasthis exact shape，and`record-accessibility` copiesitsvalidated row plusinput path intothe aggregate：
 
 ```ts
+type AccessibilityCategory =
+  | "screen-reader"
+  | "contrast"
+  | "zoom-reflow-200"
+  | "physical-touch";
+type ManualAccessibilityReceipt = {
+  schemaVersion: 1;
+  releaseDate: string;
+  category: AccessibilityCategory;
+  status: "passed" | "failed";
+  testedAt: string;
+  tester: string;
+  environment: {
+    os: string;
+    osVersion: string;
+    browser: string;
+    browserVersion: string;
+    tool: string;
+    toolVersion: string;
+    device: string;
+  };
+  notes: string;
+};
 type ManualAccessibilityEvidence = {
   schemaVersion: 1;
   releaseDate: string;
-  rows: Array<{
-    category: "screen-reader" | "contrast" | "zoom-reflow-200" | "physical-touch";
-    status: "passed" | "failed";
-    testedAt: string;
-    tester: string;
-    environment: {
-      os: string;
-      osVersion: string;
-      browser: string;
-      browserVersion: string;
-      tool: string;
-      toolVersion: string;
-      device: string;
-    };
+  rows: Array<Omit<ManualAccessibilityReceipt, "schemaVersion" | "releaseDate"> & {
     evidence: string;
   }>;
 };
 ```
 
-The screen-reader row exercises heading/landmark announcement、everyfield/error/help relationship、Tabs/Sheet/Dialog focus、polite status changes anddiff prefixes withan actual screen reader such asNVDA onWindows orVoiceOver onmacOS/iOS。The contrast row records measured light/dark normal-text、large-text、non-text control andfocus-indicator ratios againstWCAG2.2AA。The zoom row runs browser zoomat200% andrecordsreflow、content availability、focus visibility andabsence ofpage-level horizontal scrolling。The physical-touch row usesreal touch hardware andruns44px Help、Sheet、Dialog、Create andEdit flows；mouse emulation doesnotqualify。Every row needsdatedartifact evidence undertracked`test/e2e/evidence/accessibility/` andexact environment/tool versions。`scripts/verify-release-evidence.mjs` rejects a missing category，duplicate category，`failed` status，empty version/tester，missing artifact ordate outside the release evidence set；the manual schema hasno unavailable status。`accessibility-manual.md` may record that apreferred platform/tool wasunavailable，butthat note doesnotcreate orsatisfy aJSON category row。Use another actual available platform/tool orblock release，never record unavailable aspass。
+The screen-reader row exercises heading/landmark announcement、everyfield/error/help relationship、Tabs/Sheet/Dialog focus、polite status changes anddiff prefixes withan actual screen reader such asNVDA onWindows orVoiceOver onmacOS/iOS。The contrast row records measured light/dark normal-text、large-text、non-text control andfocus-indicator ratios againstWCAG2.2AA。The zoom row runs browser zoomat200% andrecordsreflow、content availability、focus visibility andabsence ofpage-level horizontal scrolling。The physical-touch row usesreal touch hardware andruns44px Help、Sheet、Dialog、Create andEdit flows；mouse emulation doesnotqualify。Every row needsexact environment/tool versions anditsown tracked receipt。`record-accessibility --release-date --category --evidence` requiresallthree explicit arguments，requires thecommand’s current instant andreceipt`testedAt` inside thedefined interval，andrequires receipt/aggregate releaseDate equality、argument/category equality、allknown keys、nonempty environment/tester/notes andan existing in-tree evidence path；it replaces onlythat category atomically anddoesnotaccept duplicates orextra fields。`scripts/verify-release-evidence.mjs` rejects a missing orduplicate category，`failed` status，empty version/tester/notes，missing orout-of-tree artifact，artifact/content mismatch orout-of-window timestamp；the manual schema hasno unavailable status。`accessibility-manual.md` may record that apreferred platform/tool wasunavailable，butthat note doesnotcreate orsatisfy aJSON category row。Use another actual available platform/tool orblock release，never record unavailable aspass。
 
 - [ ] **Step 6: Acquire exact release-time branded browser and manual accessibility evidence**
 
 Branded browser history is not acquired by `npx playwright install`。Provision these release environments before this step：`windows-chrome-current`、`windows-chrome-previous`、`windows-edge-current`、`windows-edge-previous`、`windows-firefox-current` and`windows-firefox-previous` are isolated Windows11 runners whose named target branded binary ispreinstalled at the path exported as`CFPB_BROWSER_EXECUTABLE` andwhose auto-update isdisabled forthe run。`macos-safari-current` and`macos-safari-previous` areactual Mac runners whose OS contains thetarget Safari major at`/Applications/Safari.app`。A historical branded binary ormatching historical macOS runner thatcannot beprovisioned blocksChrome/Edge/Firefox andmay produceonly theexplicit Safari unavailable row；it isnot replaced by aPlaywright download。Never run orclaim Safari onWindows。
 
-On each Windows runner，Terminal A runs：
+First，onthe release controller with`CFPB_RELEASE_DATE` setto the intended UTC release date，run theowned all-or-nothing source acquisition。This command mustcomplete beforeany capture andisrerun fromscratch ratherthanediting generated targets：
+
+```powershell
+node scripts/browser-evidence.mjs acquire-targets --release-date $env:CFPB_RELEASE_DATE
+```
+
+Distribute byte-identical read-only copies ofthe initialized matrix andfour source artifacts toeach isolated runner，butkeepone writable aggregate onthe release controller；nevermerge independently edited matrices。Every later command uses thatsame explicit releaseDate andrefuses acontent mismatch。On each Windows runner，Terminal A runs：
 
 ```powershell
 npm ci
@@ -2490,64 +2566,107 @@ npm run dev:e2e
 Terminal B sets the exact installed binary path，then uses the matching literal command fromthis list：
 
 ```powershell
+# Run capture on the named runner; after its artifacts return, run record-pass on the release controller.
+$env:CFPB_RELEASE_DATE = (Get-Content test/e2e/browser-matrix.json -Raw | ConvertFrom-Json).releaseDate
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\chrome\current\chrome.exe"
-node scripts/browser-evidence.mjs capture --product Chrome --slot current --environment windows-chrome-current --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Chrome --slot current --environment windows-chrome-current --evidence test/e2e/evidence/browser-matrix/chrome-current.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Chrome --slot current --environment windows-chrome-current --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Chrome --slot current --environment windows-chrome-current --evidence test/e2e/evidence/browser-matrix/chrome-current.json
 
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\chrome\previous\chrome.exe"
-node scripts/browser-evidence.mjs capture --product Chrome --slot previous --environment windows-chrome-previous --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Chrome --slot previous --environment windows-chrome-previous --evidence test/e2e/evidence/browser-matrix/chrome-previous.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Chrome --slot previous --environment windows-chrome-previous --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Chrome --slot previous --environment windows-chrome-previous --evidence test/e2e/evidence/browser-matrix/chrome-previous.json
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\edge\current\msedge.exe"
-node scripts/browser-evidence.mjs capture --product Edge --slot current --environment windows-edge-current --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Edge --slot current --environment windows-edge-current --evidence test/e2e/evidence/browser-matrix/edge-current.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Edge --slot current --environment windows-edge-current --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Edge --slot current --environment windows-edge-current --evidence test/e2e/evidence/browser-matrix/edge-current.json
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\edge\previous\msedge.exe"
-node scripts/browser-evidence.mjs capture --product Edge --slot previous --environment windows-edge-previous --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Edge --slot previous --environment windows-edge-previous --evidence test/e2e/evidence/browser-matrix/edge-previous.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Edge --slot previous --environment windows-edge-previous --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Edge --slot previous --environment windows-edge-previous --evidence test/e2e/evidence/browser-matrix/edge-previous.json
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\firefox\current\firefox.exe"
-node scripts/browser-evidence.mjs capture --product Firefox --slot current --environment windows-firefox-current --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Firefox --slot current --environment windows-firefox-current --evidence test/e2e/evidence/browser-matrix/firefox-current.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot current --environment windows-firefox-current --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot current --environment windows-firefox-current --evidence test/e2e/evidence/browser-matrix/firefox-current.json
 $env:CFPB_BROWSER_EXECUTABLE = "C:\release-browsers\firefox\previous\firefox.exe"
-node scripts/browser-evidence.mjs capture --product Firefox --slot previous --environment windows-firefox-previous --executable-env CFPB_BROWSER_EXECUTABLE
-node scripts/browser-evidence.mjs record-pass --product Firefox --slot previous --environment windows-firefox-previous --evidence test/e2e/evidence/browser-matrix/firefox-previous.json
+node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot previous --environment windows-firefox-previous --executable-env CFPB_BROWSER_EXECUTABLE
+node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot previous --environment windows-firefox-previous --evidence test/e2e/evidence/browser-matrix/firefox-previous.json
 ```
 
-For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path beforecapture。`capture` uses`child_process.spawn(executablePath,["--version"],{shell:false})` torunthat exact executable’s version command，normalizes andcompares itsexact version andmajor withthe matching target，writes`test/e2e/evidence/browser-matrix/<product>-<slot>-version.txt`，thenlaunches that executable at`http://127.0.0.1:8787/`。The tester executes every`browser-manual.md` check andwrites this exact evidence shape：
+For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path andrunits`capture` line there。`capture` uses`child_process.spawn(executablePath,["--version"],{shell:false})` torunthat exact executable’s version command，normalizes andcompares itsexact version andmajor withthe matching target，writes`test/e2e/evidence/browser-matrix/<product>-<slot>-version.txt`，thenlaunches that executable at`http://127.0.0.1:8787/`。The tester executes every`browser-manual.md` check andwrites this exact evidence shape：
 
 ```ts
 type BrandedBrowserSmoke = {
   schemaVersion: 1;
+  releaseDate: string;
   product: BrowserProduct;
   slot: BrowserSlot;
   testedAt: string;
   tester: string;
-  environment: string;
+  environment: BrandedEnvironment;
   checks: Array<{
     id: "root-create" | "password-post-hard-refresh" | "ordinary-edit-autosave" | "tabs-sheet" | "raw-html-md-file" | "delete-root-handoff";
     status: "passed" | "failed";
     notes: string;
   }>;
 };
+type SafariRunnerUnavailable = {
+  schemaVersion: 1;
+  releaseDate: string;
+  product: "Safari";
+  slot: BrowserSlot;
+  testedAt: string;
+  reporter: string;
+  environment: "macos-safari-current" | "macos-safari-previous";
+  targetSourceArtifact: string;
+  failure: "runner-not-provisioned";
+  notes: string;
+};
+type EngineCoverageReceipt = {
+  schemaVersion: 1;
+  releaseDate: string;
+  project: "chromium" | "firefox" | "webkit";
+  exactVersion: string;
+  status: "passed";
+  testedAt: string;
+  report: string;
+};
 ```
 
-The `record-pass` command accepts onlyan existingJSON artifact containingexactly oneofeach six check IDs，allpassed，withmatching product/slot/environment andnonempty tester/date；thenit updates onlythematching matrix row withthe captured runtime version/artifact。It doesnot accept atyped version orfree-form success string。The script usesNode stdlib anddoesnot addabrowser automation dependency。
+Every capture subcommand requires`--release-date` equal tothe matrix date andvalidates current time beforereading/writing a version artifact orlaunching thebrowser。Afterthe runner returns itsversion text andsmoke JSON tothe controller’s matching tracked paths，the controller runs thecorresponding`record-pass` line showninthe pair。`record-pass` also requires current time andthe receipt’s canonical`testedAt` inside theinterval，thenaccepts onlyan existingin-tree JSON artifact withthat same releaseDate，exact known keys，exact matching product/slot/environment，nonempty tester，andexactly oneofeach six check IDs allpassed。It updates onlythe matching matrix row atomically withthe receipt timestamp、captured runtime version andartifact paths；it doesnotaccept atyped version orfree-form success string。The script usesNode stdlib anddoesnot addabrowser automation dependency。
 
 On each actual Safari Mac runner，Terminal A runs`npm ci` and`npm run dev:e2e`；Terminal B runs：
 
 ```bash
-node scripts/browser-evidence.mjs capture-safari --slot current --environment macos-safari-current
-node scripts/browser-evidence.mjs record-pass --product Safari --slot current --environment macos-safari-current --evidence test/e2e/evidence/browser-matrix/safari-current.json
-node scripts/browser-evidence.mjs capture-safari --slot previous --environment macos-safari-previous
-node scripts/browser-evidence.mjs record-pass --product Safari --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous.json
+# Run capture-safari on the named runner; after its artifacts return, run record-pass on the release controller.
+CFPB_RELEASE_DATE="$(node -p "JSON.parse(require('node:fs').readFileSync('test/e2e/browser-matrix.json','utf8')).releaseDate")"
+node scripts/browser-evidence.mjs capture-safari --release-date "$CFPB_RELEASE_DATE" --slot current --environment macos-safari-current
+node scripts/browser-evidence.mjs record-pass --release-date "$CFPB_RELEASE_DATE" --product Safari --slot current --environment macos-safari-current --evidence test/e2e/evidence/browser-matrix/safari-current.json
+node scripts/browser-evidence.mjs capture-safari --release-date "$CFPB_RELEASE_DATE" --slot previous --environment macos-safari-previous
+node scripts/browser-evidence.mjs record-pass --release-date "$CFPB_RELEASE_DATE" --product Safari --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous.json
 ```
 
-Run each pair only on itsnamed runner。`capture-safari` runs exact`/usr/bin/safaridriver --version` forversion capture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
+Run each`capture-safari` line onlyonits named runner。It runs exact`/usr/bin/safaridriver --version` forversion capture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution；afterthe runner returns itsversion text andsmoke JSON，runthat slot’s`record-pass` line onthe release controller。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
 
 ```bash
-node scripts/browser-evidence.mjs record-safari-unavailable --slot current --environment macos-safari-current --evidence test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json
-node scripts/browser-evidence.mjs record-safari-unavailable --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json
+CFPB_RELEASE_DATE="$(node -p "JSON.parse(require('node:fs').readFileSync('test/e2e/browser-matrix.json','utf8')).releaseDate")"
+node scripts/browser-evidence.mjs record-safari-unavailable --release-date "$CFPB_RELEASE_DATE" --slot current --environment macos-safari-current --evidence test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json
+node scripts/browser-evidence.mjs record-safari-unavailable --release-date "$CFPB_RELEASE_DATE" --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json
 ```
 
-Use onlythe applicable slot command；the evidence artifact must contain thedated provisioning failure andtarget source reference。The subcommand rejects every non-Safari product。Acquire theirseparate exact versions/reports with`node scripts/browser-evidence.mjs record-engine --project chromium`，then`firefox`，then`webkit`。Each `record-engine` invocation runs that exact Playwright project againstsupervised Wrangler withthe JSON reporter，captures`browser.version()` fromthe project fixture，andwrites the engine row onlyafterthe project exits0。Execute all four manual accessibility checklists onavailable actual tools/devices，write the four exact JSON rows，then run`node scripts/verify-release-evidence.mjs`。Any missing/failing Chrome、Edge、Firefox row，malformed/extra browser row，missing engine report，or missing/failed manual category exitsnonzero。
+Use onlythe applicable slot command。`record-safari-unavailable` accepts onlythe exact`SafariRunnerUnavailable` shape atanin-tree path；it requires theexplicit releaseDate andcurrent/receipt times inside theinterval，exact Safari product/slot/environment，nonempty reporter/notes，`runner-not-provisioned` failure and`targetSourceArtifact` equal tothe matching derived target。It rejects every non-Safari product andatomically writes onlythat unavailable row。
+
+Acquire separate bundled-engine receipts andingest each manual accessibility receipt withthese exact commands：
+
+```powershell
+$releaseDate = (Get-Content test/e2e/browser-matrix.json -Raw | ConvertFrom-Json).releaseDate
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project chromium
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project firefox
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project webkit
+node scripts/browser-evidence.mjs record-accessibility --release-date $releaseDate --category screen-reader --evidence test/e2e/evidence/accessibility/screen-reader.json
+node scripts/browser-evidence.mjs record-accessibility --release-date $releaseDate --category contrast --evidence test/e2e/evidence/accessibility/contrast.json
+node scripts/browser-evidence.mjs record-accessibility --release-date $releaseDate --category zoom-reflow-200 --evidence test/e2e/evidence/accessibility/zoom-reflow-200.json
+node scripts/browser-evidence.mjs record-accessibility --release-date $releaseDate --category physical-touch --evidence test/e2e/evidence/accessibility/physical-touch.json
+node scripts/verify-release-evidence.mjs
+```
+
+Each`record-engine` validates theexplicit releaseDate andstart clock，runs that exact Playwright project againstsupervised Wrangler withthe JSON reporter，captures`browser.version()` fromthe project fixture，thenrevalidates completion clock。Onlyanexit0 run completed inside theinterval atomically writes its exact`EngineCoverageReceipt` under`test/e2e/evidence/engine/<project>.json` andcorresponding matrix row，with`testedAt = new Date().toISOString()` atcompletion；crossingthe interval writesnothing。Execute all four manual checklists onavailable actual tools/devices beforetheir record commands。Any missing/failing Chrome、Edge、Firefox row，malformed/extra browser row，missing/stale engine report，source-derivation mismatch ormissing/failed/stale manual category exitsnonzero。
 
 - [ ] **Step 7: Run focused RED/GREEN and full browser checks**
 
@@ -2565,9 +2684,12 @@ npx playwright test test/e2e/accessibility.spec.ts --project=mobile-320
 npm run build
 npx vitest run --testTimeout=600000
 npx playwright test
-node scripts/browser-evidence.mjs record-engine --project chromium
-node scripts/browser-evidence.mjs record-engine --project firefox
-node scripts/browser-evidence.mjs record-engine --project webkit
+$releaseDate = (Get-Content test/e2e/browser-matrix.json -Raw | ConvertFrom-Json).releaseDate
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project chromium
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project firefox
+node scripts/browser-evidence.mjs record-engine --release-date $releaseDate --project webkit
+node scripts/browser-evidence.mjs self-test
+node scripts/verify-release-evidence.mjs --self-test
 node scripts/verify-release-evidence.mjs
 ```
 
@@ -2580,7 +2702,7 @@ git add playwright.config.ts scripts/browser-evidence.mjs scripts/verify-release
 git commit -m "test: add cross-browser paste journeys"
 ```
 
-Independent Opus reviewsnetwork traces、real Wrangler usage、race controls、no external exfiltration、everybranch executable AxeBuilder scan、exact eight-row branded matrix schema、runtime version capture、pre-provisioned runner/manual command interface、four mandatory manual accessibility rows、keyboard/touch/320/reduced motion andalljourney assertions。Reviewer rerunsChromium full，Firefox andWebKit accessibility focused sets，andtheevidence verifier；`APPROVED` required。
+Independent Opus reviewsnetwork traces、real Wrangler usage、race controls、no external exfiltration、everybranch executable AxeBuilder scan、thefour fixed official-source adapters、independently derived nonadjacent-capable target selection、exact eight-row branded matrix schema、one release-date grammar/freshness interval、runtime version capture、pre-provisioned runner/manual command interface、four mandatory manual accessibility rows、keyboard/touch/320/reduced motion andalljourney assertions。Reviewer rerunsboth evidence-script self-tests、Chromium full、Firefox andWebKit accessibility focused sets，andthe final evidence verifier；`APPROVED` required。
 
 ---
 
@@ -2600,16 +2722,34 @@ Independent Opus reviewsnetwork traces、real Wrangler usage、race controls、n
 ```ts
 it("enforces the final client manifest and bundle budgets", async () => {
   const manifest = JSON.parse(await readFile("dist/client-assets-manifest.json", "utf8")) as ClientAssetsManifest;
+  const pageNames = [
+    "CreatePage", "ErrorPage", "LocalOnlyPastePage", "MarkdownPage", "OrdinaryPage", "PasswordPage",
+  ] as const;
   const byPath = new Map(manifest.files.map((file) => [file.path, file]));
   const gzip = (group: keyof ClientAssetsManifest["groups"]): number =>
     manifest.groups[group].reduce((total, path) => total + byPath.get(path)!.gzipLevel9Bytes, 0);
   const initialJs = manifest.groups.initial.filter((path) => path.endsWith(".js"));
   const initialCss = manifest.groups.initial.filter((path) => path.endsWith(".css"));
   const gzipPaths = (paths: string[]): number => paths.reduce((total, path) => total + byPath.get(path)!.gzipLevel9Bytes, 0);
+  const initial = new Set(manifest.groups.initial);
+  const applicationPages = new Set(manifest.groups.applicationPages);
   expect(manifest.schemaVersion).toBe(1);
-  expect(Object.keys(manifest.applicationPageRoots).sort()).toEqual([
-    "CreatePage", "ErrorPage", "LocalOnlyPastePage", "MarkdownPage", "OrdinaryPage", "PasswordPage",
-  ]);
+  expect(Object.keys(manifest.applicationPageRoots).sort()).toEqual(pageNames);
+  expect(Object.keys(manifest.applicationPageClosures).sort()).toEqual(pageNames);
+  expect(applicationPages.size).toBe(manifest.groups.applicationPages.length);
+  for (const pageName of pageNames) {
+    const closure = manifest.applicationPageClosures[pageName];
+    expect(new Set(closure).size).toBe(closure.length);
+    expect(closure).toEqual([...closure].sort());
+    expect(closure).toContain(manifest.applicationPageRoots[pageName]);
+    expect(closure.every((path) => byPath.has(path) && applicationPages.has(path) && !initial.has(path))).toBe(true);
+  }
+  expect([...applicationPages].sort()).toEqual(
+    [...new Set(pageNames.flatMap((pageName) => manifest.applicationPageClosures[pageName]))].sort(),
+  );
+  for (const pageName of pageNames.filter((name) => name !== "OrdinaryPage")) {
+    expect(manifest.applicationPageClosures[pageName]).not.toContain(manifest.applicationPageRoots.OrdinaryPage);
+  }
   expect(gzipPaths(initialJs)).toBeLessThanOrEqual(250 * 1024);
   expect(gzipPaths(initialCss)).toBeLessThanOrEqual(80 * 1024);
   expect(gzip("markdown")).toBeLessThanOrEqual(150 * 1024);
@@ -2645,6 +2785,14 @@ type ClientAssetsManifest = {
     MarkdownPage: string;
     OrdinaryPage: string;
   };
+  applicationPageClosures: {
+    CreatePage: string[];
+    PasswordPage: string[];
+    ErrorPage: string[];
+    LocalOnlyPastePage: string[];
+    MarkdownPage: string[];
+    OrdinaryPage: string[];
+  };
   groups: {
     initial: string[];
     applicationPages: string[];
@@ -2661,7 +2809,13 @@ type ClientAssetsManifest = {
 };
 ```
 
-`applicationPageRoots` maps each exact source root name tothe corresponding emitted manifest entry andcontainsnoother key。`files` enumerates every regular file actually deployed under `dist/assets`, including exact `_headers` and every hashed JS/CSS/worker asset but excluding the outside evidence file `dist/client-assets-manifest.json`; therefore the raw-total assertion includes `_headers`. Only `_headers` is exempt from the content-hashed filename rule, and it belongs to no reachability group. Discover the complete graph through manifest `imports` and `dynamicImports`, but compute each budget as incremental network files: `initial` is the entry’s transitive static closure; `applicationPages` is the union of the exact six Task15 lazy roots `CreatePage`、`PasswordPage`、`ErrorPage`、`LocalOnlyPastePage`、`MarkdownPage` and`OrdinaryPage` plus each root’s transitive static closure minus`initial`。The manifest assertion must find App’s dynamic edge to`OrdinaryPage`，then findthat adapter’s static edges to`use-paste-page` andTask13`OrdinaryPastePage`；there must beno App edge directly to either ordinary module。`markdown` is the union, across Ordinary/LocalOnly/Markdown call sites, of each micromark/GFM root’s static closure after subtracting `initial` plus that call site’s page closure; this conservative union is the measured ≤150 KiB group. `crepe` is its JS plus common-style CSS static closure minus `initial` and the OrdinaryPage closure. `diff` is the worker closure minus `initial` and the OrdinaryPage closure, because History need not have loaded Crepe. Deduplicate by emitted path inside each final set; no array may repeat a path. Initial matches spec 18；each application page closure mustexclude otherpage roots，andallfive nonordinary closures，includingMarkdownPage andLocalOnlyPastePage，mustexcludeordinary API/autosave/autosync/history/mutation modules。Shared chunks countonceperreachability set。Fail build onunclassified dynamic root、duplicate file ormissinggenerated path。Use `zlib.gzipSync(bytes,{level:9})`; `sha256` is the exact 64-character lowercase hexadecimal result of `crypto.createHash("sha256").update(bytes).digest("hex")`.
+The six fixed source mappings are`CreatePage -> src/client/pages/CreatePage.tsx`、`PasswordPage -> src/client/pages/PasswordPage.tsx`、`ErrorPage -> src/client/pages/ErrorPage.tsx`、`LocalOnlyPastePage -> src/client/pages/LocalOnlyPastePage.tsx`、`MarkdownPage -> src/client/pages/MarkdownPage.tsx` and`OrdinaryPage -> src/client/pages/OrdinaryPage.tsx`。Beforedeleting the raw Vite manifest，`build.mjs` finds theunique raw record atkey`index.html` with`src==="index.html"` and`isEntry===true`，requires itsdirect`dynamicImports` toresolveexactly those six source records，andmaps each name tothe record’s emitted`file` in`applicationPageRoots`。Thus the raw Vite graph mustcontain the App-owned dynamic`OrdinaryPage` entry established atsource level byTask15。
+
+`applicationPageClosures` hasexactly thesame six keys。Each value isthe named emitted root plusall files inits transitive Vite static`imports`/CSS/assets closure，minus`initial`，sorted byemitted path；the root mustappear inits ownclosure andnoother emitted page root mayappear。`applicationPages` isexactly thededuplicated union ofthose six arrays。Every closure path mustexist in`files` and`applicationPages` andmustbeabsent from`initial`；shared emitted chunks mayappear inmorethanone per-page closure butcountonce ineach final budget set。For`OrdinaryPage` specifically，the final test requires its emitted root andfull incremental closure in`applicationPages` andoutside`initial`，andrequires its emitted root outsideallfive nonordinary closures。
+
+Task17 treats theemitted graph onlyasfile reachability/classification；`use-paste-page`、`OrdinaryPastePage` andother source module names areoutsideits assertions。Vite may inline bothordinary modules intothe`OrdinaryPage` chunk orproduce shared chunks；do notadd`manualChunks`、artificial dynamic imports orany other chunk split toretain source boundaries。Task15’s`App.module-graph.test.ts` remains thesole proof that`OrdinaryPage.tsx` directly statically importsboth ordinary modules andthatnonordinary source closures excludeordinary controllers。
+
+`files` enumerates every regular file actually deployed under `dist/assets`, including exact `_headers` and every hashed JS/CSS/worker asset but excluding the outside evidence file `dist/client-assets-manifest.json`; therefore the raw-total assertion includes `_headers`. Only `_headers` is exempt from the content-hashed filename rule, and it belongs to no reachability group. Discover the complete graph through manifest `imports` and `dynamicImports`, but compute each budget as incremental network files: `initial` is the entry’s transitive static closure；`markdown` is the union, across Ordinary/LocalOnly/Markdown call sites, of each micromark/GFM root’s static closure after subtracting `initial` plus that call site’s page closure；this conservative union is the measured ≤150 KiB group。`crepe` is its JS plus common-style CSS static closure minus `initial` and the OrdinaryPage closure。`diff` is the worker closure minus `initial` and the OrdinaryPage closure，because History need not have loaded Crepe。Deduplicate by emitted path inside each final set；no array may repeat a path。Initial matches spec18。Fail build onunclassified dynamic root、duplicate file、missing generated path orany closure/root/group inconsistency。Use `zlib.gzipSync(bytes,{level:9})`；`sha256` is the exact 64-character lowercase hexadecimal result of `crypto.createHash("sha256").update(bytes).digest("hex")`。
 
 Exact gates：initialJS≤250KiBgzip；initialCSS≤80KiB；newMarkdown graph≤150KiB；newCrepe graph≤1.5MiB；diff graph≤60KiB；all`dist/assets` files≤8MiB uncompressed；no sourcemap；everyserved filename content-hashed except`_headers`。`src/generated/assets.ts` is regenerated frommanifest’sresolvedentry andcommitted finalbytes。
 
@@ -2697,7 +2851,7 @@ git add scripts/build.mjs src/build.test.ts src/generated/assets.ts docs/shadcn-
 git commit -m "build: add release and bundle gates"
 ```
 
-Independent Opus validatesmanifest graph math、gzip/raw budgets、hash/source set、license completeness、supervised cleanup、smoke assertions、dry-run only andunchangedworker/aioapi/package/config。`APPROVED` required。
+Independent Opus validatesraw Vite entry dynamic-root discovery、all six emitted per-page closures andtheir final classifications、manifest graph math、gzip/raw budgets、hash/source set、license completeness、supervised cleanup、smoke assertions、dry-run only andunchangedworker/aioapi/package/config。The review leavesall source import ownership exclusively toTask15 andusesnooutput-chunk assertion torepresent those source imports；it mustnotrequest chunk splitting forordinary modules。`APPROVED` required。
 
 ---
 
@@ -2746,13 +2900,15 @@ npm ci
 npm run build
 npx vitest run --testTimeout=600000
 npx playwright test
+node scripts/browser-evidence.mjs self-test
+node scripts/verify-release-evidence.mjs --self-test
 node scripts/verify-release-evidence.mjs
 npm run smoke
 npx wrangler types --check
 npx wrangler deploy --dry-run --outdir .wrangler-dist
 ```
 
-Every command mustexit0 beforedeletion。The verifier must reportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception；three separate engine rows passed；screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpassed。Missing/failed rows blockdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
+Every command mustexit0 beforedeletion。The verifier mustparse thefour fixed official stable-source artifacts，recompute thehighest two distinct majors bythe Task16 numeric-descending rule，andmatchall eight targets。It mustalso reportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception；three separate engine rows passed；screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpassed。Both aggregates mustsharethe exact valid releaseDate，andthe verifier clock plusevery retrieval/test timestamp mustbeinside`[D - 7 * 86_400_000, D + 86_400_000)`；missing、failed、stale、malformed orsource-unbound evidence blocksdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
 
 - [ ] **Step 2: Add the final RED legacy-removal test**
 
@@ -2806,6 +2962,8 @@ npm ci
 npm run build
 npx vitest run --testTimeout=600000
 npx playwright test
+node scripts/browser-evidence.mjs self-test
+node scripts/verify-release-evidence.mjs --self-test
 node scripts/verify-release-evidence.mjs
 npm run smoke
 npx wrangler types --check
@@ -2823,7 +2981,7 @@ git add src/legacy-removal.test.ts worker.js
 git commit -m "chore: remove legacy worker after release gates"
 ```
 
-Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task 18 againstthe68-ID table below，checksTask18 onlydeletedobsolete implementation，rerunsallthree inverted ancestry checks、thecandidate-symbol source scans、thefocused legacy test andthe release-evidence verifier，andsamplesfresh full evidence。Any finding returns tooriginalowner forRED/fix/re-review；thecandidate may integrate onlyafterTask18 review says`APPROVED`。
+Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task18 againstthe68-ID table below，checksTask18 onlydeletedobsolete implementation，rerunsallthree inverted ancestry checks、thecandidate-symbol source scans、thefocused legacy test、both release-pipeline self-tests andthe final release-evidence verifier，andconfirms fresh official-source-bound evidence。Any finding returns tooriginalowner forRED/fix/re-review；thecandidate may integrate onlyafterTask18 review says`APPROVED`。
 
 - [ ] **Step 6: Cherry-pick the approved candidate and verify the final integration itself**
 
@@ -2834,6 +2992,8 @@ npm ci
 npm run build
 npx vitest run --testTimeout=600000
 npx playwright test
+node scripts/browser-evidence.mjs self-test
+node scripts/verify-release-evidence.mjs --self-test
 node scripts/verify-release-evidence.mjs
 npm run smoke
 npx wrangler types --check
@@ -2878,7 +3038,7 @@ Every row is a release gate。Test title strings below arefixed acceptance names
 | C26 | reviewed domain plus Task 3 | ID boundary/reserved/case/immutable/reuse tests |
 | C27 | Tasks 11 and 16 | recursive dictionary parity、browser language/manual switch journey |
 | C28 | Tasks 6, 11, and 16 | theme controller/remount/noStorage andactiveHTML unaffected |
-| C29 | Tasks 11, 16, and 18 | separate Chromium/Firefox/WebKit engine reports；exact eight branded current/previous rows withonlySafari unavailable exception；everybranch AxeBuilder scans；four passed manual category rows；320/touch/focus/zoom/contrast checks |
+| C29 | Tasks 11, 16, and 18 | four fixed official stable histories derive two newest distinct majors；exact eight fresh branded current/previous rows withonlySafari unavailable exception；separate Chromium/Firefox/WebKit engine reports；everybranch AxeBuilder scans；four same-release-date passed manual category rows；320/touch/focus/zoom/contrast checks |
 | C30 | Tasks 17 and 18 | exact Wrangler config、local smoke、types check、dry-run only |
 | C31 | Tasks 4 and 17 | legacy routes404/noKV mutation inunit+smoke |
 | C32 | Tasks 2, 4, 12, and 16 | password bootstrap containsno summary；POST form zero fields reachesauthorization andreturns403，one wrongreturns403，duplicate/unknown returns422，one correctreturns302 exact query |
@@ -2916,7 +3076,7 @@ Every row is a release gate。Test title strings below arefixed acceptance names
 | FE06 | Tasks 11 and 16 | closed visible-text scan plusHelp hover/focus/click/touch/Escape/outside/relationship |
 | FE07 | Tasks 11 and 15 | four persistent records andexact timestamp selection/failure-after-success/remote-clean tests |
 | FE08 | Tasks 10, 11, and 15 | closedActionKey/dictionary exhaustiveness、terminal once-settle、pure-toggle no-op、no popup/status request |
-| FE09 | Tasks 6, 11, 16, and 18 | en/zh、theme、reduced motion、AA/focus/44px/reflow；branch-complete axe；exact-eight branded rows；all four manual categories passed andverified |
+| FE09 | Tasks 6, 11, 16, and 18 | en/zh、theme、reduced motion、AA/focus/44px/reflow；branch-complete axe；official-source-derived exact-eight branded rows；the verifier clock、all source`retrievedAt` andbrowser/Safari-unavailable/engine/manual`testedAt` values satisfythe one release interval；all four manual categories passed andverified |
 | FE10 | Tasks 8 and 17 | exact copied source/provenance/hash、pruned skeleton、complete notices/licenses |
 
 ## Final Self-Review Checklist for the Implemented Branch
@@ -2925,9 +3085,9 @@ Every row is a release gate。Test title strings below arefixed acceptance names
 - [ ] No production/test instruction contains an incomplete stub、unbounded error fallback、secondrouter/state owner或copied domain validation。
 - [ ] Everyparallel candidate set isfile-disjoint；theexplicit serial edges areWave1 `(1∥2)→3` andWave3 `6→7→8`，shared`http.ts` is3→4，App is8→11→15，generated/build files are8→17，andpackage/lock/i18n/render eachhaveoneactiveowner atatime。
 - [ ] Everytask hascaptured RED、minimal GREEN、focused/full checks、focused commit andindependent Opus review evidence。
-- [ ] EveryReact branch hard-refreshes fromserver-defined bootstrap；App dynamically imports`OrdinaryPage`，onlythat adapter calls`usePastePage` andrenders`OrdinaryPastePage`；noReact Router、prefetch、storage persistence orduplicate controller survives。
+- [ ] EveryReact branch hard-refreshes fromserver-defined bootstrap；Task15’s source-graph test provesApp dynamically imports`OrdinaryPage`，onlythat adapter imports/calls`usePastePage` andrenders`OrdinaryPastePage`，andallfive nonordinary source closures excludeordinary controllers；Task17 provesonlythe Vite dynamic root andemitted closure classification withoutforcing source-level chunk boundaries；noReact Router、prefetch、storage persistence orduplicate controller survives。
 - [ ] Everystrong/read-version ETag、password carrier、view-once consume、HEAD/OPTIONS/error/header anddirect HTML exception matches theexact tables；browser/direct OPTIONS is405 withroute-exact Allow，whileAPI、`/ip-trace` and`/mcp` keep theirseparate OPTIONS contracts。
 - [ ] Everymutation/reconcile/delete/terminal transition preserves exactsource、credential andtimestamp authority；no pending action is silentlyreset。
-- [ ] Vite manifest, generated assets, source integrity, notices, gzip/raw budgets andWrangler smoke/types/dry-run arefresh；browser matrix hasexactly two branded rows perproduct，all non-Safari rows passed，andall four manual accessibility categories passed withmachine-readable evidence。
+- [ ] Vite manifest, generated assets, source integrity, notices, gzip/raw budgets andWrangler smoke/types/dry-run arefresh；allfour fixed official stable histories arevalid andderive thehighest two distinct majors；browser matrix hasexactly two bound branded rows perproduct，all non-Safari rows passed，both aggregates haveone exact releaseDate，andthe final verifier clock、all source`retrievedAt` plusbrowser/Safari-unavailable/engine/manual`testedAt` values satisfythe same interval；all four manual accessibility categories passed withmachine-readable evidence。
 - [ ] Task18 pre-deletion、candidate-final andintegrated-final gates eachproveallthree superseded commits arenot ancestors andallcandidate-specific source symbols areabsent。
 - [ ] `worker.js` wasdeleted onlyafterpre-deletion gates passed；`aioapi.js` remainsunchanged；no deploy orpush occurred；finalworktree isclean。
