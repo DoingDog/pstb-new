@@ -3,7 +3,15 @@ import { BoundedDecimalNumberAccumulator, impossibleOpaqueMatch, parseStrictJson
 import { parseMultipartBoundary, parseMultipartCreateFields } from "./multipart";
 import { PasteService, type CreateInput, type UpdateContentInput, type UpdateSettingsInput } from "./pastes";
 import { resolveServerLocale } from "./i18n";
-import { applicationHeaders, renderCreatePage, renderErrorPage } from "./render";
+import {
+  applicationHeaders,
+  deriveDownloadHeaders,
+  renderCreatePage,
+  renderErrorPage,
+  renderMarkdownDocument,
+  renderPastePage,
+  renderPasswordPage,
+} from "./render";
 import { isPasteError, PasteError, type Env, type LoadedPaste, type PasteResource } from "./types";
 
 const createFields = new Set(["content", "title", "format", "expiration", "password", "viewOnce", "customId"]);
@@ -420,8 +428,8 @@ async function resolvePendingUtf8AtContentLimit(
   throw contentTooLarge();
 }
 
-async function parseTextContent(request: Request): Promise<string> {
-  textMediaType(request);
+async function parseTextContent(request: Request, validateMediaType = true): Promise<string> {
+  if (validateMediaType) textMediaType(request);
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null && !/^\d+$/.test(contentLength)) {
     await cancelBody(request.body);
@@ -563,6 +571,18 @@ async function parseReadPostBody(request: Request): Promise<MutationCredentials>
     mutationJsonPolicy(undefined),
   );
   return value === undefined ? {} : parseMutationCredentials(value);
+}
+
+async function parsePasswordForm(request: Request): Promise<string | undefined> {
+  if (!hasUtf8MediaType(request, "application", "x-www-form-urlencoded", false)) {
+    throw new PasteError("UNSUPPORTED_MEDIA_TYPE", 415, undefined, { accepted: ["application/x-www-form-urlencoded"] });
+  }
+  const entries = [...new URLSearchParams(await parseTextContent(request, false))];
+  if (entries.length === 0) return undefined;
+  const unknown = entries.find(([name]) => name !== "password");
+  if (unknown !== undefined) throw validationError(unknown[0], "Unknown field.");
+  if (entries.length > 1) throw validationError("password", "Duplicate field.");
+  return entries[0]![1];
 }
 
 async function loadWithPassword(service: PasteService, id: string, selection: PasswordSelection): Promise<LoadedPaste> {
@@ -717,26 +737,155 @@ function methodNotAllowed(allow: string): Response {
   return response;
 }
 
-function rootMethodNotAllowed(request: Request): Response {
-  const requestLocale = resolveServerLocale(request.headers.get("accept-language"));
-  const response = new Response(renderErrorPage({
-    locale: requestLocale,
-    status: 405,
-    errorCode: "METHOD_NOT_ALLOWED",
-  }), { status: 405, headers: applicationHeaders() });
-  response.headers.set("Allow", "GET,HEAD,OPTIONS");
-  return response;
-}
-
 function pastePathError(request: Request): PasteError | undefined {
-  const match = /^\/api\/pastes\/([^/]+)$/.exec(new URL(request.url).pathname);
-  if (match === null) return undefined;
+  const pathname = new URL(request.url).pathname;
+  const idMatches = [
+    /^\/api\/pastes\/([^/]+)(?:\/(?:settings|password|history(?:\/[^/]+)?|read))?$/.exec(pathname),
+    /^\/(?:raw|html|md|file)\/([^/]+)$/.exec(pathname),
+    /^\/([^/]+)$/.exec(pathname),
+  ];
+  const id = idMatches.find((match) => match !== null)?.[1];
+  if (id === undefined || ["api", "ip-trace", "assets"].includes(id)) return undefined;
   try {
-    if (decodeURIComponent(match[1]!).includes("/")) return new PasteError("PASTE_NOT_FOUND", 404);
+    if (decodeURIComponent(id).includes("/")) return new PasteError("PASTE_NOT_FOUND", 404);
   } catch {
     return new PasteError("BAD_REQUEST", 400);
   }
   return undefined;
+}
+
+function browserErrorResponse(request: Request, error: PasteError): Response {
+  const response = new Response(renderErrorPage({
+    locale: resolveServerLocale(request.headers.get("accept-language")),
+    status: error.status,
+    errorCode: error.code,
+  }), { status: error.status, headers: applicationHeaders() });
+  if (error.status === 503) response.headers.set("Retry-After", "1");
+  return response;
+}
+
+function directErrorResponse(error: PasteError): Response {
+  const headers = new Headers({ "Cache-Control": "no-store", "Content-Type": textPlainUtf8 });
+  if (error.status === 503) headers.set("Retry-After", "1");
+  return new Response(error.message, { status: error.status, headers });
+}
+
+function routeErrorResponse(request: Request, error: PasteError): Response {
+  const pathname = new URL(request.url).pathname;
+  if (/^\/(?:raw|html|md|file)(?:\/|$)/.test(pathname)) return directErrorResponse(error);
+  return pathname === "/api" || pathname.startsWith("/api/") ? errorResponse(error) : browserErrorResponse(request, error);
+}
+
+function passwordBootstrap(request: Request, errorCode: null | "FORBIDDEN", status = 200): Response {
+  return new Response(renderPasswordPage({
+    locale: resolveServerLocale(request.headers.get("accept-language")),
+    errorCode,
+  }), { status, headers: applicationHeaders() });
+}
+
+type BrowserRepresentation = "main" | "raw" | "html" | "md" | "file";
+
+function representationHeaders(representation: BrowserRepresentation, loaded: LoadedPaste): Headers {
+  switch (representation) {
+    case "main":
+    case "md":
+      return applicationHeaders();
+    case "raw":
+      return new Headers({ "Cache-Control": "no-store", "Content-Type": textPlainUtf8 });
+    case "html":
+      return new Headers({ "Cache-Control": "no-store", "Content-Type": "text/html; charset=utf-8" });
+    case "file":
+      return deriveDownloadHeaders(loaded.summary);
+  }
+}
+
+function preparedRepresentation(representation: BrowserRepresentation, request: Request, loaded: LoadedPaste): Response {
+  const locale = resolveServerLocale(request.headers.get("accept-language"));
+  const headers = representationHeaders(representation, loaded);
+  if (request.method === "HEAD") return new Response(null, { headers });
+  try {
+    switch (representation) {
+      case "main":
+        return new Response(renderPastePage({ locale, paste: loaded.summary, content: loaded.content }), { headers });
+      case "raw":
+      case "html":
+      case "file":
+        return new Response(loaded.content, { headers });
+      case "md":
+        return new Response(renderMarkdownDocument({ locale, paste: loaded.summary, content: loaded.content }), { headers });
+    }
+  } catch {
+    throw new PasteError("RENDER_FAILED", 500);
+  }
+}
+
+async function contentBearingResponse(
+  service: PasteService,
+  request: Request,
+  loaded: LoadedPaste,
+  representation: BrowserRepresentation,
+): Promise<Response> {
+  const response = preparedRepresentation(representation, request, loaded);
+  if (request.method !== "HEAD" && loaded.summary.viewOnce) await service.consume(loaded);
+  return response;
+}
+
+async function browserPasteResponse(
+  service: PasteService,
+  request: Request,
+  id: string,
+  representation: BrowserRepresentation,
+): Promise<Response> {
+  const queryPasswords = new URL(request.url).searchParams.getAll("password");
+  try {
+    if (queryPasswords.length > 1) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
+    const loaded = await service.loadContent(id, queryPasswords.length === 1 ? queryPasswords[0] : undefined);
+    return await contentBearingResponse(service, request, loaded, representation);
+  } catch (error) {
+    if (!isPasteError(error)) throw error;
+    if (representation === "main" && error.code === "FORBIDDEN") {
+      const supplied = queryPasswords.length === 1;
+      return passwordBootstrap(request, supplied ? "FORBIDDEN" : null, supplied ? 403 : 200);
+    }
+    return representation === "main" ? browserErrorResponse(request, error) : directErrorResponse(error);
+  }
+}
+
+function browserMethodNotAllowed(request: Request, allow: string, direct: boolean): Response {
+  if (direct) {
+    const response = directErrorResponse(new PasteError("BAD_REQUEST", 405));
+    response.headers.set("Allow", allow);
+    return response;
+  }
+  const response = new Response(renderErrorPage({
+    locale: resolveServerLocale(request.headers.get("accept-language")),
+    status: 405,
+    errorCode: "METHOD_NOT_ALLOWED",
+  }), { status: 405, headers: applicationHeaders() });
+  response.headers.set("Allow", allow);
+  return response;
+}
+
+function ipTraceResponse(request: Request): Promise<Response> {
+  return request.clone().text().then((data) => {
+    const value = {
+      url: request.url,
+      method: request.method,
+      data,
+      headers: Object.fromEntries(request.headers),
+      cf: Object.fromEntries(Object.entries(request.cf ?? {})),
+    };
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Allow-Methods": "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS",
+      "Cache-Control": "no-store",
+    };
+    return request.method === "HEAD"
+      ? new Response(null, { headers })
+      : new Response(JSON.stringify(value, null, 2), { headers });
+  });
 }
 
 export function createHttpApp(env: Env): Hono {
@@ -744,7 +893,7 @@ export function createHttpApp(env: Env): Hono {
 
   app.use("*", async (context, next) => {
     const error = pastePathError(context.req.raw);
-    if (error !== undefined) return errorResponse(error);
+    if (error !== undefined) return routeErrorResponse(context.req.raw, error);
     await next();
     context.res.headers.set("Cache-Control", "no-store");
   });
@@ -755,8 +904,15 @@ export function createHttpApp(env: Env): Hono {
   app.on(["GET", "HEAD"], "/", (context) => context.req.raw.method === "HEAD"
     ? new Response(null, { headers: applicationHeaders() })
     : new Response(renderCreatePage(resolveServerLocale(context.req.raw.headers.get("accept-language"))), { headers: applicationHeaders() }));
-  app.options("/", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,OPTIONS" } }));
-  app.all("/", (context) => rootMethodNotAllowed(context.req.raw));
+  app.all("/", (context) => browserMethodNotAllowed(context.req.raw, "GET,HEAD", false));
+
+  app.on(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], "/ip-trace", (context) => ipTraceResponse(context.req.raw));
+  app.all("/ip-trace", () => methodNotAllowed("GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS"));
+
+  app.on(["GET", "HEAD"], "/assets/*", () => errorResponse(new PasteError("PASTE_NOT_FOUND", 404)));
+  app.all("/assets/*", () => methodNotAllowed("GET,HEAD"));
+
+  app.all("/api", () => errorResponse(new PasteError("PASTE_NOT_FOUND", 404)));
 
   app.post("/api/pastes", async (context) => {
     const country = context.req.raw.cf?.country;
@@ -910,6 +1066,32 @@ export function createHttpApp(env: Env): Hono {
   });
   app.options("/api/pastes/:id/read", () => new Response(null, { status: 204, headers: { Allow: "GET,HEAD,POST,OPTIONS" } }));
   app.all("/api/pastes/:id/read", () => methodNotAllowed("GET,HEAD,POST,OPTIONS"));
+
+  for (const [route, representation] of [["/raw/:id", "raw"], ["/html/:id", "html"], ["/md/:id", "md"], ["/file/:id", "file"]] as const) {
+    app.on(["GET", "HEAD"], route, (context) => browserPasteResponse(new PasteService(env.PASTE_DB), context.req.raw, context.req.param("id"), representation));
+    app.all(route, (context) => browserMethodNotAllowed(context.req.raw, "GET,HEAD", true));
+  }
+  for (const route of ["/raw/*", "/html/*", "/md/*", "/file/*"]) {
+    app.all(route, () => directErrorResponse(new PasteError("PASTE_NOT_FOUND", 404)));
+  }
+
+  app.on(["GET", "HEAD"], "/:id", (context) => browserPasteResponse(new PasteService(env.PASTE_DB), context.req.raw, context.req.param("id"), "main"));
+  app.all("/:id/:ignored", (context) => browserErrorResponse(context.req.raw, new PasteError("PASTE_NOT_FOUND", 404)));
+  app.post("/:id", async (context) => {
+    const request = context.req.raw;
+    try {
+      const password = await parsePasswordForm(request);
+      await loadWithPassword(new PasteService(env.PASTE_DB), context.req.param("id"), { ...(password === undefined ? {} : { password }), ambiguous: new URL(request.url).searchParams.getAll("password").length > 1 });
+      const location = new URL(request.url);
+      if (password !== undefined) location.searchParams.set("password", password);
+      return new Response(null, { status: 302, headers: { Location: `${location.pathname}${location.search}`, "Cache-Control": "no-store" } });
+    } catch (error) {
+      if (!isPasteError(error)) throw error;
+      if (error.code === "FORBIDDEN") return passwordBootstrap(request, "FORBIDDEN", 403);
+      return browserErrorResponse(request, error);
+    }
+  });
+  app.all("/:id", (context) => browserMethodNotAllowed(context.req.raw, "GET,HEAD,POST", false));
 
   return app;
 }

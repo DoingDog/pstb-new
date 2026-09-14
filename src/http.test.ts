@@ -1,14 +1,21 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { createHttpApp } from "./http";
-import { renderCreatePage } from "./render";
+import { renderCreatePage, renderMarkdown, renderMarkdownDocument, renderPastePage, renderPasswordPage } from "./render";
 import type { Env, MutationResult, PasteResource, PasteSummary } from "./types";
 
 const wireBodyLimit = 67_108_864;
 
 vi.mock("./render", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./render")>();
-  return { ...actual, renderCreatePage: vi.fn(actual.renderCreatePage) };
+  return {
+    ...actual,
+    renderCreatePage: vi.fn(actual.renderCreatePage),
+    renderMarkdown: vi.fn(actual.renderMarkdown),
+    renderMarkdownDocument: vi.fn(actual.renderMarkdownDocument),
+    renderPastePage: vi.fn(actual.renderPastePage),
+    renderPasswordPage: vi.fn(actual.renderPasswordPage),
+  };
 });
 
 declare global {
@@ -21,6 +28,10 @@ declare global {
 
 function request(path: string, init?: RequestInit): Promise<Response> {
   return exports.default.fetch(new Request(`https://paste.test${path}`, init));
+}
+
+function localRequest(path: string, init?: RequestInit): Promise<Response> {
+  return Promise.resolve(createHttpApp(env as unknown as Env).fetch(new Request(`https://paste.test${path}`, init)));
 }
 
 async function createJsonPaste(input: Record<string, unknown>): Promise<PasteSummary> {
@@ -135,14 +146,14 @@ describe("HTTP slice 1", () => {
     expect(await head.text()).toBe("");
 
     const options = await request("/", { method: "OPTIONS" });
-    expect(options.status).toBe(204);
-    expect(options.headers.get("allow")).toBe("GET,HEAD,OPTIONS");
+    expect(options.status).toBe(405);
+    expect(options.headers.get("allow")).toBe("GET,HEAD");
     expect(options.headers.get("cache-control")).toBe("no-store");
-    expect(await options.text()).toBe("");
+    expect(readBootstrap(await options.text())).toMatchObject({ page: "error", status: 405 });
 
     const method = await request("/", { method: "POST", headers: { "accept-language": "zh-CN" } });
     expect(method.status).toBe(405);
-    expect(method.headers.get("allow")).toBe("GET,HEAD,OPTIONS");
+    expect(method.headers.get("allow")).toBe("GET,HEAD");
     expect(method.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(method.headers.get("cache-control")).toBe("no-store");
     expect(method.headers.get("content-security-policy")).toBeTruthy();
@@ -432,11 +443,18 @@ describe("HTTP slice 1", () => {
     for (const path of ["/api", "/delete/example", "/raw/example"]) {
       const response = await request(path);
       expect(response.status).toBe(404);
-      expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
       expect(response.headers.get("cache-control")).toBe("no-store");
-      await expect(response.json()).resolves.toEqual({
-        error: { code: "PASTE_NOT_FOUND", message: "The paste was not found." },
-      });
+      if (path === "/raw/example") {
+        expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      } else if (path === "/delete/example") {
+        expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+        expect(readBootstrap(await response.text())).toMatchObject({ page: "error", status: 404 });
+      } else {
+        expect(response.headers.get("content-type"), path).toBe("application/json; charset=utf-8");
+        await expect(response.json()).resolves.toEqual({
+          error: { code: "PASTE_NOT_FOUND", message: "The paste was not found." },
+        });
+      }
     }
   });
 
@@ -2117,6 +2135,364 @@ describe("HTTP slice 1", () => {
       } finally {
         await deletePaste(paste.id);
       }
+    });
+  });
+
+  describe("browser route matrix", () => {
+    const representationRows = [
+      ["raw", "text/plain; charset=utf-8"],
+      ["html", "text/html; charset=utf-8"],
+      ["md", "text/html; charset=utf-8"],
+      ["file", "application/octet-stream"],
+    ] as const;
+
+    it.each(representationRows)("serves %s GET and non-consuming HEAD", async (route, mediaType) => {
+      const paste = await createJsonPaste({ content: "exact\r\n<body>🙂</body>", expiration: "permanent" });
+      try {
+        const head = await request(`/${route}/${paste.id}`, { method: "HEAD" });
+        expect(head.status).toBe(200);
+        expect(head.headers.get("content-type")).toBe(mediaType);
+        expect(await head.text()).toBe("");
+        const get = await request(`/${route}/${paste.id}`);
+        expect(get.status).toBe(200);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("does not render browser or markdown bodies for HEAD", async () => {
+      const paste = await createJsonPaste({ content: "# source", format: "markdown", expiration: "permanent" });
+      try {
+        vi.mocked(renderPastePage).mockClear();
+        vi.mocked(renderMarkdownDocument).mockClear();
+        vi.mocked(renderMarkdown).mockClear();
+        for (const path of [`/${paste.id}`, `/md/${paste.id}`]) {
+          const response = await localRequest(path, { method: "HEAD" });
+          expect(response.status, path).toBe(200);
+          expect(await response.text()).toBe("");
+        }
+        expect(renderPastePage).not.toHaveBeenCalled();
+        expect(renderMarkdownDocument).not.toHaveBeenCalled();
+        expect(renderMarkdown).not.toHaveBeenCalled();
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("serves the browser page and password bootstrap", async () => {
+      const publicPaste = await createJsonPaste({ content: "browser source", expiration: "permanent" });
+      const protectedPaste = await createJsonPaste({ content: "protected source", password: "right", expiration: "permanent" });
+      try {
+        const page = await request(`/${publicPaste.id}`);
+        expect(page.status).toBe(200);
+        expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+        expect(readBootstrap(await page.text())).toMatchObject({ page: "paste", consumed: false, paste: { id: publicPaste.id } });
+
+        for (const path of [`/${protectedPaste.id}`, `/raw/${protectedPaste.id}`, `/html/${protectedPaste.id}`, `/md/${protectedPaste.id}`, `/file/${protectedPaste.id}`]) {
+          const response = await request(path);
+          expect(response.status, path).toBe(path === `/${protectedPaste.id}` ? 200 : 403);
+          if (path === `/${protectedPaste.id}`) {
+            expect(readBootstrap(await response.text())).toEqual({ page: "password", locale: "en", errorCode: null });
+            const wrong = await localRequest(`${path}?password=wrong`);
+            expect(wrong.status).toBe(403);
+            expect(readBootstrap(await wrong.text())).toEqual({ page: "password", locale: "en", errorCode: "FORBIDDEN" });
+          }
+        }
+      } finally {
+        await deletePaste(publicPaste.id);
+        await deletePaste(protectedPaste.id);
+      }
+    });
+
+    it("keeps direct representations exact", async () => {
+      const paste = await createJsonPaste({
+        content: "exact\r\n<body>🙂</body>",
+        title: "Résumé.txt",
+        format: "markdown",
+        expiration: "permanent",
+      });
+      try {
+        const raw = await request(`/raw/${paste.id}`);
+        expect(await raw.text()).toBe("exact\r\n<body>🙂</body>");
+        expect(raw.headers.has("content-security-policy")).toBe(false);
+        expect(raw.headers.has("x-content-type-options")).toBe(false);
+        expect(raw.headers.has("referrer-policy")).toBe(false);
+
+        const html = await request(`/html/${paste.id}`);
+        expect(await html.text()).toBe("exact\r\n<body>🙂</body>");
+        expect(html.headers.has("content-security-policy")).toBe(false);
+        expect(html.headers.has("x-content-type-options")).toBe(false);
+        expect(html.headers.has("referrer-policy")).toBe(false);
+
+        const markdown = await request(`/md/${paste.id}`);
+        const markdownBody = await markdown.text();
+        expect(markdown.headers.get("content-security-policy")).toBeTruthy();
+        expect(markdownBody.match(/id="bootstrap"/g)).toHaveLength(1);
+        expect(markdownBody.match(/id="source-data"/g)).toHaveLength(1);
+        expect(markdownBody.match(/id="initial-markdown-preview"/g)).toHaveLength(1);
+
+        const file = await request(`/file/${paste.id}`);
+        expect(await file.text()).toBe("exact\r\n<body>🙂</body>");
+        expect(file.headers.get("content-disposition")).toBe(`attachment; filename="paste-${paste.id}.txt"; filename*=UTF-8''R%C3%A9sum%C3%A9.txt`);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("rejects ambiguous direct credentials before rendering", async () => {
+      const publicPaste = await createJsonPaste({ content: "public", expiration: "permanent" });
+      const protectedPaste = await createJsonPaste({ content: "private", password: "right", expiration: "permanent" });
+      try {
+        for (const path of [`/${publicPaste.id}`, `/raw/${publicPaste.id}`, `/html/${publicPaste.id}`, `/md/${publicPaste.id}`, `/file/${publicPaste.id}`, `/${protectedPaste.id}`, `/raw/${protectedPaste.id}`, `/html/${protectedPaste.id}`, `/md/${protectedPaste.id}`, `/file/${protectedPaste.id}`]) {
+          const response = await localRequest(`${path}?password=one&password=two`);
+          expect(response.status, path).toBe(400);
+        }
+      } finally {
+        await deletePaste(publicPaste.id);
+        await deletePaste(protectedPaste.id);
+      }
+    });
+
+    it("does not authorize direct routes with headers", async () => {
+      const paste = await createJsonPaste({ content: "private", password: "right", expiration: "permanent" });
+      try {
+        for (const path of [`/raw/${paste.id}`, `/html/${paste.id}`, `/md/${paste.id}`, `/file/${paste.id}`]) {
+          expect((await request(path, { headers: { "x-paste-password": "right" } })).status, path).toBe(403);
+          expect((await request(`${path}?password=right`)).status, path).toBe(200);
+        }
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("uses password form fields to authorize without consuming", async () => {
+      const paste = await createJsonPaste({ content: "private", password: "a+b %&#?", viewOnce: true, expiration: "permanent" });
+      try {
+        const form = (body: string, contentType = "application/x-www-form-urlencoded") => localRequest(`/${paste.id}`, {
+          method: "POST",
+          headers: { "content-type": contentType },
+          body,
+        });
+        expect((await form("")).status).toBe(403);
+        expect((await form("password=")).status).toBe(403);
+        expect((await form(new URLSearchParams({ password: "wrong" }).toString())).status).toBe(403);
+        expect((await form("password=right&password=right")).status).toBe(422);
+        expect((await form("unknown=value")).status).toBe(422);
+        expect((await form("password=right", "application/json")).status).toBe(415);
+
+        const encoded = new URLSearchParams({ password: "a+b %&#?" }).toString();
+        const authorized = await form(encoded);
+        expect(authorized.status, encoded).toBe(302);
+        expect(authorized.headers.get("location")).toBe(`/${paste.id}?password=a%2Bb+%25%26%23%3F`);
+        await expect((env as unknown as Env).PASTE_DB.get(paste.id)).resolves.toBe("private");
+        expect((await request(`/${paste.id}?password=a%2Bb+%25%26%23%3F`)).status).toBe(200);
+      } finally {
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("uses browser and direct method matrices before storage", async () => {
+      const database = (env as unknown as Env).PASTE_DB;
+      const get = vi.spyOn(database, "get");
+      const getWithMetadata = vi.spyOn(database, "getWithMetadata");
+      const erase = vi.spyOn(database, "delete");
+      try {
+        for (const [path, allow] of [["/", "GET,HEAD"], ["/matrix", "GET,HEAD,POST"], ["/raw/matrix", "GET,HEAD"], ["/html/matrix", "GET,HEAD"], ["/md/matrix", "GET,HEAD"], ["/file/matrix", "GET,HEAD"]] as const) {
+          get.mockClear();
+          getWithMetadata.mockClear();
+          erase.mockClear();
+          const response = await request(path, { method: "OPTIONS" });
+          expect(response.status, path).toBe(405);
+          expect(response.headers.get("allow"), path).toBe(allow);
+          expect(get, path).not.toHaveBeenCalled();
+          expect(getWithMetadata, path).not.toHaveBeenCalled();
+          expect(erase, path).not.toHaveBeenCalled();
+        }
+      } finally {
+        get.mockRestore();
+        getWithMetadata.mockRestore();
+        erase.mockRestore();
+      }
+    });
+  });
+
+  describe("view-once order", () => {
+    it("prepares browser view-once bodies before deleting all keys", async () => {
+      const paste = await createJsonPaste({ content: "prepared", viewOnce: true, expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      const originalDelete = database.delete.bind(database);
+      const events: string[] = [];
+      vi.mocked(renderPastePage).mockImplementationOnce(() => {
+        events.push("body-prepared");
+        return "prepared body";
+      });
+      const erase = vi.spyOn(database, "delete").mockImplementation(async (key) => {
+        if (key === paste.id) events.push("delete-main");
+        else if (key === `__cfpb:meta:${paste.id}`) events.push("delete-meta");
+        else if (key.startsWith(`__cfpb:rev:${paste.id}:`)) events.push(`delete-revision-${key.slice(-1)}`);
+        return originalDelete(key);
+      });
+      try {
+        const response = await localRequest(`/${paste.id}`);
+        events.push("response-observed");
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("prepared body");
+        expect(events[0]).toBe("body-prepared");
+        const main = events.indexOf("delete-main");
+        const meta = events.indexOf("delete-meta");
+        const responseObserved = events.indexOf("response-observed");
+        expect(main).toBeGreaterThanOrEqual(0);
+        expect(meta).toBeGreaterThan(main);
+        const revisionEvents = events.slice(main + 1, meta);
+        expect(revisionEvents).toHaveLength(3);
+        expect(new Set(revisionEvents)).toEqual(new Set(["delete-revision-0", "delete-revision-1", "delete-revision-2"]));
+        expect(responseObserved).toBeGreaterThan(meta);
+      } finally {
+        vi.mocked(renderPastePage).mockClear();
+        erase.mockRestore();
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("does not consume a view-once paste when direct rendering fails", async () => {
+      const paste = await createJsonPaste({ content: "# source", format: "markdown", viewOnce: true, expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      await Promise.all([0, 1, 2].map((slot) => database.put(`__cfpb:rev:${paste.id}:${slot}`, "sentinel")));
+      vi.mocked(renderMarkdownDocument).mockImplementationOnce(() => { throw new Error("render failed"); });
+      try {
+        const response = await localRequest(`/md/${paste.id}`);
+        expect(response.status).toBe(500);
+        for (const key of [paste.id, `__cfpb:meta:${paste.id}`, `__cfpb:rev:${paste.id}:0`, `__cfpb:rev:${paste.id}:1`, `__cfpb:rev:${paste.id}:2`]) {
+          await expect((env as unknown as Env).PASTE_DB.get(key)).resolves.not.toBeNull();
+        }
+      } finally {
+        vi.mocked(renderMarkdownDocument).mockClear();
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("returns CONSUME_FAILED without source when a direct delete fails", async () => {
+      const paste = await createJsonPaste({ content: "source", viewOnce: true, expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      const originalDelete = database.delete.bind(database);
+      const erase = vi.spyOn(database, "delete").mockImplementation(async (key) => {
+        if (key === paste.id) throw new Error("delete failed");
+        return originalDelete(key);
+      });
+      try {
+        const response = await request(`/raw/${paste.id}`);
+        expect(response.status).toBe(503);
+        expect(response.headers.get("retry-after")).toBe("1");
+        const error = await response.text();
+        expect(error).not.toContain("source");
+        expect(error).toContain("view-once paste could not be consumed");
+      } finally {
+        erase.mockRestore();
+        await deletePaste(paste.id);
+      }
+    });
+  });
+
+  describe("ip-trace", () => {
+    it.each(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])("reflects %s exactly", async (method) => {
+      const response = await request("/ip-trace?query=exact", {
+        method,
+        headers: { authorization: "Bearer value", cookie: "name=value", "x-exact": "header" },
+        ...(method === "GET" || method === "HEAD" ? {} : { body: "exact body" }),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("access-control-allow-headers")).toBe("*");
+      expect(response.headers.get("access-control-allow-methods")).toBe("GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
+      expect(response.headers.get("access-control-allow-credentials")).toBeNull();
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      if (method === "HEAD") {
+        expect(await response.text()).toBe("");
+      } else {
+        await expect(response.json()).resolves.toMatchObject({
+          url: "https://paste.test/ip-trace?query=exact",
+          method,
+          data: method === "GET" ? "" : "exact body",
+          headers: expect.objectContaining({ authorization: "Bearer value", cookie: "name=value", "x-exact": "header" }),
+        });
+      }
+    });
+  });
+
+  describe("method and header matrix", () => {
+    it("rejects malformed nested API paths before dispatch and direct malformed paths", async () => {
+      const database = (env as unknown as Env).PASTE_DB;
+      const get = vi.spyOn(database, "get");
+      const getWithMetadata = vi.spyOn(database, "getWithMetadata");
+      const erase = vi.spyOn(database, "delete");
+      const apiTemplates = [
+        "/api/pastes/%ZZ/settings",
+        "/api/pastes/%ZZ/password",
+        "/api/pastes/%ZZ/history",
+        "/api/pastes/%ZZ/history/1",
+        "/api/pastes/%ZZ/read",
+      ];
+      for (const path of [...apiTemplates, "/%ZZ", "/raw/%ZZ", "/html/%ZZ", "/md/%ZZ", "/file/%ZZ"]) {
+        for (const method of ["GET", "OPTIONS"] as const) {
+          get.mockClear();
+          getWithMetadata.mockClear();
+          erase.mockClear();
+          const response = await localRequest(path, { method });
+          expect(response.status, `${method} ${path}`).toBe(400);
+          const mediaType = path.startsWith("/api/")
+            ? "application/json; charset=utf-8"
+            : path.startsWith("/raw/") || path.startsWith("/html/") || path.startsWith("/md/") || path.startsWith("/file/")
+              ? "text/plain; charset=utf-8"
+              : "text/html; charset=utf-8";
+          expect(response.headers.get("content-type"), path).toBe(mediaType);
+          expect(get).not.toHaveBeenCalled();
+          expect(getWithMetadata).not.toHaveBeenCalled();
+          expect(erase).not.toHaveBeenCalled();
+        }
+      }
+      for (const path of [
+        "/api/pastes/a%2Fb/settings",
+        "/api/pastes/a%2Fb/password",
+        "/api/pastes/a%2Fb/history",
+        "/api/pastes/a%2Fb/history/1",
+        "/api/pastes/a%2Fb/read",
+        "/api/pastes/a/settings/extra",
+        "/a%2Fb",
+        "/raw/a%2Fb",
+        "/html/a%2Fb",
+        "/md/a%2Fb",
+        "/file/a%2Fb",
+        "/raw/a/extra",
+      ]) {
+        for (const method of ["GET", "OPTIONS"] as const) {
+          get.mockClear();
+          getWithMetadata.mockClear();
+          erase.mockClear();
+          expect((await localRequest(path, { method })).status, `${method} ${path}`).toBe(404);
+          expect(get).not.toHaveBeenCalled();
+          expect(getWithMetadata).not.toHaveBeenCalled();
+          expect(erase).not.toHaveBeenCalled();
+        }
+      }
+      get.mockRestore();
+      getWithMetadata.mockRestore();
+      erase.mockRestore();
+    });
+
+    it("keeps special OPTIONS and legacy routes unchanged", async () => {
+      expect((await request("/api/pastes/matrix", { method: "OPTIONS" })).status).toBe(204);
+      expect((await request("/ip-trace", { method: "OPTIONS" })).status).toBe(200);
+      expect((await request("/mcp", { method: "OPTIONS" })).status).toBe(204);
+      for (const path of ["/api", "/delete/example"]) expect((await request(path)).status, path).toBe(404);
+      for (const method of ["GET", "HEAD"] as const) {
+        const response = await localRequest("/assets/missing-hash.js", { method });
+        expect(response.status, method).toBe(404);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+      }
+      const method = await localRequest("/assets/missing-hash.js", { method: "POST" });
+      expect(method.status).toBe(405);
+      expect(method.headers.get("allow")).toBe("GET,HEAD");
     });
   });
 
