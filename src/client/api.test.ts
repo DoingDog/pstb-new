@@ -27,7 +27,19 @@ const summary = {
   },
 };
 
-const snapshot = { ...summary, content: "hello" };
+const resourceSummary = {
+  ...summary,
+  version: "generation.7",
+  contentRevision: 2,
+  links: {
+    view: "/paste-1",
+    raw: "/raw/paste-1",
+    html: "/html/paste-1",
+    markdown: "/md/paste-1",
+    file: "/file/paste-1",
+  },
+};
+const snapshot = { ...resourceSummary, content: "hello" };
 const mutation = { changed: true, paste: summary };
 const history = {
   id: "paste-1",
@@ -90,10 +102,25 @@ function base64Url(bytes: ArrayBuffer): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-async function resourceResponse(value: Record<string, unknown> & { content: string } = snapshot, headers: HeadersInit = {}): Promise<Response> {
-  const bytes = new TextEncoder().encode(value.content);
+async function sha256Etag(bytes: Uint8Array<ArrayBuffer>): Promise<`"sha256-${string}"`> {
   const digest = base64Url(await globalThis.crypto.subtle.digest("SHA-256", bytes));
-  return jsonResponse(value, 200, { ETag: `"sha256-${digest}"`, ...headers });
+  return `"sha256-${digest}"`;
+}
+
+function resourceBytes(value: unknown): Uint8Array<ArrayBuffer> {
+  return new TextEncoder().encode(JSON.stringify(value));
+}
+
+function resourceEtag(value: unknown): Promise<`"sha256-${string}"`> {
+  return sha256Etag(resourceBytes(value));
+}
+
+async function resourceResponse(value: Record<string, unknown> & { content: string } = snapshot, headers: HeadersInit = {}): Promise<Response> {
+  const bytes = resourceBytes(value);
+  return new Response(bytes, {
+    status: 200,
+    headers: { "Content-Type": jsonMediaType, "Cache-Control": noStore, ETag: await sha256Etag(bytes), ...headers },
+  });
 }
 
 function signal(): AbortSignal {
@@ -115,14 +142,115 @@ describe("paste API", () => {
     expect(selectCreateEncoding(62_914_561)).toBe("multipart");
   });
 
+  it("projects a verified schema-v2 resource into an exact canonical snapshot", async () => {
+    const fetch = queuedFetch(await resourceResponse());
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toEqual({
+      kind: "snapshot",
+      snapshot: {
+        etag: await resourceEtag(snapshot),
+        source: snapshot.content,
+        summary: resourceSummary,
+        identity: { kind: "v2", generation: "generation", versionCounter: 7 },
+        contentRevision: 2,
+        updatedAtMs: Date.parse(resourceSummary.updatedAt),
+      },
+    });
+  });
+
+  it("projects exact legacy versions without a fabricated counter", async () => {
+    const legacy = { ...snapshot, version: "legacy" };
+    const fetch = queuedFetch(await resourceResponse(legacy));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toEqual({
+      kind: "snapshot",
+      snapshot: {
+        etag: await resourceEtag(legacy),
+        source: legacy.content,
+        summary: { ...resourceSummary, version: "legacy" },
+        identity: { kind: "legacy" },
+        contentRevision: legacy.contentRevision,
+        updatedAtMs: Date.parse(legacy.updatedAt),
+      },
+    });
+  });
+
+  it("splits schema-v2 identity at the final dot", async () => {
+    const finalDot = { ...snapshot, version: "generation.with.dots.42" };
+    const fetch = queuedFetch(await resourceResponse(finalDot));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "snapshot",
+      snapshot: { identity: { kind: "v2", generation: "generation.with.dots", versionCounter: 42 } },
+    });
+  });
+
+  it.each([
+    ["an empty schema-v2 generation", { ...snapshot, version: ".2" }],
+    ["a zero schema-v2 counter", { ...snapshot, version: "generation.0" }],
+    ["a negative schema-v2 counter", { ...snapshot, version: "generation.-1" }],
+    ["a non-canonical schema-v2 counter", { ...snapshot, version: "generation.01" }],
+    ["a non-safe schema-v2 counter", { ...snapshot, version: "generation.9007199254740992" }],
+    ["a schema-v2 version without a dot", { ...snapshot, version: "generation" }],
+    ["an arbitrary opaque v1 version", { ...snapshot, version: "v1" }],
+    ["a zero content revision", { ...snapshot, contentRevision: 0 }],
+    ["a different body ID", { ...snapshot, id: "paste-2" }],
+  ])("rejects %s before accepting a resource response", async (_name, value) => {
+    const fetch = queuedFetch(await resourceResponse(value));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 200, mutationMayHaveApplied: false },
+    });
+  });
+
+  it.each([
+    ["view", { ...snapshot.links, view: "/wrong/paste-1" }],
+    ["raw", { ...snapshot.links, raw: "/wrong/paste-1" }],
+    ["html", { ...snapshot.links, html: "/wrong/paste-1" }],
+    ["markdown", { ...snapshot.links, markdown: "/wrong/paste-1" }],
+    ["file", { ...snapshot.links, file: "/wrong/paste-1" }],
+  ])("rejects a non-canonical %s link", async (_name, links) => {
+    const fetch = queuedFetch(await resourceResponse({ ...snapshot, links }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 200, mutationMayHaveApplied: false },
+    });
+  });
+
   it("validates resource digest with exactly 43 base64url characters", async () => {
     const fetch = queuedFetch(await resourceResponse());
     const result = await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() });
-    expect(result).toEqual({ kind: "snapshot", snapshot });
+    expect(result).toMatchObject({ kind: "snapshot", snapshot: { etag: await resourceEtag(snapshot) } });
 
     const shortDigest = queuedFetch(await resourceResponse(snapshot, { ETag: '"sha256-short"' }));
     const malformed = await api(shortDigest.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() });
     expect(malformed).toMatchObject({ kind: "failure", failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 200, mutationMayHaveApplied: false } });
+  });
+
+  it("rejects the old content-only resource digest", async () => {
+    const contentOnlyEtag = await sha256Etag(new TextEncoder().encode(snapshot.content));
+    expect(contentOnlyEtag).not.toBe(await resourceEtag(snapshot));
+    const fetch = queuedFetch(await resourceResponse(snapshot, { ETag: contentOnlyEtag }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 200, mutationMayHaveApplied: false },
+    });
+  });
+
+  it("rejects a stale resource digest when summary changes but content does not", async () => {
+    const changed = { ...snapshot, title: "Changed" };
+    const staleEtag = await resourceEtag(snapshot);
+    expect(changed.content).toBe(snapshot.content);
+    expect(staleEtag).not.toBe(await resourceEtag(changed));
+    const fetch = queuedFetch(await resourceResponse(changed, { ETag: staleEtag }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 200, mutationMayHaveApplied: false },
+    });
   });
 
   it("encodes credentials in GET query strings and mutation bodies only when non-null", async () => {
@@ -197,7 +325,7 @@ describe("paste API", () => {
     const requestSignal = signal();
     const result = await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: requestSignal });
 
-    expect(result).toEqual({ kind: "snapshot", snapshot });
+    expect(result).toMatchObject({ kind: "snapshot", snapshot: { source: snapshot.content, summary: resourceSummary } });
     expect(fetch.calls).toEqual([{
       url: "/api/pastes/paste-1",
       init: { method: "GET", headers: { Accept: jsonMediaType }, cache: "no-store", signal: requestSignal },

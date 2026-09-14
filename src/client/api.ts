@@ -1,3 +1,4 @@
+import type { PasteResource } from "../types";
 import type {
   ErrorCode,
   ExpirationInput,
@@ -187,7 +188,7 @@ function isPasteSummary(value: unknown): value is PasteSummary {
     && isLinks(value.links);
 }
 
-function isRemoteSnapshot(value: unknown): value is RemoteSnapshot {
+function isPasteResource(value: unknown): value is PasteResource {
   if (!hasExactKeys(value, [
     "id",
     "title",
@@ -209,6 +210,41 @@ function isRemoteSnapshot(value: unknown): value is RemoteSnapshot {
   return isPasteSummary(summary)
     && typeof content === "string"
     && new TextEncoder().encode(content).byteLength === value.contentBytes;
+}
+
+function isCanonicalResourceLinks(links: PasteSummary["links"], id: string): boolean {
+  return links.view === `/${id}`
+    && links.raw === `/raw/${id}`
+    && links.html === `/html/${id}`
+    && links.markdown === `/md/${id}`
+    && links.file === `/file/${id}`;
+}
+
+function parseVersionIdentity(version: string): RemoteSnapshot["identity"] | undefined {
+  if (version === "legacy") return { kind: "legacy" };
+
+  const separator = version.lastIndexOf(".");
+  const generation = version.slice(0, separator);
+  const counter = version.slice(separator + 1);
+  if (separator <= 0 || !/^[1-9]\d*$/.test(counter)) return undefined;
+
+  const versionCounter = Number(counter);
+  return Number.isSafeInteger(versionCounter) ? { kind: "v2", generation, versionCounter } : undefined;
+}
+
+function projectRemoteSnapshot(body: PasteResource, etag: `"sha256-${string}"`): RemoteSnapshot | undefined {
+  const { content: source, ...summary } = body;
+  const identity = parseVersionIdentity(summary.version);
+  if (identity === undefined || summary.contentRevision <= 0 || !isCanonicalResourceLinks(summary.links, summary.id)) return undefined;
+
+  return {
+    etag,
+    source,
+    summary,
+    identity,
+    contentRevision: summary.contentRevision,
+    updatedAtMs: Date.parse(summary.updatedAt),
+  };
 }
 
 function isMutationResult(value: unknown): value is MutationResult {
@@ -378,14 +414,22 @@ function hasJsonHeaders(response: Response): boolean {
   return isJsonMediaType(response.headers.get("content-type")) && isNoStore(response.headers.get("cache-control"));
 }
 
-async function readJson(response: Response): Promise<unknown> {
+async function readJsonBytes(response: Response): Promise<Uint8Array<ArrayBuffer>> {
   if (!hasJsonHeaders(response)) throw new Error("Unexpected response headers");
   const bytes = new Uint8Array(await response.arrayBuffer());
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null && (!/^(0|[1-9]\d*)$/.test(contentLength) || Number(contentLength) !== bytes.byteLength)) {
     throw new Error("Unexpected content length");
   }
+  return bytes;
+}
+
+function parseJsonBytes(bytes: Uint8Array<ArrayBuffer>): unknown {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  return parseJsonBytes(await readJsonBytes(response));
 }
 
 async function readError(response: Response, mutationMayHaveApplied: boolean): Promise<ApiFailure> {
@@ -525,13 +569,17 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
       }
 
       try {
-        const body = await readJson(response);
-        if (!isRemoteSnapshot(body) || body.id !== input.id) return { kind: "failure", failure: malformed(200, false) };
+        const bytes = await readJsonBytes(response);
         const etag = response.headers.get("etag");
         if (!isResourceEtag(etag)) return { kind: "failure", failure: malformed(200, false) };
-        const digest = base64Url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.content)));
+        const digest = base64Url(await crypto.subtle.digest("SHA-256", bytes));
         if (etag !== `"sha256-${digest}"`) return { kind: "failure", failure: malformed(200, false) };
-        return { kind: "snapshot", snapshot: body };
+        const body = parseJsonBytes(bytes);
+        if (!isPasteResource(body) || body.id !== input.id) return { kind: "failure", failure: malformed(200, false) };
+        const snapshot = projectRemoteSnapshot(body, etag);
+        return snapshot === undefined
+          ? { kind: "failure", failure: malformed(200, false) }
+          : { kind: "snapshot", snapshot };
       } catch {
         return { kind: "failure", failure: malformed(200, false) };
       }

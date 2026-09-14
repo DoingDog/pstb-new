@@ -1,0 +1,56 @@
+import { expectTypeOf, it } from "vitest";
+import type {
+  AcceptedPasteState,
+  ActionKey,
+  AppBootstrap,
+  AutosaveStatus,
+  AutosyncStatus,
+  BaselineCapture,
+  CredentialState,
+  ErrorCode,
+  ExpirationInput,
+  HistoryList,
+  LastAction,
+  MutationResult,
+  NetworkStatus,
+  OperationRecords,
+  PastePhase,
+  PasteSummary,
+  RemoteOrder,
+  RemoteSnapshot,
+  RevisionResource,
+  SourceEvent,
+  TerminalOriginSettleContext,
+  TerminalOutcomeKey,
+  VersionIdentity,
+} from "./contracts";
+
+type FrozenContracts = readonly [
+  AcceptedPasteState,
+  ActionKey,
+  AppBootstrap,
+  AutosaveStatus,
+  AutosyncStatus,
+  BaselineCapture,
+  CredentialState,
+  ErrorCode,
+  ExpirationInput,
+  HistoryList,
+  LastAction,
+  MutationResult,
+  NetworkStatus,
+  OperationRecords,
+  PastePhase,
+  PasteSummary,
+  RemoteOrder,
+  RemoteSnapshot,
+  RevisionResource,
+  SourceEvent,
+  TerminalOriginSettleContext,
+  TerminalOutcomeKey,
+  VersionIdentity,
+];
+
+it("exposes every frozen client contract to type-only consumers", () => {
+  expectTypeOf<FrozenContracts>().toMatchTypeOf<FrozenContracts>();
+});
