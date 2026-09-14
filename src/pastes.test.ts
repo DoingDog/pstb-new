@@ -404,6 +404,23 @@ describe("read", () => {
     expect(kv.entries.size).toBe(0);
   });
 
+  it("reports a logically expired paste without cleanup when requested", async () => {
+    const { kv } = await createdV2();
+    const expiredService = new PasteService(
+      kv as unknown as KVNamespace,
+      () => new Date("2026-09-13T00:01:00.000Z"),
+      () => "00000000-0000-4000-8000-000000000001",
+    );
+    const before = kv.operations.length;
+
+    await expect(expiredService.loadContent("coherent", undefined, { cleanupExpired: false })).rejects.toMatchObject({
+      code: "PASTE_NOT_FOUND",
+      status: 404,
+    });
+    expect(kv.operations.slice(before).some((operation) => operation.type === "delete")).toBe(false);
+    expect(kv.entries.size).toBe(2);
+  });
+
   it.each([
     ["main", 1],
     ["first revision", 2],

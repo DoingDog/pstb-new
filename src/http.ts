@@ -585,10 +585,19 @@ async function parsePasswordForm(request: Request): Promise<string | undefined> 
   return entries[0]![1];
 }
 
-async function loadWithPassword(service: PasteService, id: string, selection: PasswordSelection): Promise<LoadedPaste> {
-  const loaded = await service.loadContent(id, selection.password);
-  if (selection.ambiguous) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
-  return loaded;
+async function loadWithPassword(
+  service: PasteService,
+  id: string,
+  selection: PasswordSelection,
+  options?: { cleanupExpired?: boolean },
+): Promise<LoadedPaste> {
+  if (!selection.ambiguous) return service.loadContent(id, selection.password, options);
+  try {
+    await service.loadContent(id, impossibleOpaqueMatch, options);
+  } catch (error) {
+    if (!isPasteError(error) || error.code !== "FORBIDDEN") throw error;
+  }
+  throw new PasteError("AMBIGUOUS_PASSWORD", 400);
 }
 
 async function rejectAmbiguousPasswordAfterLoad(service: PasteService, id: string, selection: PasswordSelection): Promise<void> {
@@ -739,15 +748,19 @@ function methodNotAllowed(allow: string): Response {
 
 function pastePathError(request: Request): PasteError | undefined {
   const pathname = new URL(request.url).pathname;
-  const idMatches = [
-    /^\/api\/pastes\/([^/]+)(?:\/(?:settings|password|history(?:\/[^/]+)?|read))?$/.exec(pathname),
+  const matches = [
+    /^\/api\/pastes\/([^/]+)(?:\/(?:settings|password|read)|\/history(?:\/([^/]+))?)?$/.exec(pathname),
     /^\/(?:raw|html|md|file)\/([^/]+)$/.exec(pathname),
     /^\/([^/]+)$/.exec(pathname),
   ];
-  const id = idMatches.find((match) => match !== null)?.[1];
-  if (id === undefined || ["api", "ip-trace", "assets"].includes(id)) return undefined;
+  const match = matches.find((candidate) => candidate !== null);
+  if (match === undefined || match === null) return undefined;
+  const segments = match.slice(1).filter((segment): segment is string => segment !== undefined);
+  if (segments.length === 0 || ["api", "ip-trace", "assets"].includes(segments[0]!)) return undefined;
   try {
-    if (decodeURIComponent(id).includes("/")) return new PasteError("PASTE_NOT_FOUND", 404);
+    if (segments.some((segment) => decodeURIComponent(segment).includes("/"))) {
+      return new PasteError("PASTE_NOT_FOUND", 404);
+    }
   } catch {
     return new PasteError("BAD_REQUEST", 400);
   }
@@ -838,8 +851,10 @@ async function browserPasteResponse(
 ): Promise<Response> {
   const queryPasswords = new URL(request.url).searchParams.getAll("password");
   try {
-    if (queryPasswords.length > 1) throw new PasteError("AMBIGUOUS_PASSWORD", 400);
-    const loaded = await service.loadContent(id, queryPasswords.length === 1 ? queryPasswords[0] : undefined);
+    const loaded = await loadWithPassword(service, id, {
+      ...(queryPasswords.length === 1 ? { password: queryPasswords[0] } : {}),
+      ambiguous: queryPasswords.length > 1,
+    }, { cleanupExpired: request.method !== "HEAD" });
     return await contentBearingResponse(service, request, loaded, representation);
   } catch (error) {
     if (!isPasteError(error)) throw error;

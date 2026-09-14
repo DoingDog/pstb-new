@@ -66,6 +66,24 @@ async function deletePaste(id: string): Promise<void> {
   ]);
 }
 
+async function makePasteLogicallyExpired(paste: PasteSummary): Promise<void> {
+  const database = (env as unknown as Env).PASTE_DB;
+  const metadata = JSON.parse((await database.get(`__cfpb:meta:${paste.id}`))!);
+  metadata.expiresAt = "2020-01-01T00:00:00.000Z";
+  metadata.expiration = { kind: "absolute" };
+  metadata.physicalExpiration = 1_577_836_800;
+  await database.put(`__cfpb:meta:${paste.id}`, JSON.stringify(metadata));
+  await Promise.all([0, 1, 2].map((slot) => database.put(`__cfpb:rev:${paste.id}:${slot}`, "sentinel")));
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let settle!: () => void;
+  return {
+    promise: new Promise<void>((resolve) => { settle = resolve; }),
+    resolve: () => settle(),
+  };
+}
+
 function rawContentTypeRequest(path: string, method: string, contentType: string, body: ReadableStream<Uint8Array> | null = null): Request {
   return {
     body,
@@ -2179,6 +2197,27 @@ describe("HTTP slice 1", () => {
       }
     });
 
+    it("validates logical expiry without deleting keys for every browser/direct HEAD", async () => {
+      const paste = await createJsonPaste({ content: "expired", expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      await makePasteLogicallyExpired(paste);
+      const erase = vi.spyOn(database, "delete").mockResolvedValue(undefined);
+      try {
+        for (const path of [`/${paste.id}`, `/raw/${paste.id}`, `/html/${paste.id}`, `/md/${paste.id}`, `/file/${paste.id}`]) {
+          erase.mockClear();
+          const response = await localRequest(path, { method: "HEAD" });
+          expect(response.status, path).toBe(404);
+          expect(erase, path).not.toHaveBeenCalled();
+          for (const key of [paste.id, `__cfpb:meta:${paste.id}`, `__cfpb:rev:${paste.id}:0`, `__cfpb:rev:${paste.id}:1`, `__cfpb:rev:${paste.id}:2`]) {
+            await expect(database.get(key), `${path} ${key}`).resolves.not.toBeNull();
+          }
+        }
+      } finally {
+        erase.mockRestore();
+        await deletePaste(paste.id);
+      }
+    });
+
     it("serves the browser page and password bootstrap", async () => {
       const publicPaste = await createJsonPaste({ content: "browser source", expiration: "permanent" });
       const protectedPaste = await createJsonPaste({ content: "protected source", password: "right", expiration: "permanent" });
@@ -2253,6 +2292,33 @@ describe("HTTP slice 1", () => {
       }
     });
 
+    it("defers browser/direct duplicate query credentials until resource authority", async () => {
+      const protectedPaste = await createJsonPaste({ content: "protected", password: "right", expiration: "permanent" });
+      const unprotectedPaste = await createJsonPaste({ content: "unprotected", expiration: "permanent" });
+      const expiredPaste = await createJsonPaste({ content: "expired", expiration: "permanent" });
+      const incoherentPaste = await createJsonPaste({ content: "incoherent", expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      await makePasteLogicallyExpired(expiredPaste);
+      await database.put(`__cfpb:meta:${incoherentPaste.id}`, "{");
+      try {
+        for (const [path, status] of [
+          ["/missing", 404],
+          [`/${expiredPaste.id}`, 404],
+          [`/raw/${incoherentPaste.id}`, 503],
+          [`/${protectedPaste.id}`, 400],
+          [`/raw/${unprotectedPaste.id}`, 400],
+        ] as const) {
+          const response = await localRequest(`${path}?password=one&password=two`);
+          expect(response.status, path).toBe(status);
+        }
+      } finally {
+        await deletePaste(protectedPaste.id);
+        await deletePaste(unprotectedPaste.id);
+        await deletePaste(expiredPaste.id);
+        await deletePaste(incoherentPaste.id);
+      }
+    });
+
     it("does not authorize direct routes with headers", async () => {
       const paste = await createJsonPaste({ content: "private", password: "right", expiration: "permanent" });
       try {
@@ -2317,38 +2383,140 @@ describe("HTTP slice 1", () => {
   });
 
   describe("view-once order", () => {
-    it("prepares browser view-once bodies before deleting all keys", async () => {
+    it("waits for browser view-once delete completion before returning the prepared body", async () => {
       const paste = await createJsonPaste({ content: "prepared", viewOnce: true, expiration: "permanent" });
       const database = (env as unknown as Env).PASTE_DB;
-      const originalDelete = database.delete.bind(database);
       const events: string[] = [];
+      const mainStarted = deferred();
+      const revisionStarted = [deferred(), deferred(), deferred()];
+      const metadataStarted = deferred();
+      const mainDeleted = deferred();
+      const revisionDeleted = [deferred(), deferred(), deferred()];
+      const metadataDeleted = deferred();
       vi.mocked(renderPastePage).mockImplementationOnce(() => {
         events.push("body-prepared");
         return "prepared body";
       });
-      const erase = vi.spyOn(database, "delete").mockImplementation(async (key) => {
-        if (key === paste.id) events.push("delete-main");
-        else if (key === `__cfpb:meta:${paste.id}`) events.push("delete-meta");
-        else if (key.startsWith(`__cfpb:rev:${paste.id}:`)) events.push(`delete-revision-${key.slice(-1)}`);
-        return originalDelete(key);
+      const erase = vi.spyOn(database, "delete").mockImplementation((key) => {
+        if (key === paste.id) {
+          events.push("delete-main");
+          mainStarted.resolve();
+          return mainDeleted.promise;
+        }
+        if (key === `__cfpb:meta:${paste.id}`) {
+          events.push("delete-meta");
+          metadataStarted.resolve();
+          return metadataDeleted.promise;
+        }
+        const slot = Number(key.slice(-1));
+        events.push(`delete-revision-${slot}`);
+        revisionStarted[slot]!.resolve();
+        return revisionDeleted[slot]!.promise;
+      });
+      let settled = false;
+      const responsePromise = localRequest(`/${paste.id}`).then((response) => {
+        settled = true;
+        return response;
       });
       try {
-        const response = await localRequest(`/${paste.id}`);
+        await mainStarted.promise;
+        expect(events).toEqual(["body-prepared", "delete-main"]);
+        expect(settled).toBe(false);
+
+        mainDeleted.resolve();
+        await Promise.all(revisionStarted.map(({ promise }) => promise));
+        const revisionEvents = events.slice(2);
+        expect(revisionEvents).toHaveLength(3);
+        expect(new Set(revisionEvents)).toEqual(new Set(["delete-revision-0", "delete-revision-1", "delete-revision-2"]));
+        expect(events).not.toContain("delete-meta");
+
+        revisionDeleted[0]!.resolve();
+        await Promise.resolve();
+        expect(events).not.toContain("delete-meta");
+        revisionDeleted[1]!.resolve();
+        await Promise.resolve();
+        expect(events).not.toContain("delete-meta");
+        revisionDeleted[2]!.resolve();
+        await metadataStarted.promise;
+        expect(settled).toBe(false);
+
+        metadataDeleted.resolve();
+        const response = await responsePromise;
         events.push("response-observed");
         expect(response.status).toBe(200);
         expect(await response.text()).toBe("prepared body");
-        expect(events[0]).toBe("body-prepared");
-        const main = events.indexOf("delete-main");
-        const meta = events.indexOf("delete-meta");
-        const responseObserved = events.indexOf("response-observed");
-        expect(main).toBeGreaterThanOrEqual(0);
-        expect(meta).toBeGreaterThan(main);
-        const revisionEvents = events.slice(main + 1, meta);
-        expect(revisionEvents).toHaveLength(3);
-        expect(new Set(revisionEvents)).toEqual(new Set(["delete-revision-0", "delete-revision-1", "delete-revision-2"]));
-        expect(responseObserved).toBeGreaterThan(meta);
+        expect(events.indexOf("response-observed")).toBeGreaterThan(events.indexOf("delete-meta"));
       } finally {
+        mainDeleted.resolve();
+        for (const gate of revisionDeleted) gate.resolve();
+        metadataDeleted.resolve();
+        await responsePromise.catch(() => undefined);
         vi.mocked(renderPastePage).mockClear();
+        erase.mockRestore();
+        await deletePaste(paste.id);
+      }
+    });
+
+    it("waits for API view-once delete completion before returning content", async () => {
+      const paste = await createJsonPaste({ content: "prepared API", viewOnce: true, expiration: "permanent" });
+      const database = (env as unknown as Env).PASTE_DB;
+      const events: string[] = [];
+      const mainStarted = deferred();
+      const revisionStarted = [deferred(), deferred(), deferred()];
+      const metadataStarted = deferred();
+      const mainDeleted = deferred();
+      const revisionDeleted = [deferred(), deferred(), deferred()];
+      const metadataDeleted = deferred();
+      const erase = vi.spyOn(database, "delete").mockImplementation((key) => {
+        if (key === paste.id) {
+          events.push("delete-main");
+          mainStarted.resolve();
+          return mainDeleted.promise;
+        }
+        if (key === `__cfpb:meta:${paste.id}`) {
+          events.push("delete-meta");
+          metadataStarted.resolve();
+          return metadataDeleted.promise;
+        }
+        const slot = Number(key.slice(-1));
+        events.push(`delete-revision-${slot}`);
+        revisionStarted[slot]!.resolve();
+        return revisionDeleted[slot]!.promise;
+      });
+      let settled = false;
+      const responsePromise = localRequest(`/api/pastes/${paste.id}`).then((response) => {
+        settled = true;
+        return response;
+      });
+      try {
+        await mainStarted.promise;
+        expect(events).toEqual(["delete-main"]);
+        expect(settled).toBe(false);
+
+        mainDeleted.resolve();
+        await Promise.all(revisionStarted.map(({ promise }) => promise));
+        expect(new Set(events.slice(1))).toEqual(new Set(["delete-revision-0", "delete-revision-1", "delete-revision-2"]));
+        expect(events).not.toContain("delete-meta");
+
+        revisionDeleted[0]!.resolve();
+        await Promise.resolve();
+        expect(events).not.toContain("delete-meta");
+        revisionDeleted[1]!.resolve();
+        await Promise.resolve();
+        expect(events).not.toContain("delete-meta");
+        revisionDeleted[2]!.resolve();
+        await metadataStarted.promise;
+        expect(settled).toBe(false);
+
+        metadataDeleted.resolve();
+        const response = await responsePromise;
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ id: paste.id, content: "prepared API" });
+      } finally {
+        mainDeleted.resolve();
+        for (const gate of revisionDeleted) gate.resolve();
+        metadataDeleted.resolve();
+        await responsePromise.catch(() => undefined);
         erase.mockRestore();
         await deletePaste(paste.id);
       }
@@ -2431,6 +2599,7 @@ describe("HTTP slice 1", () => {
         "/api/pastes/%ZZ/password",
         "/api/pastes/%ZZ/history",
         "/api/pastes/%ZZ/history/1",
+        "/api/pastes/p/history/%ZZ",
         "/api/pastes/%ZZ/read",
       ];
       for (const path of [...apiTemplates, "/%ZZ", "/raw/%ZZ", "/html/%ZZ", "/md/%ZZ", "/file/%ZZ"]) {
@@ -2456,6 +2625,7 @@ describe("HTTP slice 1", () => {
         "/api/pastes/a%2Fb/password",
         "/api/pastes/a%2Fb/history",
         "/api/pastes/a%2Fb/history/1",
+        "/api/pastes/p/history/a%2Fb",
         "/api/pastes/a%2Fb/read",
         "/api/pastes/a/settings/extra",
         "/a%2Fb",
@@ -2639,7 +2809,7 @@ describe("HTTP slice 1", () => {
           headers: { "content-type": "application/json", "x-paste-password": "wrong" },
           body: JSON.stringify({ content: "new", password: "wrong" }),
         });
-        expect(wrongPassword.status).toBe(403);
+        expect(wrongPassword.status).toBe(400);
 
         const authorized = await request(`/api/pastes/${protectedPaste.id}?password=one&password=two`, {
           method: "PATCH",
@@ -2958,7 +3128,7 @@ describe("HTTP slice 1", () => {
         const wrong = await request(`/api/pastes/${protectedPaste.id}/read?password=one&password=two`, {
           headers: { "x-paste-password": "wrong" },
         });
-        expect(wrong.status).toBe(403);
+        expect(wrong.status).toBe(400);
         const authorized = await request(`/api/pastes/${protectedPaste.id}/read?password=one&password=two`, {
           headers: { "x-paste-password": "right" },
         });

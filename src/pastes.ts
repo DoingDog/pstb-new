@@ -701,7 +701,7 @@ export class PasteService {
     return summary(metadata);
   }
 
-  async loadContent(id: string, password?: CurrentCredential): Promise<LoadedPaste> {
+  async loadContent(id: string, password?: CurrentCredential, options: { cleanupExpired?: boolean } = {}): Promise<LoadedPaste> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) {
       throw validationError("id", "Must be 1 to 64 ASCII letters, digits, underscores, or hyphens.");
     }
@@ -737,14 +737,14 @@ export class PasteService {
       ) {
         metadata = await this.reconcileMetadataLast(id, main.value, marker, metadata, bytes);
       }
-      await this.throwIfExpired(id, metadata.expiresAt);
+      await this.throwIfExpired(id, metadata.expiresAt, options.cleanupExpired !== false);
       this.authorize(metadata.password, password);
       return { content: main.value, metadata, summary: summary(metadata), legacy: false, marker };
     }
 
     if (sibling !== null) throw inconsistent();
     const legacy = projectLegacy(id, main.value, main.metadata);
-    await this.throwIfExpired(id, legacy.summary.expiresAt);
+    await this.throwIfExpired(id, legacy.summary.expiresAt, options.cleanupExpired !== false);
     return legacy;
   }
 
@@ -1274,9 +1274,9 @@ export class PasteService {
     if (expected !== null && supplied !== expected) throw new PasteError("FORBIDDEN", 403);
   }
 
-  private async throwIfExpired(id: string, expiresAt: string | null): Promise<void> {
+  private async throwIfExpired(id: string, expiresAt: string | null, cleanup: boolean): Promise<void> {
     if (expiresAt !== null && this.clock().getTime() >= new Date(expiresAt).getTime()) {
-      await this.deleteFive(id, "expiry");
+      if (cleanup) await this.deleteFive(id, "expiry");
       throw new PasteError("PASTE_NOT_FOUND", 404);
     }
   }
