@@ -104,8 +104,8 @@
 | Create test | `src/client/components/management.browser.test.tsx` | management forms/races/focus/result-table presentation | 14 |
 | Create test | `src/client/App.browser.test.tsx`, `src/client/App.module-graph.test.ts` | complete branch/controller integration、StrictMode-like remount、request audit andsource-only lazy/import ownership proof | 15 |
 | Create | `playwright.config.ts`, `test/e2e/helpers.ts` | real Wrangler webServer和bundled Chromium/Firefox/WebKit projects/helpers；不冒充branded browser evidence | 16 |
-| Create | `test/e2e/{create-password,ordinary-sync,view-once-representations,accessibility}.spec.ts` | end-to-end journeys、每个application branch的AxeBuilder scan和engine matrix | 16 |
-| Create | `test/fixtures/external.html`, `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`, `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`, `test/e2e/evidence/browser-target-sources/*.json`, `test/e2e/evidence/browser-matrix/**`, `test/e2e/evidence/engine/**`, `test/e2e/evidence/accessibility/**` | same-origin active-HTML marker、official stable release-history snapshots、exact-two-derived-major branded rows/manual commands、tracked engine receipts andfour release-blocking accessibility rows | 16 |
+| Create | `test/e2e/{create-password,ordinary-sync,view-once-representations,accessibility,engine-version}.spec.ts` | end-to-end journeys、每个application branch的AxeBuilder scan，以及只由`record-engine`启用并调用`browser.version()`的run-bound sentinel | 16 |
+| Create | `test/fixtures/external.html`, `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`, `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`, `test/e2e/evidence/browser-target-sources/*.json`, `test/e2e/evidence/browser-matrix/**`, `test/e2e/evidence/engine/**`, `test/e2e/evidence/accessibility/**`, transient `test/e2e/{browser-matrix,accessibility-manual}.json.lock` | same-origin active-HTML marker、official stable release-history snapshots、closed-tuple branded capture/smoke receipts、run-bound reporter/observation/engine receipts andfour release-blocking accessibility rows | 16 |
 | Modify | `src/build.test.ts` | exact pins/source set/manifest/hash/budget/no-banned-stack checks | 8，然后17 |
 | Create test | `src/legacy-removal.test.ts` | final proof旧Worker不存在且`aioapi.js`不变 | 18 |
 | Delete | `worker.js` | obsolete Service Worker implementation；仅所有release gates先通过后删除 | 18 |
@@ -2341,10 +2341,12 @@ Independent Opus performsmax-effort state-machine review againstspec17.5-17.11�
 - Create: `test/e2e/ordinary-sync.spec.ts`
 - Create: `test/e2e/view-once-representations.spec.ts`
 - Create: `test/e2e/accessibility.spec.ts`
+- Create: `test/e2e/engine-version.spec.ts`
 - Create: `test/fixtures/external.html`
 - Create: `test/e2e/browser-matrix.json`, `test/e2e/browser-manual.md`
 - Create: `test/e2e/accessibility-manual.md`, `test/e2e/accessibility-manual.json`
 - Create generated official-source and release receipts: `test/e2e/evidence/browser-target-sources/{chrome,edge,firefox,safari}-stable.json`, `test/e2e/evidence/browser-matrix/**`, `test/e2e/evidence/engine/**`, `test/e2e/evidence/accessibility/**`
+- Create/remove transient only: `test/e2e/browser-matrix.json.lock`, `test/e2e/accessibility-manual.json.lock`（Task16 command-owned，never committed）
 
 - [ ] **Step 1: Capture a real Playwright RED, then configure the minimal GREEN supervised Wrangler server**
 
@@ -2380,17 +2382,22 @@ Both commands mustexitnonzero becauseTask16 hasnot createdthem；do notmanufactu
 ```ts
 type BrowserProduct = "Chrome" | "Edge" | "Firefox" | "Safari";
 type BrowserSlot = "current" | "previous";
-type BrandedEnvironment =
-  | "windows-chrome-current"
-  | "windows-chrome-previous"
-  | "windows-edge-current"
-  | "windows-edge-previous"
-  | "windows-firefox-current"
-  | "windows-firefox-previous"
-  | "macos-safari-current"
-  | "macos-safari-previous";
+type BrandedTuple =
+  | { product: "Chrome"; slot: "current"; environment: "windows-chrome-current" }
+  | { product: "Chrome"; slot: "previous"; environment: "windows-chrome-previous" }
+  | { product: "Edge"; slot: "current"; environment: "windows-edge-current" }
+  | { product: "Edge"; slot: "previous"; environment: "windows-edge-previous" }
+  | { product: "Firefox"; slot: "current"; environment: "windows-firefox-current" }
+  | { product: "Firefox"; slot: "previous"; environment: "windows-firefox-previous" }
+  | { product: "Safari"; slot: "current"; environment: "macos-safari-current" }
+  | { product: "Safari"; slot: "previous"; environment: "macos-safari-previous" };
+type BrandedEnvironment = BrandedTuple["environment"];
+type ArtifactRef = {
+  path: string;
+  sha256: string;
+};
 type BrowserMatrix = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   releaseDate: string;
   targets: Array<{
     product: BrowserProduct;
@@ -2398,40 +2405,35 @@ type BrowserMatrix = {
     major: number;
     exactVersion: string;
     sourceArtifact: string;
+    sourceSha256: string;
   }>;
   rows: Array<
-    | {
-        product: BrowserProduct;
-        slot: BrowserSlot;
+    | (BrandedTuple & {
         targetMajor: number;
         observedVersion: string;
         mode: "manual-branded";
-        environment: BrandedEnvironment;
         status: "passed";
+        capturedAt: string;
         testedAt: string;
-        versionArtifact: string;
-        evidence: string;
-      }
-    | {
-        product: "Safari";
-        slot: BrowserSlot;
+        captureReceipt: ArtifactRef;
+        smokeReceipt: ArtifactRef;
+      })
+    | (Extract<BrandedTuple, { product: "Safari" }> & {
         targetMajor: number;
         observedVersion: null;
         mode: "manual-branded";
-        environment: "macos-safari-current" | "macos-safari-previous";
         status: "not-available";
         testedAt: string;
-        versionArtifact: null;
-        evidence: string;
-      }
+        captureReceipt: null;
+        smokeReceipt: null;
+        unavailableReceipt: ArtifactRef;
+      })
   >;
-  engineCoverage: Array<{
-    project: "chromium" | "firefox" | "webkit";
-    exactVersion: string;
-    status: "passed";
-    testedAt: string;
-    evidence: string;
-  }>;
+  engineCoverage: Array<
+    Omit<EngineCoverageReceipt, "schemaVersion" | "releaseDate"> & {
+      receiptArtifact: ArtifactRef;
+    }
+  >;
 };
 
 type VendorSourceId =
@@ -2468,15 +2470,23 @@ Task16’s`browser-evidence.mjs acquire-targets` is theonly acquisition/normaliz
 | Chrome | `google-chrome-versionhistory-win-stable`；`https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction%3D1&order_by=starttime%20desc&page_size=1000` | Follow`nextPageToken` withthe same query plus`page_token` untilabsent；acceptonly`fraction===1` records withstring`name`、numeric dotted`version` andRFC3339`serving.startTime`。Group same`version`，sort/deduplicate its`name` values into`sourceReleaseIds`，anduse theearliest start instant as`releasedAt`。Conflicting repeats exitnonzero。 |
 | Edge | `microsoft-edge-enterprise-win-x64-stable`；`https://edgeupdates.microsoft.com/api/products?view=enterprise` | Selectthe sole`Product==="Stable"` array，thenonly`Platform==="Windows"` and`Architecture==="x64"`；map`String(ReleaseId)` asits sole`sourceReleaseIds` member，`ProductVersion` as`exactVersion` and`PublishedTime` asrelease time。The source’s timezone-free exact`YYYY-MM-DDTHH:mm:ss` value isdefined bythis adapter asUTC andnormalized byappending`Z` beforecanonical timestamp parsing。 |
 | Firefox | `mozilla-firefox-stability-releases`；`https://product-details.mozilla.org/1.0/firefox_history_stability_releases.json` | Map everyown object entry whosekey is numeric dottedversion andwhosevalue isavalid Gregorian`YYYY-MM-DD`；use theversion key asits sole`sourceReleaseIds` member andnormalize thedate to`T00:00:00.000Z`。 |
-| Safari | `apple-security-releases-safari`；`https://support.apple.com/en-us/100100` | Parse everyHTML table row whosefirst text cell isexactly`Safari <numeric-dotted-version>` andwhose release-date cell is`DD Mon YYYY`；use thecanonical stripped row text asits sole`sourceReleaseIds` member andnormalize thedate toUTC midnight。Any duplicate Safari version withdifferent date orrow identity exitsnonzero。 |
+| Safari | `apple-security-releases-safari`；`https://support.apple.com/en-us/100100` | Selectexactly oneHTML`table` whoseheader row’s three direct cells normalize to`Name and information link`、`Available for`、`Release date`；fromeach later row withthree direct`th`/`td` cells，acceptthe first cell onlywhenit normalizes toexactly`Safari <numeric-dotted-version>` andrequirethe thirdcell tobeexact`DD Mon YYYY`。Normalize thedate toUTC midnight andsetthe sole ID toexactly`"safari:" + exactVersion + "@" + releasedAt`。Identical version/date duplicates collapse；the sameversion withdifferentdate，orone composite ID attached todifferent normalizedfields，exitsnonzero。 |
 
-Forall adapters，`source.responseSha256` islowercase SHA-256 ofthe exact response-body bytes inrequest order separated byone LF byte，mustmatch`^[0-9a-f]{64}$`，and`responseCount` isapositive safe integer equal tothatbody count。After vendor filtering，the artifact containsone canonical record perexact version andatleastthree distinct stable majors，notonly thetwo selected targets。`exactVersion` mustmatch`^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$`；`major` isapositive safe integer equal tothefirst numeric component；each`sourceReleaseIds` array isnonempty/sorted/unique andno ID occurs inanother record；each`releasedAt` iscanonical UTC andnotlater than`retrievedAt`。Duplicate exact versions、duplicate source IDs、field disagreement orunexpected response shape makesacquisition exitnonzero andwrite nothing。Allfour successful artifacts arewritten atomically to`test/e2e/evidence/browser-target-sources/{chrome,edge,firefox,safari}-stable.json`，withthe fixed product/channel/source identity shownabove。
+TheSafari adapter usesonlyaTask16-owned deterministic scanner andNode stdlib，notanHTML package。It decodesthe response with`new TextDecoder("utf-8", { fatal: true })`；the scanner lowercasesASCII tag names beforecomparison，ignores comment bytes，parsesbutdoesnotemit quoted orunquoted attribute text，emits decoded character data，andtracks balanced`table`/`tr`/direct`th`/`td` nesting throughoptional`thead`/`tbody` wrappers。It rejectsmalformed/unbalanced tags、nested tables and`script`/`style`/`template` elements insideacandidate table。Other start/end tags contribute no text；ASCII-case-insensitive`br` contributesoneU+0020。Character references inselected cell data mustendwith`;`：the onlynamed forms accepted，case-sensitively，are`amp`、`lt`、`gt`、`quot`、`apos` and`nbsp`，anddecimal`&#D;`/hex`&#xH;` forms mustdecode toavalid Unicode scalar；unknown、unterminated orinvalid references fail thatcandidate table。Cell normalization convertsHTML ASCII whitespace U+0009/U+000A/U+000C/U+000D/U+0020 plusU+00A0 tooneU+0020 run andtrims bothends。The header mustbeits table’s first normalized row andcontainexactly three direct`th` cells。For later rows，the firstcell version mustmatchthe common exact-version grammar；thethirdcell date mustmatch`^(0[1-9]|[12]\d|3[01]) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}$` andround-trip asavalid Gregorian UTC midnight。A missing、second orambiguous normalized header table fails ratherthanfalling backtoanother table orrow-text identity。
 
-`releaseDate` hasexact grammar`YYYY-MM-DD`：it mustmatch`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$` and，with`midnight = releaseDate + "T00:00:00.000Z"`，satisfy`Number.isFinite(Date.parse(midnight)) && new Date(Date.parse(midnight)).toISOString() === midnight`。Every`retrievedAt`、`releasedAt` and`testedAt` inany source、browser、Safari-unavailable、engine oraccessibility artifact mustbe canonical RFC3339 UTC`YYYY-MM-DDTHH:mm:ss.sssZ`，match`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$`，parse toafinite instant，andround-trip exactly through`new Date(value).toISOString()`。Let`D=Date.parse(releaseDate+"T00:00:00.000Z")`；theone freshness interval forall evidence is`[D - 7 * 86_400_000, D + 86_400_000)`。Every`retrievedAt` and`testedAt` mustfallinsideit。Historical`releasedAt` values mayprecede theinterval butmustnotexceed theirartifact’s`retrievedAt`。Thus acquisition maystart seven days beforethe UTC release date，and evidence maycomplete throughthat release date butnotafterits nextUTC midnight。
+Forall adapters，`source.responseSha256` islowercase SHA-256 ofthe exact response-body bytes inrequest order separated byone LF byte，mustmatch`^[0-9a-f]{64}$`，and`responseCount` isapositive safe integer equal tothatbody count。After vendor filtering，the artifact containsone canonical record perexact version andatleastthree distinct stable majors，notonly thetwo selected targets。`exactVersion` mustmatch`^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$`；`major` isapositive safe integer equal tothefirst numeric component；each`sourceReleaseIds` array isnonempty/sorted/unique andno ID occurs inanother record；each`releasedAt` iscanonical UTC andnotlater than`retrievedAt`。Duplicate exact versions、duplicate source IDs、field disagreement orunexpected response shape makesacquisition exitnonzero andwrite nothing。Allfour successful artifacts arewritten atomically to`test/e2e/evidence/browser-target-sources/{chrome,edge,firefox,safari}-stable.json`，withthe fixed product/channel/source identity shownabove；each matrix target’s`sourceSha256` isthencomputed overthe exact final UTF-8 bytes ofits fixed`sourceArtifact` andmustmatch`^[0-9a-f]{64}$`。
 
-`acquire-targets --release-date` validatesits explicit argument andcurrent time againstthat interval beforeandafterfetching，sets each`retrievedAt` fromthe post-fetch current instant，then derives targets independently perartifact fromrecords whose`releasedAt <= retrievedAt`：sortdistinct majors numerically descending，mapthehighest to`current` andsecond-highest to`previous`，andwithin each selected major choose thegreatest numeric dot-component tuple paddedwithzero components，usinglater`releasedAt` onlyto breakanequal tuple；anequal tuple/timestamp fromdifferent exact strings isambiguous andfails。The selected majors may beconsecutive ornonconsecutive；the script performsno arithmetic relation check betweenthem。The command writesexactlytwo targets perproduct andresets`rows`/`engineCoverage` toempty in`browser-matrix.json`；it alsoinitializes`accessibility-manual.json` withthe same exact`releaseDate` andempty rows。A failure writesnoneofthese files。
+`releaseDate` hasexact grammar`YYYY-MM-DD`：it mustmatch`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$` and，with`midnight = releaseDate + "T00:00:00.000Z"`，satisfy`Number.isFinite(Date.parse(midnight)) && new Date(Date.parse(midnight)).toISOString() === midnight`。Every`retrievedAt`、`releasedAt`、`capturedAt` and`testedAt` inany source、browser、Safari-unavailable、engine oraccessibility artifact mustbe canonical RFC3339 UTC`YYYY-MM-DDTHH:mm:ss.sssZ`，match`^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$`，parse toafinite instant，andround-trip exactly through`new Date(value).toISOString()`。Let`D=Date.parse(releaseDate+"T00:00:00.000Z")`；theone freshness interval forall evidence is`[D - 7 * 86_400_000, D + 86_400_000)`。Every acquisition、capture、`record-pass`、`record-safari-unavailable`、`record-engine` and`record-accessibility` invocation callsitsinjected clock exactlyonce beforeany fetch/spawn/read/write，names thatinstant`commandNow`，andusesonlythatinstant forallcurrent-time checks inthat operation；theCLI clock is`Date.now` andself-tests injectafixed function。Every consumed`retrievedAt`、`capturedAt` and`testedAt` mustbothfallinside theinterval andbe`<= commandNow`；timestamps producedbythat operation usecanonical`commandNow`。An operation derivesone remaining-duration budget from`D + 86_400_000 - commandNow` andaborts any fetch orspawn whose deadline timer expires，withoutreading asecond wall clock；deadline expiry removes scratch output andcommits nothing，preserving theexisting interval-crossing closure。Thefinal verifier similarly capturesone`verifierNow` beforeany read andrequires every consumed`retrievedAt`、`capturedAt` and`testedAt` bothinside theinterval and`<= verifierNow`。Historical`releasedAt` values mayprecede theinterval butmustalways be`<= retrievedAt`。Thus no timestamp one millisecond afterthe operation clock canpass merely becauseit remainsinside therelease interval。
 
-`scripts/verify-release-evidence.mjs` reparses allfour fixed source-artifact paths andrejects schema/product/channel/source ID/source URL/releaseDate mismatches、stale`retrievedAt`、malformed/repeated/inconsistent release records orfewerthanthree distinct majors。It independently repeats the selection above andrequires exactlyone matching target andone final row foreachofthe eight product/slot pairs，withthe target’s`major`、`exactVersion` andfixed`sourceArtifact` equal tothederived values andthe row’s`targetMajor` equal tothe target。Both Chrome rows、both Edge rows andboth Firefox rows mustbe`passed` witha fresh`testedAt` andnonempty runtime`observedVersion` whose normalized exact version equals`target.exactVersion` andwhose parsed major equals`target.major`，plus existing matching version/test evidence artifacts。Safari uses thesame passed exact-version/freshness rule whenacquired；onlya Safari row may be`not-available`，andit muststill bindthederived target andfresh runner-provisioning failure artifact。A Safari unavailable row isnotapass andnever satisfiesmanual accessibility evidence。`engineCoverage` mustseparately containexactlyone fresh passed Chromium、Firefox andWebKit report withversions；the verifier nevermapsChromium toChrome/Edge orWebKit toSafari。Finally itrequires`browser-matrix.json` and`accessibility-manual.json` tohaveexactly thesame valid`releaseDate`，requires theverifier’s owncurrent instant inside thesame interval，andapplies thatinterval toevery`retrievedAt`/`testedAt`。Implement both self-test modes with`fs.mkdtemp` under`os.tmpdir()` and`finally` cleanup，no network andno tracked writes。`browser-evidence.mjs self-test` feedsminimal raw payloads throughallfour adapters，including Chrome duplicate-fraction grouping、Edge timezone conversion、Firefox UTC-midnight conversion、Safari nonadjacent majors，andproves atomic no-write onone source failure orinterval crossing。`verify-release-evidence.mjs --self-test` first accepts onecomplete synthetic campaign whose twohighest majors arenonadjacent，thenrequires rejection aftereach independent mutation：wrong product/channel/source ID/source URL，duplicate exact version，duplicate source release ID，version/major disagreement，malformed/future release time，fewerthanthree majors，wrong target/slot/exact version/source path，aggregate date disagreement，one out-of-window evidence timestamp，andanout-of-window verifier clock。
+`acquire-targets --release-date` capturesits single`commandNow` beforefetching，validatesthe explicit argument andthatinstant againstthe interval，andusescanonical`commandNow` asthe one`retrievedAt` forallfour artifacts。It then derives targets independently perartifact fromrecords whose`releasedAt <= retrievedAt`：sortdistinct majors numerically descending，mapthehighest to`current` andsecond-highest to`previous`，andwithin each selected major choose thegreatest numeric dot-component tuple paddedwithzero components，usinglater`releasedAt` onlyto breakanequal tuple；anequal tuple/timestamp fromdifferent exact strings isambiguous andfails。The selected majors may beconsecutive ornonconsecutive；the script performsno arithmetic relation check betweenthem。Afterallfour responses、artifacts andtarget hashes validate，the command stages thefour source artifacts、exactlytwo targets perproduct、anempty`rows`/`engineCoverage` matrix andanempty same-date`accessibility-manual.json`，thenunderthe exact matrix lock commits each staged file bysame-directory atomic rename andremoves every prior mapped branded capture/smoke/unavailable artifact plusallthree engine reporter/observation/receipt artifacts。A fetch、parse orvalidation failure occurs beforethat campaign commit andwrites ordeletes noneofthese files；a later interrupted partial filesystem commit remainsfail-closed becauseevery consumer requires one releaseDate、the fixed paths andmatching hashes。
+
+`scripts/verify-release-evidence.mjs` capturesone`verifierNow` beforeany read，reparses allfour fixed source-artifact paths，rehashes theirexact bytes，andrejects schema/product/channel/source ID/source URL/releaseDate mismatches、a`retrievedAt > verifierNow`、malformed/repeated/inconsistent release records orfewerthanthree distinct majors。It independently repeats the selection above andrequires exactlyone matching target andone final row foreachofthe eight product/slot pairs，withthe target’s`major`、`exactVersion`、fixed`sourceArtifact` and`sourceSha256` equal tothederived values andbytes，andthe row’s`targetMajor` equal tothe target。
+
+For everypassed branded row，the verifier derivesits environment、capture path andsmoke path onlyfromthe closed mapping below，thenreparses andrehashes both immutable receipts atthose exact paths。It requiresmatrix、source artifact、capture andsmoke toshareone releaseDate andtuple；requires every repeated environment、target source path/hash、target version/major、observed version/major、capture path/hash and`capturedAt` toagree exactly；reparses thecapture’s raw version output ratherthantrusting stored parsed fields；requiresobserved exact version/major toequal the independently derived target；andrequiresboth timestamps ininterval，`capturedAt <= testedAt <= verifierNow`。This rejectsprior-campaign、renamed、swapped orpartially edited artifacts evenwhenone version string stillmatches。Both Chrome rows、both Edge rows andboth Firefox rows mustbe`passed`；Safari uses thesame chain whenpassed。Onlya Safari row may be`not-available`，andthenits exact mapped unavailable receipt isreparsed/rehashed、its source path/hash andtuple mustmatch、itstestedAt mustbeinside theinterval and`<= verifierNow`，andneither a capture norsmoke receipt mayexist forthat slot。An unavailable row isnotapass andnever satisfiesmanual accessibility evidence。
+
+`engineCoverage` mustseparately containexactlyone Chromium、Firefox andWebKit row andpass the exact reporter/observation/receipt reparse-and-hash contract below；the verifier nevermapsChromium toChrome/Edge orWebKit toSafari。It also reparses every manual accessibility receipt andaggregate row。Finally itrequires`browser-matrix.json` and`accessibility-manual.json` tohaveexactly thesame valid`releaseDate`，requires`verifierNow` inside thesame interval，andapplies both interval membership andthe`<= verifierNow` ceiling toevery`retrievedAt`、`capturedAt` and`testedAt` whilepreserving`releasedAt <= retrievedAt`。
+
+Implement both self-test modes with`fs.mkdtemp` under`os.tmpdir()`、injected one-call clocks and`finally` cleanup，withno network ortracked writes。`browser-evidence.mjs self-test` feedsminimal raw payloads throughallfour adapters，includingChrome duplicate-fraction grouping、Edge timezone conversion、Firefox UTC-midnight conversion，andSafari nested inline markup、named`&nbsp;`、decimal/hex numeric entities、collapsed whitespace、identical duplicate rows、conflicting duplicate dates andnonadjacent majors；it alsoproves campaign atomic no-write、deadline-triggered interval-crossing no-write andclosed mapping rejection。`verify-release-evidence.mjs --self-test` first accepts onecomplete synthetic campaign whose twohighest majors arenonadjacent，thenrebuildsthat valid fixture beforeeach independent mutation andrequires rejection for：wrong product/channel/source ID/source URL，duplicate exact version，duplicate source release ID，version/major disagreement，malformed/future release time，fewerthanthree majors，wrong target/slot/exact version/source path/hash，aggregate date disagreement，anout-of-window timestamp，averifier clock outside theinterval，aprior-campaign capture releaseDate，awrong branded tuple/environment/capture orsmoke path，acapture target/source/version mismatch，areversed`testedAt < capturedAt` chronology，missing engine report，missing engine observation，wrong engine project，wrong run token，afailed report test，duplicate observations，apre-existing stale output notcreated bythe run，andengine version disagreement。For those branded cases，mutate onefield-set atatime andrehash every intentionally changed reference sothe intended guard isreached：replace Chrome/current capture bytes with`releaseDate` oneUTC day earlier whilethe smoke remainscurrent；changeits capture tuple toChrome/previous；changeonlythe current smoke environment to`windows-chrome-previous`；pointonlyits`captureReceipt.path` to`chrome-previous-capture.json`；changeonly`target.exactVersion` awayfromthe raw/derived value；andset`testedAt = capturedAt - 1` millisecond。For engine cases，independently delete the mapped report；delete the mapped observation；changeone reporter test’s`projectName`；changeonehex digit ofthe annotation token；setone result to`failed` and`stats.unexpected` to1；appendasecond observation array member；preseed old report/observation files thenhaveaninjected child stub emitneither andprove cleanup followedby missing-output failure；andchangeonlythe file observation version whilethe annotation version remainsvalid。The exact future-clock case uses`releaseDate="2026-09-13"` andinjects`commandNow = verifierNow = 2026-09-13T12:00:00.000Z`，thenchanges the otherwisevalid smoke receipt’s`testedAt` to`2026-09-13T12:00:00.001Z`；thatinstant remainsinside therelease interval butmustfail`record-pass` in`browser-evidence.mjs self-test` andthe same fixture mustfail final verification in`verify-release-evidence.mjs --self-test`。The producer self-test alsodrives theengine missing/stale/report-policy cases throughaninjected child result，whilethe verifier self-test drives the corresponding immutable artifact mutations throughfull reparse。Parallel acquisition andaccessibility unit cases assert produced`retrievedAt === commandNow` andreject any consumed`testedAt > commandNow`。
 
 - [ ] **Step 2: Write RED create/password/edit/history/delete journey**
 
@@ -2544,7 +2554,7 @@ type ManualAccessibilityEvidence = {
 };
 ```
 
-The screen-reader row exercises heading/landmark announcement、everyfield/error/help relationship、Tabs/Sheet/Dialog focus、polite status changes anddiff prefixes withan actual screen reader such asNVDA onWindows orVoiceOver onmacOS/iOS。The contrast row records measured light/dark normal-text、large-text、non-text control andfocus-indicator ratios againstWCAG2.2AA。The zoom row runs browser zoomat200% andrecordsreflow、content availability、focus visibility andabsence ofpage-level horizontal scrolling。The physical-touch row usesreal touch hardware andruns44px Help、Sheet、Dialog、Create andEdit flows；mouse emulation doesnotqualify。Every row needsexact environment/tool versions anditsown tracked receipt。`record-accessibility --release-date --category --evidence` requiresallthree explicit arguments，requires thecommand’s current instant andreceipt`testedAt` inside thedefined interval，andrequires receipt/aggregate releaseDate equality、argument/category equality、allknown keys、nonempty environment/tester/notes andan existing in-tree evidence path；it replaces onlythat category atomically anddoesnotaccept duplicates orextra fields。`scripts/verify-release-evidence.mjs` rejects a missing orduplicate category，`failed` status，empty version/tester/notes，missing orout-of-tree artifact，artifact/content mismatch orout-of-window timestamp；the manual schema hasno unavailable status。`accessibility-manual.md` may record that apreferred platform/tool wasunavailable，butthat note doesnotcreate orsatisfy aJSON category row。Use another actual available platform/tool orblock release，never record unavailable aspass。
+The screen-reader row exercises heading/landmark announcement、everyfield/error/help relationship、Tabs/Sheet/Dialog focus、polite status changes anddiff prefixes withan actual screen reader such asNVDA onWindows orVoiceOver onmacOS/iOS。The contrast row records measured light/dark normal-text、large-text、non-text control andfocus-indicator ratios againstWCAG2.2AA。The zoom row runs browser zoomat200% andrecordsreflow、content availability、focus visibility andabsence ofpage-level horizontal scrolling。The physical-touch row usesreal touch hardware andruns44px Help、Sheet、Dialog、Create andEdit flows；mouse emulation doesnotqualify。Every row needsexact environment/tool versions anditsown tracked receipt。`record-accessibility --release-date --category --evidence` requiresallthree explicit arguments，capturesone`commandNow` beforeany read，requires thatinstant andreceipt`testedAt` inside thedefined interval and`testedAt <= commandNow`，andrequires receipt/aggregate releaseDate equality、argument/category equality、allknown keys、nonempty environment/tester/notes andan existing in-tree evidence path；it replaces onlythat category atomically anddoesnotaccept duplicates orextra fields。`scripts/verify-release-evidence.mjs` rejects a missing orduplicate category，`failed` status，empty version/tester/notes，missing orout-of-tree artifact，artifact/content mismatch orout-of-window timestamp；the manual schema hasno unavailable status。`accessibility-manual.md` may record that apreferred platform/tool wasunavailable，butthat note doesnotcreate orsatisfy aJSON category row。Use another actual available platform/tool orblock release，never record unavailable aspass。
 
 - [ ] **Step 6: Acquire exact release-time branded browser and manual accessibility evidence**
 
@@ -2556,7 +2566,20 @@ First，onthe release controller with`CFPB_RELEASE_DATE` setto the intended UTC 
 node scripts/browser-evidence.mjs acquire-targets --release-date $env:CFPB_RELEASE_DATE
 ```
 
-Distribute byte-identical read-only copies ofthe initialized matrix andfour source artifacts toeach isolated runner，butkeepone writable aggregate onthe release controller；nevermerge independently edited matrices。Every later command uses thatsame explicit releaseDate andrefuses acontent mismatch。On each Windows runner，Terminal A runs：
+The following table isthe closed branded tuple map andthe onlyauthority forenvironment andartifact paths；code implementsit asone frozen object keyedbyexact`product + "/" + slot` andlooks upbeforeany broad-union schema check。No CLI argument、receipt ormatrix row mayoverrideany mapped value。
+
+| Product | Slot | Required environment | Fixed target source artifact | Exact capture receipt output | Exact smoke receipt input |
+|---|---|---|---|---|---|
+| Chrome | current | `windows-chrome-current` | `test/e2e/evidence/browser-target-sources/chrome-stable.json` | `test/e2e/evidence/browser-matrix/chrome-current-capture.json` | `test/e2e/evidence/browser-matrix/chrome-current.json` |
+| Chrome | previous | `windows-chrome-previous` | `test/e2e/evidence/browser-target-sources/chrome-stable.json` | `test/e2e/evidence/browser-matrix/chrome-previous-capture.json` | `test/e2e/evidence/browser-matrix/chrome-previous.json` |
+| Edge | current | `windows-edge-current` | `test/e2e/evidence/browser-target-sources/edge-stable.json` | `test/e2e/evidence/browser-matrix/edge-current-capture.json` | `test/e2e/evidence/browser-matrix/edge-current.json` |
+| Edge | previous | `windows-edge-previous` | `test/e2e/evidence/browser-target-sources/edge-stable.json` | `test/e2e/evidence/browser-matrix/edge-previous-capture.json` | `test/e2e/evidence/browser-matrix/edge-previous.json` |
+| Firefox | current | `windows-firefox-current` | `test/e2e/evidence/browser-target-sources/firefox-stable.json` | `test/e2e/evidence/browser-matrix/firefox-current-capture.json` | `test/e2e/evidence/browser-matrix/firefox-current.json` |
+| Firefox | previous | `windows-firefox-previous` | `test/e2e/evidence/browser-target-sources/firefox-stable.json` | `test/e2e/evidence/browser-matrix/firefox-previous-capture.json` | `test/e2e/evidence/browser-matrix/firefox-previous.json` |
+| Safari | current | `macos-safari-current` | `test/e2e/evidence/browser-target-sources/safari-stable.json` | `test/e2e/evidence/browser-matrix/safari-current-capture.json` | `test/e2e/evidence/browser-matrix/safari-current.json` |
+| Safari | previous | `macos-safari-previous` | `test/e2e/evidence/browser-target-sources/safari-stable.json` | `test/e2e/evidence/browser-matrix/safari-previous-capture.json` | `test/e2e/evidence/browser-matrix/safari-previous.json` |
+
+The sole unavailable inputs arealso fixed：Safari/current uses`test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json` andSafari/previous uses`test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json`。Task16 ownsthe transient exact locks`test/e2e/browser-matrix.json.lock` for`acquire-targets`/`record-pass`/`record-safari-unavailable`/`record-engine` and`test/e2e/accessibility-manual.json.lock` for`record-accessibility`；each writer capturesits clock，opensits lock with`wx` beforethe first aggregate read，holdsit throughatomic rename，andremovesonlythat lock in`finally`。Locks containno evidence andare nevercommitted。Distribute byte-identical read-only copies ofthe initialized matrix andfour source artifacts toeach isolated runner，butkeepone writable aggregate onthe release controller；nevermerge independently edited matrices。Every later command uses thatsame explicit releaseDate，derivesall paths/environment fromthe table andrefuses acontent mismatch。On each Windows runner，Terminal A runs：
 
 ```powershell
 npm ci
@@ -2589,47 +2612,111 @@ node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE 
 node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot previous --environment windows-firefox-previous --evidence test/e2e/evidence/browser-matrix/firefox-previous.json
 ```
 
-For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path andrunits`capture` line there。`capture` uses`child_process.spawn(executablePath,["--version"],{shell:false})` torunthat exact executable’s version command，normalizes andcompares itsexact version andmajor withthe matching target，writes`test/e2e/evidence/browser-matrix/<product>-<slot>-version.txt`，thenlaunches that executable at`http://127.0.0.1:8787/`。The tester executes every`browser-manual.md` check andwrites this exact evidence shape：
+For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path andrunits`capture` line there。`capture` capturesone`commandNow` beforeany read/spawn，looks upthe exact tuple，requires theCLI environment andthe matrix/source path/hash/version/major toagree withthat mapping，andrefuses ifthat tuple’s mapped capture、smoke orunavailable output alreadyexists。It uses`child_process.spawn(executablePath,["--version"],{shell:false})` torunthat exact executable，collects stdout andstderr separately asbytes，decodesboth withfatal UTF-8 andstores bothstrings untrimmed。After splitting onCRLF/LF andtrimmingonlyASCII edge whitespace，define`V = "(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*)){0,3}"` andrequireexactlyone nonempty line tomatchthe applicable`new RegExp` source`"^Google Chrome (" + V + ")$"`、`"^Microsoft Edge (" + V + ")$"`、`"^Mozilla Firefox (" + V + ")$"` or`"^Included with Safari (" + V + ")(?: \\([^\\r\\n]*\\))?$"`；capture group1 isthe observed exact version，andanyother nonempty line orsecond match fails。The parsed version andmajor mustequal the target。The command sets`capturedAt` tothe canonical`commandNow`，writesonlythe mapped JSON capture receipt throughsame-directory temp plusatomic rename，prints thatpath andits SHA-256，thenlaunches the exact executable at`http://127.0.0.1:8787/`。It nevercreates orreads astandalone text version artifact。
+
+The tester executes every`browser-manual.md` check onlyafterthe capture receipt exists，copiesits shared binding fields withouteditingthem，sets`testedAt >= capturedAt`，andwrites the exact mapped smoke path throughsame-directory temp plusrename。These arethe exact receipt shapes；allobjects rejectunknown keys andall SHA-256 values arelowercase64-hex hashes ofthe referenced exact bytes：
 
 ```ts
-type BrandedBrowserSmoke = {
+type BrandedCaptureReceipt = BrandedTuple & {
   schemaVersion: 1;
   releaseDate: string;
-  product: BrowserProduct;
-  slot: BrowserSlot;
+  capturedAt: string;
+  target: {
+    sourceArtifact: string;
+    sourceSha256: string;
+    exactVersion: string;
+    major: number;
+  };
+  rawVersionOutput: {
+    stdout: string;
+    stderr: string;
+  };
+  observed: {
+    exactVersion: string;
+    major: number;
+  };
+};
+type BrandedBrowserSmoke = BrandedTuple & {
+  schemaVersion: 2;
+  releaseDate: string;
+  capturedAt: string;
   testedAt: string;
+  captureReceipt: ArtifactRef;
+  target: {
+    sourceArtifact: string;
+    sourceSha256: string;
+    exactVersion: string;
+    major: number;
+  };
+  observed: {
+    exactVersion: string;
+    major: number;
+  };
   tester: string;
-  environment: BrandedEnvironment;
   checks: Array<{
     id: "root-create" | "password-post-hard-refresh" | "ordinary-edit-autosave" | "tabs-sheet" | "raw-html-md-file" | "delete-root-handoff";
     status: "passed" | "failed";
     notes: string;
   }>;
 };
-type SafariRunnerUnavailable = {
+type SafariRunnerUnavailable = Extract<BrandedTuple, { product: "Safari" }> & {
   schemaVersion: 1;
   releaseDate: string;
-  product: "Safari";
-  slot: BrowserSlot;
   testedAt: string;
   reporter: string;
-  environment: "macos-safari-current" | "macos-safari-previous";
-  targetSourceArtifact: string;
+  target: {
+    sourceArtifact: string;
+    sourceSha256: string;
+    exactVersion: string;
+    major: number;
+  };
   failure: "runner-not-provisioned";
   notes: string;
+};
+type EngineProject = "chromium" | "firefox" | "webkit";
+type EngineVersionObservation = {
+  releaseDate: string;
+  testedAt: string;
+  runToken: string;
+  project: EngineProject;
+  exactVersion: string;
+};
+type EngineVersionObservationArtifact = {
+  schemaVersion: 1;
+  observations: [EngineVersionObservation];
+};
+type EngineSuiteSummary = {
+  files: [
+    "test/e2e/create-password.spec.ts",
+    "test/e2e/ordinary-sync.spec.ts",
+    "test/e2e/view-once-representations.spec.ts",
+    "test/e2e/accessibility.spec.ts",
+    "test/e2e/engine-version.spec.ts",
+  ];
+  total: number;
+  passed: number;
+  skipped: 0;
+  unexpected: 0;
+  flaky: 0;
+  sentinel: "records browser.version() for record-engine";
 };
 type EngineCoverageReceipt = {
   schemaVersion: 1;
   releaseDate: string;
-  project: "chromium" | "firefox" | "webkit";
+  runToken: string;
+  project: EngineProject;
   exactVersion: string;
   status: "passed";
   testedAt: string;
-  report: string;
+  suite: EngineSuiteSummary;
+  reporterArtifact: ArtifactRef;
+  observationArtifact: ArtifactRef;
 };
 ```
 
-Every capture subcommand requires`--release-date` equal tothe matrix date andvalidates current time beforereading/writing a version artifact orlaunching thebrowser。Afterthe runner returns itsversion text andsmoke JSON tothe controller’s matching tracked paths，the controller runs thecorresponding`record-pass` line showninthe pair。`record-pass` also requires current time andthe receipt’s canonical`testedAt` inside theinterval，thenaccepts onlyan existingin-tree JSON artifact withthat same releaseDate，exact known keys，exact matching product/slot/environment，nonempty tester，andexactly oneofeach six check IDs allpassed。It updates onlythe matching matrix row atomically withthe receipt timestamp、captured runtime version andartifact paths；it doesnotaccept atyped version orfree-form success string。The script usesNode stdlib anddoesnot addabrowser automation dependency。
+Every capture subcommand requires`--release-date` equal tothe matrix date，requiresits one`commandNow` inside the interval andusesit asthe receipt’s`capturedAt`。The runner isthe sole writer ofthe mapped capture andsmoke receipts；aftermanual completion itreturns both files byte-for-byte underthose same relative paths tothe controller，alongwiththe capture hash printedby`capture`。The controller mustcopy ratherthanretype、rename oreditthem，mustrecompute thathash，andkeeps theonly writable`browser-matrix.json`；runner matrices areneverreturned ormerged。
+
+The controller thenruns thecorresponding`record-pass` line。That command capturesone`commandNow` beforeany read，requires`--evidence` toequalthe mapping’s exact smoke path，derivesthe capture andsource paths fromthe tuple，andreparses matrix、source、capture andsmoke bytes itself。It rejectsunknown keys andrequiresexact releaseDate/product/slot/environment/target source path/hash/target version/major/observed version/major/capturedAt equality across every field sharedbythe two receipts；requires the smoke’s capture path/hash toreference those exact capture bytes；re-extracts the observed version from`rawVersionOutput`；requires ittoequal the independently derived matrix target；requires`capturedAt <= testedAt <= commandNow` withboth timestamps inside theinterval；andrequires anonempty tester plusexactlyoneofeach six check IDs allpassed。Onlyafterall checks pass doesit stagea row containingthe mapped environment、capture/smoke paths andhashes、capturedAt、testedAt andobserved target version，thenatomically replaceonlythat tuple’s row inthe controller aggregate。It neverrewrites either immutable receipt andaccepts neither aCLI-supplied version norfree-form success string。The script usesNode stdlib andaddsno package。
 
 On each actual Safari Mac runner，Terminal A runs`npm ci` and`npm run dev:e2e`；Terminal B runs：
 
@@ -2642,7 +2729,7 @@ node scripts/browser-evidence.mjs capture-safari --release-date "$CFPB_RELEASE_D
 node scripts/browser-evidence.mjs record-pass --release-date "$CFPB_RELEASE_DATE" --product Safari --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous.json
 ```
 
-Run each`capture-safari` line onlyonits named runner。It runs exact`/usr/bin/safaridriver --version` forversion capture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution；afterthe runner returns itsversion text andsmoke JSON，runthat slot’s`record-pass` line onthe release controller。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
+Run each`capture-safari` line onlyonits named runner。It applies thesame closed mapping、clock、structured receipt、raw-output parser andatomic write contract，runs exact`/usr/bin/safaridriver --version` forcapture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution；afterthe runner returnsits byte-identical mapped capture andsmoke receipts，runthat slot’s`record-pass` line onthe release controller。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
 
 ```bash
 CFPB_RELEASE_DATE="$(node -p "JSON.parse(require('node:fs').readFileSync('test/e2e/browser-matrix.json','utf8')).releaseDate")"
@@ -2650,7 +2737,67 @@ node scripts/browser-evidence.mjs record-safari-unavailable --release-date "$CFP
 node scripts/browser-evidence.mjs record-safari-unavailable --release-date "$CFPB_RELEASE_DATE" --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json
 ```
 
-Use onlythe applicable slot command。`record-safari-unavailable` accepts onlythe exact`SafariRunnerUnavailable` shape atanin-tree path；it requires theexplicit releaseDate andcurrent/receipt times inside theinterval，exact Safari product/slot/environment，nonempty reporter/notes，`runner-not-provisioned` failure and`targetSourceArtifact` equal tothe matching derived target。It rejects every non-Safari product andatomically writes onlythat unavailable row。
+Use onlythe applicable slot command。`record-safari-unavailable` capturesone`commandNow` beforeany read andaccepts onlythe exact`SafariRunnerUnavailable` shape atthe tuple’s fixed unavailable path；it requires theexplicit/matrix/receipt releaseDate equal，`commandNow` and`testedAt` inside theinterval，`testedAt <= commandNow`，the exact Safari product/slot/mapped environment，nonempty reporter/notes，`runner-not-provisioned` failure andthe target source path/hash/version/major equal tothe independently derived target。It rejects every non-Safari product，any other evidence path，orany existing mapped capture/smoke receipt，thenatomically writes onlythat unavailable row withthe unavailable receipt’s exact path/hash。
+
+Task16 alsoowns`test/e2e/engine-version.spec.ts` asthe sole engine observation producer。It registers no test duringordinary Playwright commands；when`CFPB_ENGINE_RUN_TOKEN` exists，it registers exactlythis sentinel，takesproject identity from`testInfo.project.name` andversion onlyfromthe same run’s`browser.version()`，writesone observation array atomically，andadds the same observation asone JSON-reporter-captured`cfpb-engine-observation` annotation：
+
+```ts
+import { randomUUID } from "node:crypto";
+import { rename, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { expect, test } from "@playwright/test";
+
+type EngineVersionObservation = {
+  releaseDate: string;
+  testedAt: string;
+  runToken: string;
+  project: "chromium" | "firefox" | "webkit";
+  exactVersion: string;
+};
+
+const observationPaths = {
+  chromium: "test/e2e/evidence/engine/chromium-version-observation.json",
+  firefox: "test/e2e/evidence/engine/firefox-version-observation.json",
+  webkit: "test/e2e/evidence/engine/webkit-version-observation.json",
+} as const;
+const runToken = process.env.CFPB_ENGINE_RUN_TOKEN;
+
+if (runToken !== undefined) {
+  test("records browser.version() for record-engine", async ({ browser }, testInfo) => {
+    expect(runToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(testInfo.project.name).toBe(process.env.CFPB_ENGINE_PROJECT);
+    expect(Object.hasOwn(observationPaths, testInfo.project.name)).toBe(true);
+    const project = testInfo.project.name as keyof typeof observationPaths;
+    const outputPath = process.env.CFPB_ENGINE_OBSERVATION_PATH ?? "";
+    expect(resolve(outputPath)).toBe(resolve(observationPaths[project]));
+    const exactVersion = browser.version();
+    expect(exactVersion).toMatch(/^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$/);
+    const observation = {
+      releaseDate: process.env.CFPB_RELEASE_DATE ?? "",
+      testedAt: process.env.CFPB_ENGINE_TESTED_AT ?? "",
+      runToken,
+      project,
+      exactVersion,
+    } satisfies EngineVersionObservation;
+    const body = `${JSON.stringify({ schemaVersion: 1, observations: [observation] })}\n`;
+    const temporary = `${outputPath}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, body, { encoding: "utf8", flag: "wx" });
+    await rename(temporary, outputPath);
+    testInfo.annotations.push({
+      type: "cfpb-engine-observation",
+      description: JSON.stringify(observation),
+    });
+  });
+}
+```
+
+The exact engine artifact map isclosed andhasno output override：
+
+| Project | JSON reporter artifact | Version observation artifact | Final receipt artifact |
+|---|---|---|---|
+| `chromium` | `test/e2e/evidence/engine/chromium-report.json` | `test/e2e/evidence/engine/chromium-version-observation.json` | `test/e2e/evidence/engine/chromium-receipt.json` |
+| `firefox` | `test/e2e/evidence/engine/firefox-report.json` | `test/e2e/evidence/engine/firefox-version-observation.json` | `test/e2e/evidence/engine/firefox-receipt.json` |
+| `webkit` | `test/e2e/evidence/engine/webkit-report.json` | `test/e2e/evidence/engine/webkit-version-observation.json` | `test/e2e/evidence/engine/webkit-receipt.json` |
 
 Acquire separate bundled-engine receipts andingest each manual accessibility receipt withthese exact commands：
 
@@ -2666,7 +2813,15 @@ node scripts/browser-evidence.mjs record-accessibility --release-date $releaseDa
 node scripts/verify-release-evidence.mjs
 ```
 
-Each`record-engine` validates theexplicit releaseDate andstart clock，runs that exact Playwright project againstsupervised Wrangler withthe JSON reporter，captures`browser.version()` fromthe project fixture，thenrevalidates completion clock。Onlyanexit0 run completed inside theinterval atomically writes its exact`EngineCoverageReceipt` under`test/e2e/evidence/engine/<project>.json` andcorresponding matrix row，with`testedAt = new Date().toISOString()` atcompletion；crossingthe interval writesnothing。Execute all four manual checklists onavailable actual tools/devices beforetheir record commands。Any missing/failing Chrome、Edge、Firefox row，malformed/extra browser row，missing/stale engine report，source-derivation mismatch ormissing/failed/stale manual category exitsnonzero。
+Each`record-engine` capturesone`commandNow` beforeany read/spawn，requiresits explicit/matrix releaseDate equal andthatinstant inside theinterval，looks upallthree fixed paths fromthe project table，andopens the exact matrix lock with`open(...,"wx")` beforeloadingthe aggregate，holdingit untilits own`finally` removal。A final receipt ormatrix row alreadypresent isimmutable andmakes the command refuse；leftover reporter/observation scratch files aredeleted beforethe run，thenrequired absent，so achild thatdoesnotproduceboth cannotfall backtostale bytes。The command creates`runToken = randomBytes(32).toString("hex")` internally；there isno token orversion CLI flag。
+
+It spawnsagainstthe configured supervised Wrangler server with`spawn(process.execPath, [resolve("node_modules/@playwright/test/cli.js"), "test", "test/e2e/create-password.spec.ts", "test/e2e/ordinary-sync.spec.ts", "test/e2e/view-once-representations.spec.ts", "test/e2e/accessibility.spec.ts", "test/e2e/engine-version.spec.ts", "--project=" + project, "--reporter=json"], { shell: false, env })`；no`npx` lookup oradditional suite isallowed。The child inherits normalenvironment plusonlythese evidence values：`PLAYWRIGHT_JSON_OUTPUT_FILE=<absolute mapped report path>`、`CFPB_ENGINE_OBSERVATION_PATH=<absolute mapped observation path>`、`CFPB_ENGINE_RUN_TOKEN=<generated token>`、`CFPB_ENGINE_PROJECT=<selected project>`、`CFPB_RELEASE_DATE=<validated date>` and`CFPB_ENGINE_TESTED_AT=<canonical commandNow>`。No environment value supplies browser version。
+
+Afterexit0，`record-engine` independently parses bothnew files；exit0 aloneisinsufficient。For the reporter it requires`config.projects` tocontainexactly oneentry whose`name` isthe selected project，recursively flattens`suites[].suites[]` and`suites[].specs[].tests[]`，requires every executed test’s`projectName` equalthe selected project，requires the normalized repo-relative`spec.file` set equalthe five ordered`EngineSuiteSummary.files` entries withatleastone test perfile，andrequiresno test outside thatset。It requires top-level`errors` empty；`stats.expected` equalthe positive flattened test count；`stats.skipped === stats.unexpected === stats.flaky === 0`；andfor every test，`expectedStatus === "passed"`、`status === "expected"` andexactlyone result with`retry === 0`、`status === "passed"`、no`error` andempty`errors`。Thus skips、expected failures、retry-recovered flakes andunexpected failures allblock。The sentinel title mustoccur exactlyonce，andits test-level`annotations` mustcontain exactlyone entry whose`type === "cfpb-engine-observation"` andwhose`description` parses toan object withexactlythe`EngineVersionObservation` keys；noother test maycarry thatannotation type。The fixed observation file musthaveexactlyone array member。Reporter annotation、observation file andinvocation mustmatch exactly onreleaseDate、`testedAt === canonical commandNow`、64-hex token andactual project，andthe annotation/file exactVersion mustmatch eachother andthe numeric-dotted value returnedby`browser.version()`；duplicate annotations orobservations fail。
+
+Onlyafterthat validation does`record-engine` hash the exact reporter/observation bytes，buildthe exact`EngineCoverageReceipt` with`suite.total === suite.passed > 0` andthe threezero counts，serializeit，hash those receipt bytes，andstage bothreceipt andupdated matrix in same-directory temp files。The matrix row isevery receipt field except`schemaVersion`/`releaseDate` plus`receiptArtifact` atthe project’s fixed receipt path/hash。Underits lock the command renamesthe receipt andmatrix onlyafterboth temps validate；ifthe second rename fails itremoves the new receipt andleavesthe previous aggregate，andany interruption isrejectedbythe final cross-hash checks。The final verifier reopens each fixed reporter、observation andreceipt，recomputes allthree hashes，repeats thefull report policy，requiresits sentinel annotation equalthe immutable observation file，requires every receipt field equalthe parsed artifacts，andrequires the row equalthe receipt projection field-for-field plusits exact receipt reference/hash。A wrong project/token/path、prior-campaign output、unrelated report orversion swap thereforecannot satisfythe row。
+
+Execute all four manual checklists onavailable actual tools/devices beforetheir record commands。Any missing/failing Chrome、Edge、Firefox row，malformed/extra browser row，missing/stale/swapped engine artifact，source-derivation mismatch ormissing/failed/stale manual category exitsnonzero。
 
 - [ ] **Step 7: Run focused RED/GREEN and full browser checks**
 
@@ -2693,16 +2848,19 @@ node scripts/verify-release-evidence.mjs --self-test
 node scripts/verify-release-evidence.mjs
 ```
 
-Allbundled engines andeverybranch AxeBuilder scan pass。The final verifier independently requires exactly eightbranded target/row pairs andfourpassed manual accessibility categories；neither bundled engine output norSafari unavailable evidence isconverted intoanother row ormanual pass。
+Allbundled engines andeverybranch AxeBuilder scan pass。The three`record-engine` GREEN commands musteach createonlyits mapped reporter、single-observation andreceipt files plusone aggregate row，andboth self-tests exercise every new schema/path/hash/clock parser withouttracked writes。The final verifier independently requires exactly eightbranded target/row pairs andfourpassed manual accessibility categories；neither bundled engine output norSafari unavailable evidence isconverted intoanother row ormanual pass。
 
 - [ ] **Step 8: Commit and independent review gate**
 
 ```powershell
+foreach ($lock in @("test/e2e/browser-matrix.json.lock", "test/e2e/accessibility-manual.json.lock")) {
+  if (Test-Path $lock) { throw "stale Task16 lock: $lock" }
+}
 git add playwright.config.ts scripts/browser-evidence.mjs scripts/verify-release-evidence.mjs test
 git commit -m "test: add cross-browser paste journeys"
 ```
 
-Independent Opus reviewsnetwork traces、real Wrangler usage、race controls、no external exfiltration、everybranch executable AxeBuilder scan、thefour fixed official-source adapters、independently derived nonadjacent-capable target selection、exact eight-row branded matrix schema、one release-date grammar/freshness interval、runtime version capture、pre-provisioned runner/manual command interface、four mandatory manual accessibility rows、keyboard/touch/320/reduced motion andalljourney assertions。Reviewer rerunsboth evidence-script self-tests、Chromium full、Firefox andWebKit accessibility focused sets，andthe final evidence verifier；`APPROVED` required。
+Independent Opus reviewsnetwork traces、real Wrangler usage、race controls、no external exfiltration、everybranch executable AxeBuilder scan、thefour fixed official-source adapters including deterministic Safari cells/composite IDs、independently derived nonadjacent-capable target selection、theclosed eight-tuple capture/smoke mappings andimmutable handoff、one release-date grammar/freshness interval plusoperation-clock ceilings、theTask16-owned`engine-version.spec.ts` producer、exact reporter/observation/receipt paths andcross-hashes、pre-provisioned runner/manual command interface、four mandatory manual accessibility rows、keyboard/touch/320/reduced motion andalljourney assertions。Review scope includes every Task16 path inthis task’s Files list andevery generated path namedinthe two closed maps。Reviewer rerunsboth evidence-script self-tests、Chromium full、Firefox andWebKit accessibility focused sets、allthree`record-engine` commands andthe final evidence verifier；`APPROVED` required。
 
 ---
 
@@ -2908,7 +3066,7 @@ npx wrangler types --check
 npx wrangler deploy --dry-run --outdir .wrangler-dist
 ```
 
-Every command mustexit0 beforedeletion。The verifier mustparse thefour fixed official stable-source artifacts，recompute thehighest two distinct majors bythe Task16 numeric-descending rule，andmatchall eight targets。It mustalso reportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception；three separate engine rows passed；screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpassed。Both aggregates mustsharethe exact valid releaseDate，andthe verifier clock plusevery retrieval/test timestamp mustbeinside`[D - 7 * 86_400_000, D + 86_400_000)`；missing、failed、stale、malformed orsource-unbound evidence blocksdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
+Every command mustexit0 beforedeletion。The verifier mustparse andhash thefour fixed official stable-source artifacts，recompute thehighest two distinct majors bythe Task16 numeric-descending rule，andmatchall eight targets includingtheir fixed source paths/hashes。It mustreportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception。Everypassed branded row mustreparse/hashits exact mapped capture andsmoke receipts，rederiveversion fromraw output，matchall repeated tuple/environment/target/source fields andsatisfy`capturedAt <= testedAt`；each unavailable Safari row mustreparse/hashonlyits mapped failure receipt andhave no capture/smoke files。Three separate engine rows musteach reparse the fixed JSON reporter、single-observation andreceipt artifacts，recompute allhashes，repeat theall-pass/sentinel/token/project/version policy andequalthe receipt projection field-for-field。Screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpass fromreparsed receipts。Both aggregates andevery referenced artifact sharethe exact valid releaseDate；one`verifierNow` iscaptured beforeall reads，isinside`[D - 7 * 86_400_000, D + 86_400_000)`，andevery`retrievedAt`、`capturedAt` and`testedAt` isbothinside thatinterval and`<= verifierNow`，whileevery`releasedAt <= retrievedAt`。Missing、failed、future-dated、stale、swapped、malformed orsource-unbound evidence blocksdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
 
 - [ ] **Step 2: Add the final RED legacy-removal test**
 
@@ -2981,7 +3139,7 @@ git add src/legacy-removal.test.ts worker.js
 git commit -m "chore: remove legacy worker after release gates"
 ```
 
-Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task18 againstthe68-ID table below，checksTask18 onlydeletedobsolete implementation，rerunsallthree inverted ancestry checks、thecandidate-symbol source scans、thefocused legacy test、both release-pipeline self-tests andthe final release-evidence verifier，andconfirms fresh official-source-bound evidence。Any finding returns tooriginalowner forRED/fix/re-review；thecandidate may integrate onlyafterTask18 review says`APPROVED`。
+Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task18 againstthe68-ID table below，checksTask18 onlydeletedobsolete implementation，rerunsallthree inverted ancestry checks、thecandidate-symbol source scans、thefocused legacy test、both release-pipeline self-tests andthe final release-evidence verifier，andconfirms fresh official-source-bound evidence plusallbranded capture/smoke andengine reporter/observation/receipt cross-hashes underone non-future verifier clock。Any finding returns tooriginalowner forRED/fix/re-review；thecandidate may integrate onlyafterTask18 review says`APPROVED`。
 
 - [ ] **Step 6: Cherry-pick the approved candidate and verify the final integration itself**
 
