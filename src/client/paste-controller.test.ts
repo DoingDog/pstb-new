@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MutationResult, PasteSummary } from "../types";
 import {
   createPasteController,
+  type ContentReconcileResult,
   type PasteController,
   type PasteControllerSnapshot,
 } from "./paste-controller";
@@ -80,8 +81,8 @@ describe("PasteController mutation slot", () => {
     expect(snapshot(controller).coalescedSource).toBe("three");
 
     expect(controller.acceptContentMutation(save.token, mutationResult(), 12)).toBe(true);
-    expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toHaveLength(1);
-    expect(controller.effects().at(-1)).toMatchObject({ type: "dispatch-content", content: "three" });
+    expect(controller.effects().filter((effect) => effect.type === "autosave-slot-available")).toHaveLength(1);
+    expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toHaveLength(0);
   });
 
   it("retains only one autosave when settings owns the slot", () => {
@@ -91,11 +92,10 @@ describe("PasteController mutation slot", () => {
     controller.sourceEvent({ type: "input", content: "two", eventAt: 1 });
     controller.sourceEvent({ type: "input", content: "three", eventAt: 2 });
     expect(snapshot(controller).coalescedSource).toBe("three");
-    expect(controller.acceptMetadataMutation(title.token, mutationResult(), 3)).toBe(true);
+    expect(controller.acceptMetadataMutation(title.token, mutationResult({ paste: summary({ title: "T", version: "g.2", contentRevision: 1 }) }), 3)).toBe(true);
 
-    expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toEqual([
-      expect.objectContaining({ content: "three", intent: expect.objectContaining({ action: "autosave" }) }),
-    ]);
+    expect(controller.effects().filter((effect) => effect.type === "autosave-slot-available")).toHaveLength(1);
+    expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toHaveLength(0);
   });
 
   it("retires an occupied token before a remote apply can settle it", () => {
@@ -133,7 +133,7 @@ describe("PasteController mutation slot", () => {
       acceptedSource: "three",
       lastSavedContent: "three",
       version: "g.3",
-      responseEtag: '"sha256-three"',
+      responseEtag: null,
     });
     expect(snapshot(controller)).toEqual(current);
   });
@@ -177,7 +177,7 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
       summary: expect.objectContaining({ version: "g.2" }),
       version: "g.2",
       contentRevision: 2,
-      responseEtag: '"sha256-two"',
+      responseEtag: null,
       versionUsable: true,
     });
   });
@@ -191,11 +191,12 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
     const reconcile = controller.startContentReconcile(3);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
     expect(reconcile).toMatchObject({ cache: "no-store", ifNoneMatch: null, mutationToken: save.token });
-    expect(controller.acceptContentReconcile(reconcile.requestToken, { status: 200, content: "two", paste: summary({ version: "g.2", contentRevision: 2 }), etag: '"sha256-two"' }, 4)).toBe(true);
+    expect(controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("two", { version: "g.2", contentRevision: 2 }), 4)).toBe(true);
 
-    expect(snapshot(controller)).toMatchObject({ mutation: { state: "in-flight", intent: { kind: "content", content: "later" } }, acceptedSource: "two", lastSavedContent: "two", draft: "later" });
+    expect(snapshot(controller)).toMatchObject({ mutation: { state: "idle" }, acceptedSource: "two", lastSavedContent: "two", draft: "later" });
     expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "apply-authoritative", kind: "reconciled-applied" }));
     expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "autosave-slot-available" }));
+    expect(controller.effects().some((effect) => effect.type === "dispatch-content")).toBe(false);
   });
 
   it("requires explicit retry when reconciliation proves the write was not applied", () => {
@@ -205,7 +206,7 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
     const reconcile = controller.startContentReconcile(2);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
 
-    controller.acceptContentReconcile(reconcile.requestToken, { status: 200, content: "one", paste: summary(), etag: '"sha256-one"' }, 3);
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("one"), 3);
 
     expect(snapshot(controller)).toMatchObject({ mutation: { state: "idle" }, draft: "one", acceptedSource: "one", autosave: { state: "error" } });
     expect(controller.effects().some((effect) => effect.type === "autosave-slot-available")).toBe(false);
@@ -219,7 +220,7 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
     const reconcile = controller.startContentReconcile(2);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
 
-    controller.acceptContentReconcile(reconcile.requestToken, { status: 200, content: "one", paste: summary({ version: "g.2", updatedAt: "2026-09-15T00:00:01.000Z" }) }, 3);
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("one", { version: "g.2", updatedAt: "2026-09-15T00:00:01.000Z" }), 3);
 
     expect(snapshot(controller)).toMatchObject({ mutation: { state: "idle" }, conflictCandidate: expect.objectContaining({ source: "one" }), acceptedSource: "one" });
     expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "apply-authoritative", kind: "pause", state: "conflict" }));
@@ -232,12 +233,12 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
     controller.failMutation(save.token, { status: 503 }, 1);
     const first = controller.startContentReconcile(2);
     if (first.kind !== "dispatch") throw new Error("expected reconcile GET");
-    controller.acceptContentReconcile(first.requestToken, { status: 403 }, 3);
+    controller.acceptContentReconcile(first.requestToken, reconcileFailure("forbidden"), 3);
     expect(snapshot(controller).mutation.state).toBe("content-reconciliation");
 
     const second = controller.startContentReconcile(4);
     if (second.kind !== "dispatch") throw new Error("expected reconcile GET");
-    controller.acceptContentReconcile(second.requestToken, { status: 503 }, 5);
+    controller.acceptContentReconcile(second.requestToken, reconcileFailure("unavailable"), 5);
     expect(snapshot(controller).mutation.state).toBe("content-reconciliation");
   });
 
@@ -257,10 +258,10 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
     const reconcile = controller.startContentReconcile(2);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
 
-    controller.acceptContentReconcile(reconcile.requestToken, { status: 200, content: "two", paste: summary({ viewOnce: true }) }, 3);
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("two", { viewOnce: true }), 3);
 
-    expect(snapshot(controller)).toMatchObject({ phase: "consumed", mutation: { state: "idle" }, acceptedSource: "one", draft: "one", terminalResponseSource: "two" });
-    expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "terminal-settled", key: "content-reconcile-terminal-current-kept" }));
+    expect(snapshot(controller)).toMatchObject({ phase: "consumed", mutation: { state: "idle" }, acceptedSource: "one", draft: "one", terminalResponseSource: "two", terminalOrigin: expect.objectContaining({ actionKey: "content-reconcile" }) });
+    expect(controller.effects().some((effect) => effect.type === "terminal-settled")).toBe(false);
   });
 });
 
@@ -278,7 +279,7 @@ describe("PasteController password and reconciliation failure policy", () => {
     expect(intended).toMatchObject({ kind: "dispatch", credentialProbe: "intended", authorizationPassword: "intended value" });
     if (intended.kind !== "dispatch" || intended.type !== "reconcile-settings") throw new Error("expected intended credential probe");
 
-    controller.acceptMetadataReconcile(intended.requestToken, { status: 403 }, 3);
+    controller.acceptMetadataReconcile(intended.requestToken, reconcileFailure("forbidden"), 3);
 
     expect(controller.effects()).toContainEqual(expect.objectContaining({
       type: "dispatch-metadata-reconcile",
@@ -299,7 +300,7 @@ describe("PasteController password and reconciliation failure policy", () => {
     const intended = controller.startMetadataReconcile(2);
     if (intended.kind !== "dispatch" || intended.type !== "reconcile-settings") throw new Error("expected intended credential probe");
 
-    controller.acceptMetadataReconcile(intended.requestToken, { status: 403 }, 3);
+    controller.acceptMetadataReconcile(intended.requestToken, reconcileFailure("forbidden"), 3);
 
     expect(controller.effects().some((effect) => effect.type === "dispatch-metadata-reconcile")).toBe(false);
     expect(snapshot(controller).mutation.state).toBe("metadata-reconciliation");
@@ -317,7 +318,7 @@ describe("PasteController password and reconciliation failure policy", () => {
     const intended = controller.startMetadataReconcile(2);
     if (intended.kind !== "dispatch" || intended.type !== "reconcile-settings") throw new Error("expected intended credential probe");
 
-    expect(controller.acceptMetadataReconcile(intended.requestToken, { status: 304 }, 3)).toBe(true);
+    expect(controller.acceptMetadataReconcile(intended.requestToken, reconcileFailure("not-modified"), 3)).toBe(true);
     expect(snapshot(controller).credential).toEqual({ committed: "intended value", pending: null });
   });
 
@@ -328,7 +329,7 @@ describe("PasteController password and reconciliation failure policy", () => {
     const reconcile = controller.startContentReconcile(2);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
 
-    expect(controller.acceptContentReconcile(reconcile.requestToken, { status: 304 }, 3)).toBe(true);
+    expect(controller.acceptContentReconcile(reconcile.requestToken, reconcileFailure("not-modified"), 3)).toBe(true);
     expect(snapshot(controller)).toMatchObject({ mutation: { state: "content-reconciliation" }, lastAction: { state: "failed", key: "content-reconcile" } });
     expect(controller.effects().some((effect) => effect.type === "autosave-slot-available")).toBe(false);
   });
@@ -340,7 +341,7 @@ describe("PasteController password and reconciliation failure policy", () => {
     const reconcile = controller.startContentReconcile(2);
     if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
 
-    controller.acceptContentReconcile(reconcile.requestToken, { status: 404 }, 3);
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileFailure("not-found"), 3);
 
     const effects = controller.effects();
     const pauseIndex = effects.findIndex((effect) => effect.type === "pause" && effect.state === "not-found");
@@ -402,7 +403,7 @@ describe("PasteController metadata, passwords, and delete", () => {
     controller.failMutation(expiry.token, { status: 500 }, 1);
     const reconcile = controller.startMetadataReconcile(2);
 
-    expect(reconcile).toMatchObject({ kind: "dispatch", type: "dispatch-relative-expiration-retry", now: 2 });
+    expect(reconcile).toMatchObject({ kind: "dispatch", type: "reconcile-settings" });
     expect(snapshot(controller).reconciliationRequired).toBe(true);
   });
 
@@ -433,5 +434,226 @@ describe("PasteController metadata, passwords, and delete", () => {
       expect(snapshot(controller).credential.committed).toBeNull();
       expect(snapshot(controller).credential.pending).toBe(status === 204 ? null : "replacement");
     }
+  });
+});
+
+function remoteSnapshot(source: string, overrides: Partial<PasteSummary> = {}) {
+  const remote = summary(overrides);
+  const separator = remote.version.lastIndexOf(".");
+  return {
+    etag: '"sha256-remote"' as const,
+    source,
+    summary: remote,
+    identity: remote.version === "legacy"
+      ? { kind: "legacy" as const }
+      : { kind: "v2" as const, generation: remote.version.slice(0, separator), versionCounter: Number(remote.version.slice(separator + 1)) },
+    contentRevision: remote.contentRevision,
+    updatedAtMs: Date.parse(remote.updatedAt),
+  };
+}
+
+function reconcileSnapshot(source: string, overrides: Partial<PasteSummary> = {}): ContentReconcileResult {
+  return { kind: "snapshot", snapshot: remoteSnapshot(source, overrides) };
+}
+
+function reconcileFailure(kind: "forbidden" | "not-found" | "unavailable" | "network" | "malformed" | "not-modified"): ContentReconcileResult {
+  return { kind };
+}
+
+describe("PasteController round-one regressions", () => {
+  it("releases an eligible slot without dispatching an unfinished IME draft", () => {
+    const { controller } = pasteControllerFixture();
+    const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "T" });
+    controller.sourceEvent({ type: "composition-start", content: "", eventAt: 1 });
+    controller.sourceEvent({ type: "composition-input", content: "中文", eventAt: 2 });
+
+    controller.acceptMetadataMutation(title.token, mutationResult({ paste: summary({ title: "T", version: "g.2", contentRevision: 1 }) }), 3);
+
+    expect(controller.effects().filter((effect) => effect.type === "autosave-slot-available")).toHaveLength(1);
+    expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toHaveLength(0);
+  });
+
+  it("clears coordinator coalescing when an ineligible release follows a conflict", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.sourceEvent({ type: "input", content: "later", eventAt: 1 });
+    controller.failMutation(save.token, { status: 409 }, 2);
+
+    expect(snapshot(controller).coalescedSource).toBeNull();
+  });
+
+  it("blocks delete, settings, and password mutations after any version conflict", () => {
+    const { controller } = pasteControllerFixture();
+    const deletion = dispatch(controller, { kind: "delete", action: "delete", authorizationPassword: null });
+    controller.acceptDeleteMutation(deletion.token, { status: 409 }, 1);
+
+    for (const intent of [
+      { kind: "delete", action: "delete", authorizationPassword: null },
+      { kind: "settings-title", action: "settings-title", title: "T" },
+      { kind: "password-set", action: "password-set", newPassword: "new", authorizationPassword: null },
+    ] as const) {
+      expect(controller.startMutation(intent, 2)).toMatchObject({ kind: "blocked", reason: "version-unusable" });
+    }
+  });
+
+  it("rejects metadata that splices a changed content revision into the captured source", () => {
+    const { controller } = pasteControllerFixture();
+    const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "T" });
+
+    expect(controller.acceptMetadataMutation(title.token, mutationResult({ paste: summary({ title: "T", version: "g.2", contentRevision: 99 }) }), 1)).toBe(false);
+    expect(snapshot(controller)).toMatchObject({ acceptedSource: "one", contentRevision: 1, reconciliationRequired: true });
+  });
+
+  it("clears mutation ETags instead of using them as resource validators", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "manual-save", content: "two", omitVersion: false });
+
+    controller.acceptContentMutation(save.token, mutationResult({ etag: '"sha256-mutation"' }), 1);
+
+    expect(snapshot(controller).responseEtag).toBeNull();
+  });
+
+  it("uses canonical remote snapshots and extracts generations at the final dot", () => {
+    const { controller } = pasteControllerFixture({
+      accepted: {
+        acceptedSource: "one",
+        draft: "one",
+        summary: summary({ version: "generation.with.dots.1" }),
+        version: "generation.with.dots.1",
+        versionUsable: true,
+        contentRevision: 1,
+        updatedAt: "2026-09-15T00:00:00.000Z",
+        responseEtag: '"sha256-one"',
+        acceptedApplyGeneration: 1,
+        localGeneration: 0,
+        displayGeneration: 1,
+      },
+    });
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    expect(save.capture.generation).toBe("generation.with.dots");
+    controller.failMutation(save.token, { status: 500 }, 1);
+    const reconcile = controller.startContentReconcile(2);
+    if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
+
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("two", { version: "generation.with.dots.2", contentRevision: 2 }), 3);
+
+    expect(snapshot(controller)).toMatchObject({ acceptedSource: "two", responseEtag: '"sha256-remote"', reconciliationRequired: false });
+  });
+
+  it("keeps canonical conflict authority with its original target and capture", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 500 }, 1);
+    const reconcile = controller.startContentReconcile(2);
+    if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
+
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("third", { version: "g.3", contentRevision: 3 }), 3);
+
+    expect(snapshot(controller).conflictCandidate).toMatchObject({ source: "third", originalTarget: "two", capture: expect.objectContaining({ inFlightContent: "two" }), snapshot: expect.objectContaining({ etag: '"sha256-remote"' }) });
+  });
+
+  it("settles proved-not-applied reconciliation as succeeded while retaining the save failure", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "manual-save", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: null }, 1);
+    const reconcile = controller.startContentReconcile(2);
+    if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
+
+    controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("one"), 3);
+
+    expect(snapshot(controller)).toMatchObject({ lastAction: { state: "succeeded", key: "content-reconcile" }, originalMutationFailure: expect.objectContaining({ key: "manual-save", status: null }) });
+  });
+
+  it("allows only one in-flight reconciliation read and settles unavailable reads for retry", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 503 }, 1);
+    const first = controller.startContentReconcile(2);
+    if (first.kind !== "dispatch") throw new Error("expected reconcile GET");
+    expect(controller.startContentReconcile(3)).toMatchObject({ kind: "blocked", reason: "reconcile-pending" });
+    controller.acceptContentReconcile(first.requestToken, reconcileFailure("network"), 4);
+
+    expect(snapshot(controller)).toMatchObject({ mutation: { state: "content-reconciliation" }, lastAction: { state: "failed", key: "content-reconcile" } });
+    expect(controller.startContentReconcile(5)).toMatchObject({ kind: "dispatch" });
+  });
+
+  it("reads current settings before rewriting a relative expiration from a fresh version", () => {
+    const { controller } = pasteControllerFixture();
+    const expiry = dispatch(controller, { kind: "settings-expiration", action: "settings-expiration", expiration: 60 });
+    controller.failMutation(expiry.token, { status: 500 }, 1);
+
+    const read = controller.startMetadataReconcile(2);
+    expect(read).toMatchObject({ kind: "dispatch", type: "reconcile-settings" });
+    if (read.kind !== "dispatch" || read.type !== "reconcile-settings") throw new Error("expected settings read");
+    controller.acceptMetadataReconcile(read.requestToken, reconcileSnapshot("one", { version: "g.2", contentRevision: 1 }), 3);
+
+    expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "dispatch-relative-expiration-retry", version: "g.2", now: 3 }));
+  });
+
+  it("initializes and commits the controller-owned credential used by authorized non-password mutations", () => {
+    const { controller } = pasteControllerFixture({ credential: "bootstrap credential" } as never);
+    expect(snapshot(controller).credential).toEqual({ committed: "bootstrap credential", pending: null });
+    controller.setPendingCredential("replacement credential");
+    const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "T" });
+    controller.acceptMetadataMutation(title.token, mutationResult({ paste: summary({ title: "T", version: "g.2", contentRevision: 1 }) }), 1);
+
+    expect(snapshot(controller).credential).toEqual({ committed: "replacement credential", pending: null });
+    expect(controller.effects()).toContainEqual({ type: "credential-commit", credential: "replacement credential" });
+  });
+
+  it("enters irreversible armed-view-once before releasing a view-once settings mutation", () => {
+    const { controller } = pasteControllerFixture();
+    const viewOnce = dispatch(controller, { kind: "settings-view-once", action: "settings-view-once", viewOnce: true });
+
+    controller.acceptMetadataMutation(viewOnce.token, mutationResult({ paste: summary({ viewOnce: true, version: "g.2", contentRevision: 1 }) }), 1);
+
+    expect(snapshot(controller)).toMatchObject({ phase: "armed-view-once", serverCapabilities: false, summary: expect.objectContaining({ viewOnce: true }) });
+    expect(controller.effects().some((effect) => effect.type === "autosave-slot-available")).toBe(false);
+  });
+
+  it("retains a terminal origin until a display commit supplies a closed outcome", () => {
+    const { controller } = pasteControllerFixture();
+    controller.enterTerminal("consumed", 1, { actionKey: "reload-server", actionAttempt: 7, startedAt: "2026-09-15T00:00:00.000Z" });
+
+    expect(snapshot(controller)).toMatchObject({ phase: "consumed", terminalOrigin: expect.objectContaining({ actionKey: "reload-server" }), lastAction: { state: "idle" } });
+    expect(controller.effects().some((effect) => effect.type === "terminal-settled")).toBe(false);
+    expect(controller.settleTerminal("use-consumed-response-displayed", 2)).toBe(false);
+    expect(controller.settleTerminal("reload-terminal-response-displayed", 3)).toBe(true);
+  });
+
+  it("fails closed for all unknown 5xx mutation results and recognizes permanent and normalized absolute expiry", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 502 }, 1);
+    expect(snapshot(controller).mutation.state).toBe("content-reconciliation");
+
+    const absolute = createPasteController({
+      accepted: {
+        acceptedSource: "one",
+        draft: "one",
+        summary: summary({ expiration: { kind: "permanent" }, expiresAt: null }),
+        version: "g.1",
+        versionUsable: true,
+        contentRevision: 1,
+        updatedAt: "2026-09-15T00:00:00.000Z",
+        responseEtag: '"sha256-one"',
+        acceptedApplyGeneration: 1,
+        localGeneration: 0,
+        displayGeneration: 1,
+      },
+    });
+    const permanent = dispatch(absolute, { kind: "settings-expiration", action: "settings-expiration", expiration: null });
+    absolute.failMutation(permanent.token, { status: 500 }, 1);
+    const permanentRead = absolute.startMetadataReconcile(2);
+    if (permanentRead.kind !== "dispatch" || permanentRead.type !== "reconcile-settings") throw new Error("expected settings reconcile");
+    absolute.acceptMetadataReconcile(permanentRead.requestToken, reconcileSnapshot("one", { expiration: { kind: "permanent" }, expiresAt: null }), 3);
+    expect(snapshot(absolute).lastAction).toMatchObject({ state: "succeeded", key: "settings-reconcile" });
+
+    const offset = dispatch(absolute, { kind: "settings-expiration", action: "settings-expiration", expiration: "2026-09-15T02:00:00+02:00" });
+    absolute.failMutation(offset.token, { status: 500 }, 4);
+    const offsetRead = absolute.startMetadataReconcile(5);
+    if (offsetRead.kind !== "dispatch" || offsetRead.type !== "reconcile-settings") throw new Error("expected settings reconcile");
+    absolute.acceptMetadataReconcile(offsetRead.requestToken, reconcileSnapshot("one", { expiration: { kind: "absolute" }, expiresAt: "2026-09-15T00:00:00.000Z" }), 6);
+    expect(snapshot(absolute).lastAction).toMatchObject({ state: "succeeded", key: "settings-reconcile" });
   });
 });

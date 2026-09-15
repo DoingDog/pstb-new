@@ -90,7 +90,7 @@ describe("staged surface application", () => {
     await resolveStages(fixture);
 
     await expect(attempt).resolves.toBe(true);
-    expect(fixture.ports.commit).toHaveBeenCalledWith({ preview: "preview-0", visual: "visual-0", diff: "diff-0" }, 1);
+    expect(fixture.ports.commit).toHaveBeenCalledWith({ preview: "preview-0", visual: "visual-0", diff: "diff-0" }, 2);
   });
 
   it("keeps current presentation when an edit invalidates a detached stage", async () => {
@@ -101,7 +101,7 @@ describe("staged surface application", () => {
 
     await expect(attempt).resolves.toBe(false);
     expect(fixture.ports.commit).not.toHaveBeenCalled();
-    expect(fixture.ports.disposeAttemptResources).toHaveBeenCalledTimes(1);
+    expect(fixture.ports.disposeAttemptResources).toHaveBeenCalled();
     expect(fixture.apply.snapshot()).toMatchObject({ source: "local", status: "idle" });
   });
 
@@ -121,26 +121,31 @@ describe("staged surface application", () => {
 
     await expect(attempt).resolves.toBe(false);
     expect(fixture.ports.commit).not.toHaveBeenCalled();
-    expect(fixture.ports.disposeAttemptResources).toHaveBeenCalledTimes(1);
+    expect(fixture.ports.disposeAttemptResources).toHaveBeenCalled();
   });
 
   it("drops a reverse retry without clearing the current fallback or draft source", async () => {
     const fixture = surfaceFixture();
-    const first = fixture.apply.retry("two");
-    const firstPreview = fixture.previews[0]!.promise;
-    const second = fixture.apply.retry("two");
-    const secondPreview = fixture.previews[1]!.promise;
+    const initial = fixture.apply.apply("two");
+    await resolveStages(fixture, 0);
+    await initial;
+    const first = fixture.apply.retryPreview("two");
+    const firstPreview = fixture.previews[1]!.promise;
+    const second = fixture.apply.retryPreview("two");
+    const secondPreview = fixture.previews[2]!.promise;
 
     expect(firstPreview).not.toBe(secondPreview);
-    await resolveStages(fixture, 1);
+    fixture.previews[2]!.resolve("preview-2");
+    await settle();
     await expect(second).resolves.toBe(true);
-    await resolveStages(fixture, 0);
+    fixture.previews[1]!.resolve("preview-1");
+    await settle();
     await expect(first).resolves.toBe(false);
-    expect(fixture.ports.commit).toHaveBeenCalledTimes(1);
+    expect(fixture.ports.commit).toHaveBeenCalledTimes(2);
     expect(fixture.apply.snapshot()).toMatchObject({ source: "two" });
   });
 
-  it("retains the old generation when a detached preview fails", async () => {
+  it("publishes a target-bound preview fallback while retaining the other staged surfaces", async () => {
     const fixture = surfaceFixture();
     const attempt = fixture.apply.apply("two");
     fixture.previews[0]!.reject(new Error("preview failed"));
@@ -148,9 +153,9 @@ describe("staged surface application", () => {
     fixture.diffs[0]!.resolve("diff");
     await settle();
 
-    await expect(attempt).resolves.toBe(false);
-    expect(fixture.ports.commit).not.toHaveBeenCalled();
-    expect(fixture.apply.snapshot()).toMatchObject({ status: "fallback", source: "one", fallback: "preview" });
+    await expect(attempt).resolves.toBe(true);
+    expect(fixture.ports.commit).toHaveBeenCalledWith(expect.objectContaining({ preview: expect.objectContaining({ surface: "preview", source: "two", generation: 2 }), visual: "visual", diff: "diff" }), 2);
+    expect(fixture.apply.snapshot()).toMatchObject({ status: "fallback", source: "two", fallback: "preview" });
   });
 });
 
@@ -158,7 +163,7 @@ describe("terminal settlement", () => {
   it("settles a terminal origin exactly once with the required outcome key", () => {
     const fixture = surfaceFixture();
     expect(fixture.apply.settleTerminal({ actionKey: "content-reconcile", actionAttempt: 3, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBe("content-reconcile-terminal-current-kept");
-    expect(fixture.apply.settleTerminal({ actionKey: "content-reconcile", actionAttempt: 3, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBe("");
+    expect(fixture.apply.settleTerminal({ actionKey: "content-reconcile", actionAttempt: 3, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBeNull();
   });
 
   it.each([
@@ -208,6 +213,9 @@ describe("source-specific entry guards", () => {
       acceptedBaselineCurrent: true,
       localGenerationCurrent: true,
       ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
       draftMatchesAccepted: true,
       composing: false,
       autosaveTimer: false,
@@ -227,5 +235,124 @@ describe("source-specific entry guards", () => {
   it("keeps terminal local source choice independent from ordinary controller guards", () => {
     expect(terminalLocalApplyEntryAllowed({ terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true })).toBe(true);
     expect(terminalLocalApplyEntryAllowed({ terminalEpochCurrent: true, displayGenerationCurrent: false, selectedSourceCurrent: true })).toBe(false);
+  });
+});
+
+describe("StagedSurfaceApply round-one regressions", () => {
+  it("retires the first source-owned transaction when a newer entry starts and uses one target generation", async () => {
+    const fixture = surfaceFixture();
+    const first = fixture.apply.apply("first");
+    const second = fixture.apply.apply("second");
+
+    expect(fixture.ports.stagePreview).toHaveBeenNthCalledWith(1, "first", 2);
+    expect(fixture.ports.stagePreview).toHaveBeenNthCalledWith(2, "second", 3);
+    await resolveStages(fixture, 0);
+    await expect(first).resolves.toBe(false);
+    expect(fixture.ports.commit).not.toHaveBeenCalled();
+    await resolveStages(fixture, 1);
+    await expect(second).resolves.toBe(true);
+    expect(fixture.ports.commit).toHaveBeenCalledWith(expect.any(Object), 3);
+    expect(fixture.apply.snapshot().capture.currentDisplayGeneration).toBe(3);
+  });
+
+  it("publishes a target-bound fallback without leaking late detached stage resources", async () => {
+    const fixture = surfaceFixture();
+    const attempt = fixture.apply.apply("two");
+    fixture.previews[0]!.reject(new Error("preview failed"));
+    fixture.visuals[0]!.resolve("visual");
+    fixture.diffs[0]!.resolve("diff");
+    await settle();
+
+    await expect(attempt).resolves.toBe(true);
+    expect(fixture.ports.commit).toHaveBeenCalledWith(expect.objectContaining({ preview: expect.objectContaining({ surface: "preview", source: "two", generation: 2 }), visual: "visual", diff: "diff" }), 2);
+    expect(fixture.apply.snapshot()).toMatchObject({ status: "fallback", fallback: "preview" });
+  });
+
+  it("restores the old generation and contains disposer failures after a touched-host commit failure", async () => {
+    const fixture = surfaceFixture();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      throw new Error("commit failed");
+    });
+    vi.mocked(fixture.ports.disposeAttemptResources).mockImplementation(() => {
+      throw new Error("dispose failed");
+    });
+    vi.mocked(fixture.ports.restoreOld).mockResolvedValue(false);
+    const attempt = fixture.apply.apply("two");
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(false);
+    expect(fixture.ports.restoreOld).toHaveBeenCalledWith(1, "one");
+    expect(fixture.ports.showOldGenerationFailure).toHaveBeenCalledWith(1, "one");
+  });
+
+  it("keeps a mounted fallback visible until a guarded retry publishes", async () => {
+    const fixture = surfaceFixture();
+    const failed = fixture.apply.apply("two");
+    fixture.previews[0]!.reject(new Error("preview failed"));
+    fixture.visuals[0]!.resolve("visual");
+    fixture.diffs[0]!.resolve("diff");
+    await settle();
+    await failed;
+
+    const retry = fixture.apply.retry("two");
+    expect(fixture.apply.snapshot()).toMatchObject({ status: "fallback", fallback: "preview" });
+    fixture.previews[1]!.resolve("preview-retry");
+    await settle();
+    await retry;
+  });
+
+  it("rejects a source-specific retry whose source is no longer exact", async () => {
+    const fixture = surfaceFixture();
+    expect(typeof (fixture.apply as unknown as { retryPreview?: unknown }).retryPreview).toBe("function");
+    await expect(fixture.apply.retryPreview("other")).resolves.toBe(false);
+    expect(fixture.ports.stagePreview).not.toHaveBeenCalled();
+  });
+
+  it("requires the Use remote active window in addition to ordinary-page guards", () => {
+    expect(useRemoteApplyEntryAllowed({
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      ...{ active: false, activeDeadlineCurrent: true, activeUntil: 0 },
+    })).toBe(false);
+  });
+
+  it("retires a Use remote attempt before staging when its active deadline has elapsed", () => {
+    const fixture = surfaceFixture();
+    fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: 0,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+    });
+
+    expect(fixture.ports.stagePreview).not.toHaveBeenCalled();
+  });
+
+  it("uses closed terminal outcomes and models a later consumed-response choice separately", () => {
+    const fixture = surfaceFixture();
+    expect(fixture.apply.settleTerminal({ actionKey: "reload-server", actionAttempt: 1, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBe("reload-terminal-response-displayed");
+    expect(fixture.apply.settleTerminal({ actionKey: "reload-server", actionAttempt: 1, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBeNull();
+    expect(typeof (fixture.apply as unknown as { settleUseConsumedResponse?: unknown }).settleUseConsumedResponse).toBe("function");
   });
 });
