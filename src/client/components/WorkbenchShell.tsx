@@ -47,8 +47,9 @@ export function WorkbenchShell({
       <SidebarProvider>
         <AppSidebar
           destinations={destinations}
-          {...(metadata === undefined ? {} : { metadata })}
-          {...(actions === undefined ? {} : { actions })}
+          destinationLabel={copy.pasteViews}
+          {...(metadata === undefined ? {} : { metadata, metadataLabel: copy.documentStatus })}
+          {...(actions === undefined ? {} : { actions, actionsLabel: copy.localActions })}
           onDestinationSelect={selectDestination}
         />
         <SidebarInset>

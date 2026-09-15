@@ -60,6 +60,25 @@ describe("i18n", () => {
     expect(errorMessage("zh-CN", "an-unrecognized-server-message")).toBe(dictionaries["zh-CN"].errors.UNKNOWN_ERROR);
   });
 
+  it("freezes the complete label and validation catalogs for later workbench pages", () => {
+    expect(Object.keys(dictionaries.en.labels).sort()).toEqual([
+      "application", "armedViewOnce", "autosave", "autosync", "back", "brand", "bytes", "cancel", "changePassword",
+      "clearPassword", "computeDiff", "consumed", "content", "continue", "copy", "create", "createNew", "currentPassword",
+      "customId", "delete", "deleteUncertain", "discard", "documentStatus", "download", "edit", "enabled", "encoding", "error",
+      "exactText", "expiration", "expires", "file", "format", "fullRefresh", "fullSnapshot", "help", "history", "historyEmpty",
+      "historyLoading", "html", "keepCurrent", "languageChinese", "languageEnglish", "lastAction", "limit", "localActions", "locale",
+      "markdown", "network", "newDocument", "newPassword", "notFound", "notProtected", "oneDay", "oneHour", "oneMinute", "oneWeek",
+      "oneYear", "openHtmlLocally", "openSource", "operationStatus", "paste", "pasteViews", "password", "passwordRequired", "permanent",
+      "preview", "protected", "raw", "reconcile", "reload", "reloadServer", "representations", "reveal", "retry", "revision", "save", "saveExpiration",
+      "saveFormat", "saveSettings", "saveStatus", "saveTitle", "saveViewOnce", "saved", "selectedRevision", "setPassword", "settings", "size",
+      "source", "standard", "submit", "text", "theme", "themeDark", "themeLight", "themeSystem", "thirtyDays", "title", "toggleSidebar", "unifiedDiff",
+      "unwrap", "useRemote", "view", "viewOnce", "wrap",
+    ].sort());
+    expect(Object.keys(dictionaries.en.validation).sort()).toEqual([
+      "contentInvalidScalar", "contentRequired", "contentTooLarge", "customIdInvalid", "deleteDescription", "passwordInvalid", "titleInvalidScalar", "titleTooLong",
+    ]);
+  });
+
   it("keeps explanatory copy out of labels", () => {
     for (const key of [
       "titleDescription",

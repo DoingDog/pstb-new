@@ -16,17 +16,36 @@ export interface NavigationPort {
   assign(url: string): void;
 }
 
+type LocalActionKey = "copy" | "download";
+
 export interface LocalActionState {
-  key: "copy" | "download";
+  key: LocalActionKey;
   state: "pending" | "succeeded" | "failed";
+  attempt: number;
   startedAt: string;
   settledAt?: string;
+}
+
+export interface LocalActionCapabilities {
+  copy?: boolean;
+  download?: boolean;
+  html?: "blob" | { href: string; label?: string };
+  wrap?: {
+    value: boolean;
+    onChange(value: boolean): void;
+  };
+  sourcePreview?: {
+    sourceVisible: boolean;
+    onSourceVisibleChange(value: boolean): void;
+    preview: React.ReactNode;
+  };
 }
 
 export interface LocalActionsProps {
   source: string;
   locale: Locale;
   filename: string;
+  capabilities: LocalActionCapabilities;
   clipboard?: ClipboardPort;
   download?: DownloadPort;
   navigation?: NavigationPort;
@@ -51,18 +70,29 @@ const browserNavigation: NavigationPort = {
 };
 
 function fallbackCopy(source: string): void {
+  const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const textarea = document.createElement("textarea");
+  const onCopy = (event: ClipboardEvent) => {
+    event.clipboardData?.setData("text/plain", source);
+    event.preventDefault();
+  };
+
   textarea.value = source;
   textarea.setAttribute("aria-hidden", "true");
   textarea.tabIndex = -1;
   textarea.style.position = "fixed";
   textarea.style.opacity = "0";
   textarea.style.pointerEvents = "none";
-  (document.body as unknown as { appendChild(child: HTMLTextAreaElement): void }).appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  if (!copied) throw new Error("copy failed");
+  document.addEventListener("copy", onCopy);
+  try {
+    document.body.appendChild(textarea);
+    textarea.select();
+    if (!document.execCommand("copy")) throw new Error("copy failed");
+  } finally {
+    document.removeEventListener("copy", onCopy);
+    textarea.remove();
+    previouslyFocused?.focus();
+  }
 }
 
 async function copySource(source: string, clipboard: ClipboardPort | undefined): Promise<void> {
@@ -79,6 +109,7 @@ export function LocalActions({
   source,
   locale,
   filename,
+  capabilities,
   clipboard,
   download = browserDownload,
   navigation = browserNavigation,
@@ -86,72 +117,107 @@ export function LocalActions({
   representationLabel,
   onActionState,
 }: LocalActionsProps) {
-  const [wrapped, setWrapped] = React.useState(false);
-  const [showSource, setShowSource] = React.useState(false);
-  const [outcomes, setOutcomes] = React.useState<Partial<Record<"copy" | "download", LocalActionState>>>({});
+  const [outcomes, setOutcomes] = React.useState<Partial<Record<LocalActionKey, LocalActionState>>>({});
+  const mounted = React.useRef(true);
+  const nextAttempt = React.useRef(0);
+  const latestByKey = React.useRef<Partial<Record<LocalActionKey, number>>>({});
+  const latestAttempt = React.useRef(0);
+  const pendingKeys = React.useRef<Partial<Record<LocalActionKey, boolean>>>({});
+  const callback = React.useRef(onActionState);
+  callback.current = onActionState;
   const copy = labels(locale);
+  const html = capabilities.html ?? (representationHref === undefined ? undefined : { href: representationHref, label: representationLabel });
 
-  const report = React.useCallback((state: LocalActionState) => {
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      latestAttempt.current = ++nextAttempt.current;
+    };
+  }, []);
+
+  const report = React.useCallback((state: LocalActionState, reportLastAction: boolean) => {
+    if (!mounted.current) return;
     setOutcomes((current) => ({ ...current, [state.key]: state }));
-    onActionState?.(state);
-  }, [onActionState]);
+    if (reportLastAction && latestAttempt.current === state.attempt) callback.current?.(state);
+  }, []);
 
-  const run = React.useCallback(async (key: "copy" | "download", operation: () => Promise<void>) => {
+  const run = React.useCallback(async (key: LocalActionKey, operation: () => Promise<void>) => {
+    if (pendingKeys.current[key]) return;
+    const attempt = ++nextAttempt.current;
     const startedAt = new Date().toISOString();
-    report({ key, state: "pending", startedAt });
+    pendingKeys.current[key] = true;
+    latestByKey.current[key] = attempt;
+    latestAttempt.current = attempt;
+    report({ key, state: "pending", attempt, startedAt }, true);
     try {
       await operation();
-      report({ key, state: "succeeded", startedAt, settledAt: new Date().toISOString() });
+      if (!mounted.current || latestByKey.current[key] !== attempt) return;
+      pendingKeys.current[key] = false;
+      report({ key, state: "succeeded", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     } catch {
-      report({ key, state: "failed", startedAt, settledAt: new Date().toISOString() });
+      if (!mounted.current || latestByKey.current[key] !== attempt) return;
+      pendingKeys.current[key] = false;
+      report({ key, state: "failed", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     }
   }, [report]);
 
   const copyLabel = outcomes.copy === undefined ? copy.copy : dictionaries[locale].actions.copy[outcomes.copy.state];
   const downloadLabel = outcomes.download === undefined ? copy.download : dictionaries[locale].actions.download[outcomes.download.state];
+  const copyPending = outcomes.copy?.state === "pending";
+  const downloadPending = outcomes.download?.state === "pending";
+
+  const downloadSource = async () => {
+    const url = download.createObjectURL(new Blob([new TextEncoder().encode(source)], { type: "application/octet-stream" }));
+    let dispatched = false;
+    try {
+      download.dispatchDownload(url, filename);
+      dispatched = true;
+    } finally {
+      if (dispatched) setTimeout(() => download.revokeObjectURL(url), 0);
+      else download.revokeObjectURL(url);
+    }
+  };
 
   return (
     <section aria-label={copy.localActions} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="min-h-11" onClick={() => void run("copy", () => copySource(source, clipboard))}>
-          {copyLabel}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="min-h-11"
-          onClick={() => void run("download", async () => {
-            const blob = new Blob([new TextEncoder().encode(source)], { type: "application/octet-stream" });
-            const url = download.createObjectURL(blob);
-            download.dispatchDownload(url, filename);
-          })}
-        >
-          {downloadLabel}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="min-h-11"
-          onClick={() => {
-            const url = download.createObjectURL(new Blob([source], { type: "text/html" }));
-            navigation.assign(url);
-          }}
-        >
-          {copy.openHtmlLocally}
-        </Button>
-        {representationHref !== undefined && (
-          <a className="inline-flex min-h-11 items-center px-3 text-primary underline-offset-4 hover:underline" href={representationHref}>
-            {representationLabel ?? copy.raw}
+        {capabilities.copy && (
+          <Button type="button" variant="outline" className="min-h-11" aria-disabled={copyPending || undefined} onClick={() => void run("copy", () => copySource(source, clipboard))}>
+            {copyLabel}
+          </Button>
+        )}
+        {capabilities.download && (
+          <Button type="button" variant="outline" className="min-h-11" aria-disabled={downloadPending || undefined} onClick={() => void run("download", downloadSource)}>
+            {downloadLabel}
+          </Button>
+        )}
+        {html === "blob" && (
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => navigation.assign(download.createObjectURL(new Blob([source], { type: "text/html" })))}>
+            {copy.openHtmlLocally}
+          </Button>
+        )}
+        {typeof html === "object" && (
+          <a className="inline-flex min-h-11 items-center px-3 text-primary underline-offset-4 hover:underline" href={html.href}>
+            {html.label ?? copy.html}
           </a>
         )}
-        <Button type="button" variant="ghost" className="min-h-11" onClick={() => setWrapped((value) => !value)}>
-          {wrapped ? copy.unwrap : copy.wrap}
-        </Button>
-        <Button type="button" variant="ghost" className="min-h-11" onClick={() => setShowSource((value) => !value)}>
-          {showSource ? copy.preview : copy.source}
-        </Button>
+        {capabilities.wrap !== undefined && (
+          <Button type="button" variant="ghost" className="min-h-11" onClick={() => capabilities.wrap!.onChange(!capabilities.wrap!.value)}>
+            {capabilities.wrap.value ? copy.unwrap : copy.wrap}
+          </Button>
+        )}
+        {capabilities.sourcePreview !== undefined && (
+          <Button type="button" variant="ghost" className="min-h-11" onClick={() => capabilities.sourcePreview!.onSourceVisibleChange(!capabilities.sourcePreview!.sourceVisible)}>
+            {capabilities.sourcePreview.sourceVisible ? copy.preview : copy.source}
+          </Button>
+        )}
       </div>
-      {showSource && <pre data-local-source="true" className={wrapped ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>}
+      {capabilities.sourcePreview !== undefined && (
+        capabilities.sourcePreview.sourceVisible
+          ? <pre data-local-source="true" className={capabilities.wrap?.value ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>
+          : capabilities.sourcePreview.preview
+      )}
     </section>
   );
 }

@@ -8,11 +8,14 @@ export interface OperationStatusProps {
   ordinary: boolean;
 }
 
+type StatusRecordId = "autosave" | "autosync" | "network" | "last-action";
+
 interface StatusRecord {
-  id: "autosave" | "autosync" | "network" | "last-action";
+  id: StatusRecordId;
   label: string;
   state: string;
   instant: string | null;
+  signature: string;
 }
 
 const terminalStates: Readonly<Record<TerminalOutcomeKey, "succeeded" | "failed">> = {
@@ -27,29 +30,22 @@ const terminalStates: Readonly<Record<TerminalOutcomeKey, "succeeded" | "failed"
 
 function autosaveInstant(records: OperationRecords): string | null {
   switch (records.autosave.state) {
-    case "saved":
-      return records.autosave.confirmedAt;
+    case "saved": return records.autosave.confirmedAt;
     case "error":
     case "password-required":
     case "not-found":
-    case "conflict":
-      return records.autosave.failedAt;
+    case "conflict": return records.autosave.failedAt;
     case "waiting":
-    case "saving":
-      return records.autosave.confirmedAt;
-    case "clean":
-      return null;
+    case "saving": return records.autosave.confirmedAt;
+    case "clean": return null;
   }
 }
 
 function autosyncInstant(records: OperationRecords): string | null {
   switch (records.autosync.state) {
-    case "unchanged":
-      return records.autosync.checkedAt;
-    case "remote-applied":
-      return records.autosync.appliedAt;
-    default:
-      return records.autosync.stateChangedAt;
+    case "unchanged": return records.autosync.checkedAt;
+    case "remote-applied": return records.autosync.appliedAt;
+    default: return records.autosync.stateChangedAt;
   }
 }
 
@@ -71,43 +67,23 @@ function lastActionInstant(action: LastAction): string | null {
   return action.state === "pending" ? action.startedAt : action.settledAt;
 }
 
+function signature(id: StatusRecordId, record: unknown): string {
+  return JSON.stringify([id, record]);
+}
+
 function statusRecords(locale: Locale, records: OperationRecords, ordinary: boolean): StatusRecord[] {
   const copy = labels(locale);
   const dictionary = dictionaries[locale];
   const current: StatusRecord[] = [
-    {
-      id: "network",
-      label: copy.network,
-      state: dictionary.status.network[records.network.state],
-      instant: records.network.changedAt,
-    },
-    {
-      id: "last-action",
-      label: copy.lastAction,
-      state: lastActionState(locale, records.lastAction),
-      instant: lastActionInstant(records.lastAction),
-    },
+    { id: "network", label: copy.network, state: dictionary.status.network[records.network.state], instant: records.network.changedAt, signature: signature("network", records.network) },
+    { id: "last-action", label: copy.lastAction, state: lastActionState(locale, records.lastAction), instant: lastActionInstant(records.lastAction), signature: signature("last-action", records.lastAction) },
   ];
   if (!ordinary) return current;
   return [
-    {
-      id: "autosave",
-      label: copy.autosave,
-      state: dictionary.status.autosave[records.autosave.state],
-      instant: autosaveInstant(records),
-    },
-    {
-      id: "autosync",
-      label: copy.autosync,
-      state: dictionary.status.autosync[records.autosync.state],
-      instant: autosyncInstant(records),
-    },
+    { id: "autosave", label: copy.autosave, state: dictionary.status.autosave[records.autosave.state], instant: autosaveInstant(records), signature: signature("autosave", records.autosave) },
+    { id: "autosync", label: copy.autosync, state: dictionary.status.autosync[records.autosync.state], instant: autosyncInstant(records), signature: signature("autosync", records.autosync) },
     ...current,
   ];
-}
-
-function recordSignature(record: StatusRecord): string {
-  return JSON.stringify([record.id, record.state, record.instant]);
 }
 
 function announcement(locale: Locale, record: StatusRecord): string {
@@ -118,26 +94,28 @@ function announcement(locale: Locale, record: StatusRecord): string {
 
 export function OperationStatus({ locale, records, ordinary }: OperationStatusProps) {
   const current = statusRecords(locale, records, ordinary);
-  const signatures = current.map(recordSignature);
-  const previous = React.useRef<string[] | null>(null);
+  const previous = React.useRef<{ locale: Locale; ordinary: boolean; signatures: ReadonlyMap<StatusRecordId, string> } | null>(null);
   const [message, setMessage] = React.useState("");
 
   React.useEffect(() => {
-    if (previous.current === null) {
-      previous.current = signatures;
+    const signatures = new Map(current.map((record) => [record.id, record.signature] as const));
+    const baseline = previous.current;
+    previous.current = { locale, ordinary, signatures };
+    if (baseline === null || baseline.ordinary !== ordinary) {
+      setMessage("");
       return;
     }
-    const changedIndex = signatures.findIndex((value, index) => value !== previous.current?.[index]);
-    previous.current = signatures;
-    if (changedIndex !== -1) setMessage(announcement(locale, current[changedIndex]!));
-  }, [current, locale, signatures]);
+    const changed = current.filter((record) => baseline.signatures.get(record.id) !== record.signature);
+    if (changed.length > 0) setMessage(changed.map((record) => announcement(locale, record)).join(" "));
+    else if (baseline.locale !== locale) setMessage("");
+  }, [current, locale, ordinary]);
 
   return (
     <section aria-label={labels(locale).operationStatus} className="border-t border-border py-3">
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-operation-announcement="true">
         {message}
       </div>
-      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <dl className="grid gap-3 text-[13px] leading-[1.45] sm:grid-cols-2 lg:grid-cols-4">
         {current.map((record) => (
           <div key={record.id} data-operation-record={record.id} className="min-w-0">
             <dt className="text-muted-foreground">{record.label}</dt>

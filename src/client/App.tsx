@@ -1,6 +1,6 @@
 // Derived from shadcn-ui/ui new-york-v4/sidebar-11 at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.
 import * as React from "react";
-import { errorMessage, labels, resolveBrowserLocale, type Locale } from "../i18n";
+import { errorMessage, formatDate, labels, resolveBrowserLocale, type Locale } from "../i18n";
 import type { InitialPage } from "./bootstrap";
 import type { OperationRecords } from "./contracts";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
@@ -96,25 +96,31 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
   const copy = labels(locale);
   return (
     <>
-      <select
-        aria-label={copy.locale}
-        className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        value={locale}
-        onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}
-      >
-        <option value="en">{copy.languageEnglish}</option>
-        <option value="zh-CN">{copy.languageChinese}</option>
-      </select>
-      <select
-        aria-label={copy.theme}
-        className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        value={preference}
-        onChange={(event) => onThemeChange(event.currentTarget.value as ThemePreference)}
-      >
-        <option value="system">{copy.themeSystem}</option>
-        <option value="light">{copy.themeLight}</option>
-        <option value="dark">{copy.themeDark}</option>
-      </select>
+      <label htmlFor="document-locale" className="flex min-w-0 flex-col gap-1 text-xs">
+        <span>{copy.locale}</span>
+        <select
+          id="document-locale"
+          className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          value={locale}
+          onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}
+        >
+          <option value="en">{copy.languageEnglish}</option>
+          <option value="zh-CN">{copy.languageChinese}</option>
+        </select>
+      </label>
+      <label htmlFor="document-theme" className="flex min-w-0 flex-col gap-1 text-xs">
+        <span>{copy.theme}</span>
+        <select
+          id="document-theme"
+          className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          value={preference}
+          onChange={(event) => onThemeChange(event.currentTarget.value as ThemePreference)}
+        >
+          <option value="system">{copy.themeSystem}</option>
+          <option value="light">{copy.themeLight}</option>
+          <option value="dark">{copy.themeDark}</option>
+        </select>
+      </label>
     </>
   );
 }
@@ -127,6 +133,9 @@ function sidebarMetadata(initialPage: InitialPage, locale: Locale) {
     return [
       { label: "ID", value: bootstrap.paste.id },
       { label: copy.protected, value: bootstrap.paste.protected ? copy.enabled : copy.notProtected },
+      { label: copy.viewOnce, value: bootstrap.paste.viewOnce ? copy.enabled : copy.standard },
+      { label: copy.expires, value: bootstrap.paste.expiresAt === null ? copy.permanent : formatDate(locale, bootstrap.paste.expiresAt) },
+      { label: copy.size, value: `${bootstrap.paste.contentBytes} ${copy.bytes}` },
       { label: copy.revision, value: String(bootstrap.paste.contentRevision) },
     ];
   }

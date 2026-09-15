@@ -136,7 +136,6 @@ export function HelpTrigger({ label, content, descriptionId }: HelpTriggerProps)
       <TooltipContent
         className="max-w-[min(22rem,calc(100vw-2rem))] border border-border bg-popover text-popover-foreground"
         onEscapeKeyDown={() => help.close(true)}
-        onPointerDownOutside={() => help.close()}
       >
         <span id={descriptionId} ref={(node) => help.registerContent(descriptionId, node)}>{content}</span>
       </TooltipContent>
