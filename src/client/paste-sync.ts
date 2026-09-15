@@ -2,6 +2,7 @@ import type {
   AutosyncStatus,
   BaselineCapture,
   PastePhase,
+  PasteSummary,
   RemoteOrder,
   RemoteSnapshot,
 } from "./contracts";
@@ -15,8 +16,10 @@ function baselineVersionCounter(baseline: BaselineCapture): number | null {
   if (baseline.generation === "legacy") return null;
   const separator = baseline.version.lastIndexOf(".");
   if (separator < 1 || baseline.version.slice(0, separator) !== baseline.generation) return null;
-  const counter = Number(baseline.version.slice(separator + 1));
-  return Number.isSafeInteger(counter) && counter > 0 ? counter : null;
+  const counterText = baseline.version.slice(separator + 1);
+  if (!/^[1-9]\d*$/.test(counterText)) return null;
+  const counter = Number(counterText);
+  return Number.isSafeInteger(counter) ? counter : null;
 }
 
 export function classifyRemote(snapshot: RemoteSnapshot, baseline: BaselineCapture): RemoteOrder {
@@ -57,6 +60,7 @@ export interface PasteSyncCapture {
   localGeneration: number;
   acceptedApplyGeneration: number;
   baseline: BaselineCapture;
+  acceptedSummary: PasteSummary;
   responseEtag: Etag | null;
 }
 
@@ -77,6 +81,8 @@ export interface PasteSyncController {
   setOnline(online: boolean, eventAt: number): void;
   keepCurrent(actionAt: number): void;
   retrySync(actionAt: number, pendingCredential: string | null): boolean;
+  completeRemoteApply(committedAt: number): boolean;
+  cancelRemoteApply(cancelledAt: number): boolean;
   dispose(): void;
 }
 
@@ -105,6 +111,28 @@ function hasSnapshot(result: PasteSyncReadResult): result is Extract<PasteSyncRe
 
 function hasEtag(result: PasteSyncReadResult): result is Extract<PasteSyncReadResult, { etag: Etag }> {
   return result.status === 304 && "etag" in result;
+}
+
+function samePublicSummary(left: PasteSummary, right: PasteSummary): boolean {
+  return left.id === right.id
+    && left.title === right.title
+    && left.format === right.format
+    && left.viewOnce === right.viewOnce
+    && left.protected === right.protected
+    && left.createdAt === right.createdAt
+    && left.updatedAt === right.updatedAt
+    && left.expiresAt === right.expiresAt
+    && left.expiration.kind === right.expiration.kind
+    && (left.expiration.kind !== "relative" || (right.expiration.kind === "relative" && left.expiration.seconds === right.expiration.seconds))
+    && left.version === right.version
+    && left.contentRevision === right.contentRevision
+    && left.contentBytes === right.contentBytes
+    && left.createdCountry === right.createdCountry
+    && left.links.view === right.links.view
+    && left.links.raw === right.links.raw
+    && left.links.html === right.links.html
+    && left.links.markdown === right.links.markdown
+    && left.links.file === right.links.file;
 }
 
 export interface PasteSyncOptions {
@@ -140,7 +168,10 @@ export class PasteSync implements PasteSyncController {
   private online = true;
   private retryWithoutValidator = false;
   private retryCredential: string | null = null;
+  private retryRequired = false;
   private candidate: Candidate | null = null;
+  private locallyCleanOverride = false;
+  private remoteApplyPending = false;
   private permanentlyStopped = false;
   private terminal = false;
   private state: AutosyncStatus = "inactive";
@@ -171,34 +202,41 @@ export class PasteSync implements PasteSyncController {
     }
 
     this.syncDueAt = loadAt + CADENCE_MS;
-    this.setState("waiting", loadAt);
+    this.setState("waiting", null);
     this.armTimer();
   }
 
   recordUserActivity(activityAt: number): void {
-    if (!this.started || this.disposed || this.terminal) return;
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
     this.activeUntil = activityAt + ACTIVE_WINDOW_MS;
     this.armTimer();
   }
 
   localWorkChanged(): void {
-    if (!this.started || this.disposed || this.terminal) return;
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
     this.localDirty = true;
     this.syncDueAt = null;
     this.candidate = null;
+    this.locallyCleanOverride = false;
+    this.remoteApplyPending = false;
+    this.clearRetryIntent();
     this.invalidateRead();
-    if (this.isActive()) this.setState("paused-local", this.options.now());
+    if (this.isActive() && !this.retryRequired) this.setState("paused-local", this.options.now());
     this.armTimer();
   }
 
   localWorkSettled(settledAt: number): void {
-    if (!this.started || this.disposed || this.terminal) return;
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
     this.localDirty = false;
+    if (this.retryRequired) {
+      this.armTimer();
+      return;
+    }
     if (this.isEligible()) {
-      this.syncDueAt = settledAt + CADENCE_MS;
+      this.syncDueAt = this.inFlight === null ? settledAt + CADENCE_MS : null;
       this.setState("waiting", settledAt);
     } else {
       this.syncDueAt = null;
@@ -208,20 +246,27 @@ export class PasteSync implements PasteSyncController {
   }
 
   setOnline(online: boolean, eventAt: number): void {
-    if (!this.started || this.disposed || this.terminal) return;
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
     this.online = online;
     if (!online) {
       this.syncDueAt = null;
       this.candidate = null;
+      this.locallyCleanOverride = false;
+      this.remoteApplyPending = false;
+      this.clearRetryIntent();
       this.invalidateRead();
-      if (this.isActive()) this.setState("paused-offline", eventAt);
+      if (this.isActive() && !this.retryRequired) this.setState("paused-offline", eventAt);
       this.armTimer();
       return;
     }
 
+    if (this.retryRequired) {
+      this.armTimer();
+      return;
+    }
     if (this.isEligible()) {
-      this.syncDueAt = eventAt + CADENCE_MS;
+      this.syncDueAt = this.inFlight === null ? eventAt + CADENCE_MS : null;
       this.setState("waiting", eventAt);
     } else {
       this.syncDueAt = null;
@@ -231,13 +276,12 @@ export class PasteSync implements PasteSyncController {
   }
 
   keepCurrent(actionAt: number): void {
-    if (!this.started || this.disposed || this.terminal || !this.isActive() || !this.candidate) return;
+    if (!this.canDismissCandidate()) return;
 
     this.candidate = null;
-    if (this.isEligible()) {
-      this.syncDueAt = actionAt + CADENCE_MS;
-      this.setState("waiting", actionAt);
-    }
+    this.locallyCleanOverride = true;
+    this.syncDueAt = actionAt + CADENCE_MS;
+    this.setState("waiting", actionAt);
     this.armTimer();
   }
 
@@ -247,16 +291,41 @@ export class PasteSync implements PasteSyncController {
       || this.disposed
       || this.terminal
       || this.permanentlyStopped
+      || this.inFlight !== null
       || !this.isActive()
-      || !this.isEligible()
+      || (!this.isEligible() && !this.canDismissCandidate() && !this.canRetryForbidden())
     ) return false;
 
+    const dismissingCandidate = this.candidate !== null;
+    this.retryRequired = false;
     this.candidate = null;
-    this.retryWithoutValidator = true;
+    this.locallyCleanOverride = dismissingCandidate;
+    this.retryWithoutValidator = dismissingCandidate;
     this.retryCredential = pendingCredential;
     this.syncDueAt = actionAt + CADENCE_MS;
     this.setState("waiting", actionAt);
     this.armTimer();
+    return true;
+  }
+
+  completeRemoteApply(committedAt: number): boolean {
+    if (!this.canSettleRemoteApply()) return false;
+
+    this.remoteApplyPending = false;
+    this.locallyCleanOverride = true;
+    this.setState("remote-applied", committedAt);
+    this.scheduleAfterSettle(committedAt);
+    return true;
+  }
+
+  cancelRemoteApply(cancelledAt: number): boolean {
+    if (!this.canSettleRemoteApply()) return false;
+
+    this.remoteApplyPending = false;
+    this.locallyCleanOverride = true;
+    this.options.emit({ type: "error", at: cancelledAt });
+    this.setState("error", cancelledAt);
+    this.scheduleAfterSettle(cancelledAt);
     return true;
   }
 
@@ -265,6 +334,8 @@ export class PasteSync implements PasteSyncController {
 
     this.disposed = true;
     this.syncDueAt = null;
+    this.remoteApplyPending = false;
+    this.clearRetryIntent();
     this.clearTimer();
     this.invalidateRead();
   }
@@ -277,7 +348,46 @@ export class PasteSync implements PasteSyncController {
     const current = this.options.capture();
     return !this.terminal
       && !this.permanentlyStopped
+      && !this.retryRequired
+      && !this.remoteApplyPending
       && this.isActive()
+      && current.phase === "ordinary"
+      && (current.locallyClean || this.locallyCleanOverride)
+      && !current.offline
+      && this.online
+      && !this.localDirty;
+  }
+
+  private canDismissCandidate(): boolean {
+    const current = this.options.capture();
+    return this.started
+      && !this.disposed
+      && !this.terminal
+      && !this.permanentlyStopped
+      && this.candidate !== null
+      && this.isActive()
+      && current.phase === "ordinary"
+      && !current.offline
+      && this.online
+      && !this.localDirty;
+  }
+
+  private canSettleRemoteApply(): boolean {
+    const current = this.options.capture();
+    return this.remoteApplyPending
+      && !this.disposed
+      && !this.terminal
+      && !this.permanentlyStopped
+      && this.isActive()
+      && current.phase === "ordinary"
+      && !current.offline
+      && this.online
+      && !this.localDirty;
+  }
+
+  private canRetryForbidden(): boolean {
+    const current = this.options.capture();
+    return this.retryRequired
       && current.phase === "ordinary"
       && current.locallyClean
       && !current.offline
@@ -285,11 +395,22 @@ export class PasteSync implements PasteSyncController {
       && !this.localDirty;
   }
 
+  private clearRetryIntent(): void {
+    this.retryWithoutValidator = false;
+    this.retryCredential = null;
+  }
+
   private armTimer(): void {
     this.clearTimer();
-    if (!this.started || this.disposed || this.terminal || !this.isActive()) return;
+    if (!this.started || this.disposed || this.terminal) return;
+    if (!this.isActive()) {
+      this.expire();
+      return;
+    }
 
-    const dueAt = Math.min(this.syncDueAt ?? this.activeUntil, this.activeUntil);
+    const dueAt = this.inFlight === null && !this.remoteApplyPending
+      ? Math.min(this.syncDueAt ?? this.activeUntil, this.activeUntil)
+      : this.activeUntil;
     this.timerHandle = this.options.timer.setTimeout(() => {
       this.timerHandle = null;
       this.onTimer();
@@ -308,12 +429,13 @@ export class PasteSync implements PasteSyncController {
       this.expire();
       return;
     }
-    if (this.inFlight) {
+    if (this.inFlight || this.remoteApplyPending) {
       this.armTimer();
       return;
     }
     if (!this.isEligible()) {
       this.syncDueAt = null;
+      this.clearRetryIntent();
       this.setPausedState(this.options.now());
       this.armTimer();
       return;
@@ -358,10 +480,14 @@ export class PasteSync implements PasteSyncController {
     }
 
     const canOrder = this.canOrder(read);
-    if (!this.isCurrent(read)) return;
+    if (this.inFlight !== read) return;
+    if (!this.isActive()) {
+      this.expire();
+      return;
+    }
     this.inFlight = null;
     if (!canOrder) {
-      this.armTimer();
+      this.scheduleAfterSettle(receivedAt);
       return;
     }
 
@@ -379,7 +505,7 @@ export class PasteSync implements PasteSyncController {
       if (
         order === "marker-equal"
         && result.snapshot.source === read.capture.baseline.acceptedSource
-        && result.snapshot.etag === read.capture.responseEtag
+        && samePublicSummary(result.snapshot.summary, read.capture.acceptedSummary)
       ) {
         this.options.emit({ type: "unchanged", etag: result.snapshot.etag, checkedAt: receivedAt });
         this.setState("unchanged", receivedAt);
@@ -388,13 +514,15 @@ export class PasteSync implements PasteSyncController {
       }
       if (order === "definitely-newer") {
         this.candidate = null;
+        this.locallyCleanOverride = false;
+        this.remoteApplyPending = true;
         this.options.emit({ type: "proven-newer", snapshot: result.snapshot, capture: read.capture, checkedAt: receivedAt });
-        this.setState("remote-applied", receivedAt);
-        this.scheduleAfterSettle(receivedAt);
+        this.armTimer();
         return;
       }
 
       this.candidate = { snapshot: result.snapshot, capture: read.capture };
+      this.locallyCleanOverride = false;
       this.syncDueAt = null;
       this.options.emit({ type: "candidate", snapshot: result.snapshot, capture: read.capture, checkedAt: receivedAt });
       this.setState("conflict", receivedAt);
@@ -404,7 +532,10 @@ export class PasteSync implements PasteSyncController {
 
     if (result.status === 403) {
       this.candidate = null;
+      this.locallyCleanOverride = false;
+      this.retryRequired = true;
       this.syncDueAt = null;
+      this.clearRetryIntent();
       this.options.emit({ type: "forbidden", at: receivedAt });
       this.setState("forbidden", receivedAt);
       this.clearTimer();
@@ -412,7 +543,10 @@ export class PasteSync implements PasteSyncController {
     }
     if (result.status === 404) {
       this.candidate = null;
+      this.locallyCleanOverride = false;
+      this.retryRequired = false;
       this.syncDueAt = null;
+      this.clearRetryIntent();
       this.permanentlyStopped = true;
       this.options.emit({ type: "not-found", at: receivedAt });
       this.setState("not-found", receivedAt);
@@ -434,15 +568,19 @@ export class PasteSync implements PasteSyncController {
   }
 
   private handleReadFailure(read: InFlightRead, _reason: unknown): void {
+    const settledAt = this.options.now();
     const canOrder = this.canOrder(read);
-    if (!this.isCurrent(read)) return;
+    if (this.inFlight !== read) return;
+    if (!this.isActive()) {
+      this.expire();
+      return;
+    }
 
     this.inFlight = null;
     if (!canOrder) {
-      this.armTimer();
+      this.scheduleAfterSettle(settledAt);
       return;
     }
-    const settledAt = this.options.now();
     this.options.emit({ type: "error", at: settledAt });
     this.setState("error", settledAt);
     this.scheduleAfterSettle(settledAt);
@@ -460,10 +598,14 @@ export class PasteSync implements PasteSyncController {
   private handleTerminalViewOnce(read: InFlightRead, snapshot: RemoteSnapshot, receivedAt: number): void {
     if (this.disposed || this.terminal) return;
 
-    const ordinaryTokenCurrent = this.isCurrent(read);
+    const ordinaryTokenCurrent = this.canOrder(read);
     this.terminal = true;
     this.candidate = null;
+    this.locallyCleanOverride = false;
+    this.remoteApplyPending = false;
+    this.clearRetryIntent();
     this.syncDueAt = null;
+    this.inFlight?.controller.abort();
     this.inFlight = null;
     this.requestToken += 1;
     this.clearTimer();
@@ -497,7 +639,6 @@ export class PasteSync implements PasteSyncController {
     this.requestToken += 1;
     if (!this.inFlight) return;
     this.inFlight.controller.abort();
-    this.inFlight = null;
   }
 
   private isCurrent(read: InFlightRead): boolean {
@@ -507,6 +648,9 @@ export class PasteSync implements PasteSyncController {
   private expire(): void {
     this.syncDueAt = null;
     this.candidate = null;
+    this.locallyCleanOverride = false;
+    this.remoteApplyPending = false;
+    this.clearRetryIntent();
     this.invalidateRead();
     this.clearTimer();
     this.setState("inactive", this.options.now());
@@ -522,7 +666,7 @@ export class PasteSync implements PasteSyncController {
     }
   }
 
-  private setState(state: AutosyncStatus, at: number): void {
+  private setState(state: AutosyncStatus, at: number | null): void {
     if (this.state === state) return;
     this.state = state;
     this.options.emit({ type: "state", state, at });

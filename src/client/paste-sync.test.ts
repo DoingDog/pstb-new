@@ -50,6 +50,7 @@ class FakeClock {
 
 interface PendingRead {
   request: PasteSyncReadRequest;
+  settled: boolean;
   resolve: (result: PasteSyncReadResult) => void;
   reject: (reason: unknown) => void;
 }
@@ -99,6 +100,7 @@ function capture(overrides: Partial<PasteSyncCapture> = {}): PasteSyncCapture {
       updatedAt: "2026-09-13T00:00:00.000Z",
       acceptedSource: "local",
     },
+    acceptedSummary: summary(),
     responseEtag: etag,
     ...overrides,
   };
@@ -121,6 +123,7 @@ function syncFixture({ loadAt }: { loadAt: number }) {
   clock.now = loadAt;
   let currentCapture = capture();
   const reads: PendingRead[] = [];
+  let maxActiveReads = 0;
   const events: PasteSyncEvent[] = [];
   const controller = new PasteSync({
     now: () => clock.now,
@@ -131,7 +134,8 @@ function syncFixture({ loadAt }: { loadAt: number }) {
     AbortController,
     capture: () => currentCapture,
     read: (request) => new Promise<PasteSyncReadResult>((resolve, reject) => {
-      reads.push({ request, resolve, reject });
+      reads.push({ request, settled: false, resolve, reject });
+      maxActiveReads = Math.max(maxActiveReads, reads.filter((read) => !read.settled).length);
     }),
     emit: (event) => events.push(event),
   });
@@ -147,16 +151,28 @@ function syncFixture({ loadAt }: { loadAt: number }) {
       currentCapture = next;
     },
     resolve304(index: number, responseEtag = etag) {
-      reads[index]?.resolve({ status: 304, etag: responseEtag });
+      const read = reads[index];
+      if (!read) return;
+      read.settled = true;
+      read.resolve({ status: 304, etag: responseEtag });
     },
     resolve200(index: number, remote = snapshot()) {
-      reads[index]?.resolve({ status: 200, snapshot: remote });
+      const read = reads[index];
+      if (!read) return;
+      read.settled = true;
+      read.resolve({ status: 200, snapshot: remote });
     },
     resolveStatus(index: number, status: 403 | 404 | 409 | 503) {
-      reads[index]?.resolve({ status });
+      const read = reads[index];
+      if (!read) return;
+      read.settled = true;
+      read.resolve({ status });
     },
     reject(index: number, reason: unknown) {
-      reads[index]?.reject(reason);
+      const read = reads[index];
+      if (!read) return;
+      read.settled = true;
+      read.reject(reason);
     },
     async flush() {
       await Promise.resolve();
@@ -168,10 +184,22 @@ function syncFixture({ loadAt }: { loadAt: number }) {
     activeTimerCount() {
       return clock.activeTimerCount();
     },
+    activeReadCount() {
+      return reads.filter((read) => !read.settled).length;
+    },
+    maxActiveReads() {
+      return maxActiveReads;
+    },
   };
 }
 
 describe("PasteSync timing", () => {
+  it("emits initial waiting without a transition timestamp", () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    expect(fixture.events[0]).toEqual({ type: "state", state: "waiting", at: null });
+  });
+
   it("uses one timer for cadence and the exclusive active deadline", async () => {
     const fixture = syncFixture({ loadAt: 0 });
 
@@ -215,6 +243,65 @@ describe("PasteSync timing", () => {
     expect(fixture.reads).toHaveLength(2);
   });
 
+  it("does not overlap a retired physical read before its valid view-once response settles", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.controller.localWorkChanged();
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.reads).toHaveLength(1);
+    expect(fixture.maxActiveReads()).toBe(1);
+    fixture.resolve200(0, snapshot({ summary: summary({ viewOnce: true }) }));
+    await fixture.flush();
+
+    expect(fixture.events.filter((event) => event.type === "terminal-view-once")).toHaveLength(1);
+    expect(fixture.activeReadCount()).toBe(0);
+    expect(fixture.activeTimerCount()).toBe(0);
+  });
+
+  it("rejects Retry while a physical check is still pending", () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+
+    expect(fixture.controller.retrySync(fixture.clock.now, "replacement")).toBe(false);
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(1);
+    expect(fixture.clock.maxActiveTimers).toBe(1);
+  });
+
+  it("expires a non-view-once response that settles before the queued deadline callback", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.clock.now = 300_000;
+    fixture.resolve304(0);
+    await fixture.flush();
+
+    expect(fixture.lastState()).toBe("inactive");
+    expect(fixture.activeTimerCount()).toBe(0);
+    expect(fixture.reads[0]?.request.signal.aborted).toBe(true);
+  });
+
+  it("keeps terminal view-once precedence but retires ordinary authority at the deadline", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.clock.now = 300_000;
+    fixture.resolve200(0, snapshot({ summary: summary({ viewOnce: true }) }));
+    await fixture.flush();
+
+    expect(fixture.events).toContainEqual(expect.objectContaining({
+      type: "terminal-view-once",
+      ordinaryTokenCurrent: false,
+      receivedAt: 300_000,
+    }));
+    expect(fixture.lastState()).toBe("inactive");
+    expect(fixture.activeTimerCount()).toBe(0);
+  });
+
   it("dispatches at 299,999 ms but not at the exclusive deadline", () => {
     const fixture = syncFixture({ loadAt: 0 });
 
@@ -247,6 +334,24 @@ describe("PasteSync timing", () => {
 });
 
 describe("classifyRemote", () => {
+  it.each([
+    ["g.1e2", 101],
+    ["g.01", 2],
+    ["g.+1", 2],
+    ["g.1.5", 2],
+    ["g.0", 2],
+    ["g.9007199254740992", 2],
+  ])("fails closed for malformed baseline counter %s", (version, versionCounter) => {
+    const baseline = { ...capture().baseline, generation: "g", version };
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "g", versionCounter },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    expect(classifyRemote(remote, baseline)).toBe("incomparable");
+  });
+
   it("compares all three markers only within the same v2 generation", () => {
     const baseline = capture().baseline;
     const older = snapshot({ updatedAtMs: Date.parse("2026-09-12T00:00:00.000Z") });
@@ -319,7 +424,7 @@ describe("PasteSync ordering and recovery", () => {
       },
       { remote: snapshot({ updatedAtMs: Date.parse("2026-09-12T00:00:00.000Z") }), event: "candidate" },
       { remote: snapshot({ source: "remote" }), event: "candidate" },
-      { remote: snapshot({ etag: '"sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' }), event: "candidate" },
+      { remote: snapshot({ etag: '"sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' }), event: "unchanged" },
       {
         remote: snapshot({
           identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
@@ -344,6 +449,43 @@ describe("PasteSync ordering and recovery", () => {
     }
   });
 
+  it("waits for staged remote apply acknowledgement before reporting success or resuming cadence", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+
+    expect(fixture.events.some((event) => event.type === "proven-newer")).toBe(true);
+    expect(fixture.lastState()).toBe("checking");
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(1);
+
+    expect(fixture.controller.completeRemoteApply(fixture.clock.now)).toBe(true);
+    expect(fixture.lastState()).toBe("remote-applied");
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("accepts an unconditional marker-equal 200 after mutation when its complete public summary matches", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    fixture.setCapture(capture({ responseEtag: null }));
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, snapshot());
+    await fixture.flush();
+
+    expect(fixture.events).toContainEqual({ type: "unchanged", etag, checkedAt: 3_000 });
+    expect(fixture.lastState()).toBe("unchanged");
+  });
+
   it("retains repeated candidates and gives Keep current and Retry full cadences", async () => {
     const fixture = syncFixture({ loadAt: 0 });
     const candidate = snapshot({ source: "remote" });
@@ -366,9 +508,28 @@ describe("PasteSync ordering and recovery", () => {
     fixture.clock.advance(1);
     expect(fixture.reads[2]?.request.ifNoneMatch).toBeUndefined();
     expect(fixture.reads[2]?.request.password).toBe("pending-password");
-    fixture.resolve304(2);
+    fixture.resolve200(2);
     await fixture.flush();
     expect(fixture.events).toContainEqual({ type: "credential-proved", password: "pending-password", at: 9_000 });
+  });
+
+  it.each([
+    ["Keep current", (fixture: ReturnType<typeof syncFixture>) => fixture.controller.keepCurrent(fixture.clock.now)],
+    ["Retry sync", (fixture: ReturnType<typeof syncFixture>) => expect(fixture.controller.retrySync(fixture.clock.now, null)).toBe(true)],
+  ])("dismisses a scheduler-owned candidate through %s when aggregate locallyClean is false", async (_action, dismiss) => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, snapshot({ source: "remote" }));
+    await fixture.flush();
+    fixture.setCapture(capture({ locallyClean: false }));
+    dismiss(fixture);
+
+    expect(fixture.lastState()).toBe("waiting");
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
   });
 
   it("cancels local-dirty reads and starts a fresh cadence only when local work settles", async () => {
@@ -403,6 +564,64 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(1);
     fixture.clock.advance(1);
     expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("latches forbidden across offline recovery and keeps Retry conditional until an authorized 304 proves its credential", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolveStatus(0, 403);
+    await fixture.flush();
+    fixture.controller.setOnline(false, fixture.clock.now);
+    fixture.controller.setOnline(true, fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.reads).toHaveLength(1);
+    expect(fixture.lastState()).toBe("forbidden");
+    expect(fixture.controller.retrySync(fixture.clock.now, "replacement")).toBe(true);
+    fixture.clock.advance(3_000);
+    expect(fixture.reads[1]?.request.ifNoneMatch).toBe(etag);
+    expect(fixture.reads[1]?.request.password).toBe("replacement");
+    fixture.resolve304(1);
+    await fixture.flush();
+    expect(fixture.events).toContainEqual({ type: "credential-proved", password: "replacement", at: 9_000 });
+  });
+
+  it("does not let queued callbacks change permanent not-found state", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolveStatus(0, 404);
+    await fixture.flush();
+    fixture.controller.localWorkChanged();
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.controller.setOnline(false, fixture.clock.now);
+    fixture.controller.setOnline(true, fixture.clock.now);
+    fixture.controller.recordUserActivity(fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.lastState()).toBe("not-found");
+    expect(fixture.reads).toHaveLength(1);
+    expect(fixture.activeTimerCount()).toBe(0);
+  });
+
+  it("clears an expired Retry intent before a later activity window starts", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, snapshot({ source: "remote" }));
+    await fixture.flush();
+    fixture.clock.advance(296_000);
+    expect(fixture.controller.retrySync(fixture.clock.now, "old-pending")).toBe(true);
+    fixture.clock.advance(1_000);
+    expect(fixture.lastState()).toBe("inactive");
+    fixture.controller.recordUserActivity(fixture.clock.now);
+    fixture.controller.localWorkChanged();
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.reads[1]?.request.password).toBeNull();
+    expect(fixture.reads[1]?.request.ifNoneMatch).toBe(etag);
   });
 
   it("handles HTTP outcomes and online network failures without an immediate retry", async () => {
@@ -440,7 +659,7 @@ describe("PasteSync ordering and recovery", () => {
     expect(networkFixture.reads).toHaveLength(2);
   });
 
-  it("does not let Retry or settle reopen an expired window", () => {
+  it("does not let Retry or settle reopen an expired window", async () => {
     const fixture = syncFixture({ loadAt: 0 });
 
     fixture.clock.advance(300_000);
@@ -455,6 +674,10 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(1);
     fixture.controller.localWorkChanged();
     fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.reject(0, new DOMException("aborted", "AbortError"));
+    await fixture.flush();
     fixture.clock.advance(3_000);
     expect(fixture.reads).toHaveLength(2);
   });
