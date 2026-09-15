@@ -9,30 +9,86 @@ import {
 } from "./i18n";
 
 describe("i18n", () => {
-  it("keeps English and Simplified Chinese dictionary keys in parity at runtime", () => {
+  it("checks recursive dictionary parity and terminal outcomes", () => {
     expect(() => assertDictionaryParity(dictionaries)).not.toThrow();
-
-    expect(() => assertDictionaryParity({
-      en: { create: "Create" },
-      "zh-CN": { paste: "粘贴内容" },
-    } as never)).toThrow("dictionary keys do not match");
+    const broken = structuredClone(dictionaries);
+    delete (broken["zh-CN"].help as Partial<Record<string, string>>).autosync;
+    expect(() => assertDictionaryParity(broken as never)).toThrow("dictionary keys do not match at help.autosync");
+    expect(Object.keys(dictionaries.en.terminal).sort()).toEqual([
+      "content-reconcile-terminal-current-kept",
+      "reload-terminal-current-kept-choice",
+      "reload-terminal-current-unchanged",
+      "reload-terminal-response-display-failed",
+      "reload-terminal-response-displayed",
+      "use-consumed-response-display-failed",
+      "use-consumed-response-displayed",
+    ]);
   });
 
-  it("pairs every displayed error with a localized recovery action and normalizes unknown codes", () => {
-    for (const locale of ["en", "zh-CN"] as const) {
-      for (const message of Object.values(dictionaries[locale].errors)) {
-        expect(message).toMatch(locale === "en" ? /\.\s+\S/ : /。\S/);
-      }
-    }
-
-    expect(dictionaries.en.errors.METHOD_NOT_ALLOWED).toBe("Method not allowed. Return to the create page.");
-    expect(errorMessage("zh-CN", "UNKNOWN_ERROR")).toBe(dictionaries["zh-CN"].errors.INTERNAL_ERROR);
-    expect(dictionaries["zh-CN"].labels).toMatchObject({
-      create: "创建剪贴板",
-      submit: "创建剪贴板",
-      delete: "删除剪贴板",
-      paste: "剪贴板",
+  it("keeps errors, statuses, and action outcomes closed and localized", () => {
+    expect(Object.keys(dictionaries.en.errors).sort()).toEqual(Object.keys(dictionaries["zh-CN"].errors).sort());
+    expect(Object.keys(dictionaries.en.actions).sort()).toEqual([
+      "autosave",
+      "content-reconcile",
+      "copy",
+      "create",
+      "delete",
+      "download",
+      "history-list",
+      "history-snapshot",
+      "manual-save",
+      "overwrite",
+      "password-clear",
+      "password-reconcile",
+      "password-set",
+      "reload-server",
+      "retry-sync",
+      "save-retry",
+      "settings-expiration",
+      "settings-format",
+      "settings-reconcile",
+      "settings-title",
+      "settings-view-once",
+      "use-consumed-response",
+      "use-remote",
+    ]);
+    expect(dictionaries.en.errors).toMatchObject({
+      NETWORK_ERROR: expect.any(String),
+      MALFORMED_RESPONSE: expect.any(String),
+      UNKNOWN_ERROR: expect.any(String),
     });
+    expect(errorMessage("zh-CN", "an-unrecognized-server-message")).toBe(dictionaries["zh-CN"].errors.UNKNOWN_ERROR);
+  });
+
+  it("keeps explanatory copy out of labels", () => {
+    for (const key of [
+      "titleDescription",
+      "formatDescription",
+      "expirationDescription",
+      "passwordDescription",
+      "customIdDescription",
+      "storedExactly",
+      "viewOnceDescription",
+    ]) {
+      expect(dictionaries.en.labels).not.toHaveProperty(key);
+      expect(dictionaries["zh-CN"].labels).not.toHaveProperty(key);
+    }
+    expect(dictionaries.en.help).toMatchObject({
+      contentStorage: expect.any(String),
+      contentLimit: expect.any(String),
+      format: expect.any(String),
+      expiration: expect.any(String),
+      relativeExpiration: expect.any(String),
+      password: expect.any(String),
+      passwordUrl: expect.any(String),
+      viewOnce: expect.any(String),
+      activeHtml: expect.any(String),
+      markdownNormalization: expect.any(String),
+      autosave: expect.any(String),
+      autosync: expect.any(String),
+      largeDiff: expect.any(String),
+    });
+    expect(dictionaries.en.validation.deleteDescription).toBe("Delete this paste permanently.");
   });
 
   it("selects the first supported browser language and falls back to the document locale", () => {
