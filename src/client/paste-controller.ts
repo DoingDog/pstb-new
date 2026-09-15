@@ -80,7 +80,7 @@ export type MetadataReconcileDispatch =
 type OriginalMutationFailure = { key: ActionKey; status: number | null; failedAt: string };
 type ConflictCandidate = { source: string; paste: PasteSummary; snapshot: RemoteSnapshot; capture: BaselineCapture & { inFlightContent: string }; originalTarget: string };
 
-export interface PasteControllerSnapshot extends AcceptedPasteState {
+interface PasteControllerSnapshotBase {
   lastSavedContent: string;
   mutation: MutationSlot;
   coalescedSource: string | null;
@@ -95,6 +95,36 @@ export interface PasteControllerSnapshot extends AcceptedPasteState {
   reconciliationRequired: boolean;
   serverCapabilities: boolean;
 }
+
+export interface ActivePasteControllerSnapshot extends AcceptedPasteState, PasteControllerSnapshotBase {
+  resource: "active";
+}
+
+export interface DeletedRootHandoffSnapshot extends PasteControllerSnapshotBase {
+  resource: "deleted-root-handoff";
+  acceptedSource: "";
+  draft: "";
+  summary: null;
+  version: null;
+  versionUsable: false;
+  contentRevision: null;
+  updatedAt: null;
+  responseEtag: null;
+  acceptedApplyGeneration: null;
+  localGeneration: null;
+  displayGeneration: null;
+  lastSavedContent: "";
+  coalescedSource: null;
+  credential: { committed: null; pending: null };
+  conflictCandidate: null;
+  terminalResponseSource: null;
+  terminalOrigin: null;
+  originalMutationFailure: null;
+  reconciliationRequired: false;
+  serverCapabilities: false;
+}
+
+export type PasteControllerSnapshot = ActivePasteControllerSnapshot | DeletedRootHandoffSnapshot;
 
 export interface PasteControllerOptions {
   accepted: AcceptedPasteState;
@@ -123,7 +153,7 @@ export interface PasteController {
 }
 
 const sourceActivityEvents = new Set<SourceEvent["type"]>(["input", "composition-end", "crepe-change"]);
-type InternalState = Omit<PasteControllerSnapshot, "mutation">;
+type InternalState = Omit<ActivePasteControllerSnapshot, "mutation">;
 type MetadataRequest = { requestToken: number; token: number; probe: "intended" | "authorization" | "current"; credential: string | null };
 
 function instant(at: number | undefined): string {
@@ -207,6 +237,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   const initial = options.accepted;
   let state: InternalState = {
     ...initial,
+    resource: "active",
     lastSavedContent: initial.acceptedSource,
     coalescedSource: null,
     phase: "ordinary",
@@ -225,10 +256,11 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   let slot: MutationSlot = { state: "idle", nextToken };
   let metadataRequest: MetadataRequest | undefined;
   let effects: MutationEffect[] = [];
+  let rootHandoffSnapshot: DeletedRootHandoffSnapshot | null = null;
   const mutationCredentials = new Map<number, string | null>();
   const reconcileCredentials = new Map<number, string | null>();
 
-  const snapshot = (): Readonly<PasteControllerSnapshot> => ({ ...state, mutation: slot });
+  const snapshot = (): Readonly<PasteControllerSnapshot> => rootHandoffSnapshot ?? { ...state, mutation: slot };
 
   const setLastAction = (intent: MutationIntent, at: number | undefined, attempt = nextToken): void => {
     state = { ...state, lastAction: { state: "pending", key: actionKey(intent), attempt, startedAt: instant(at) } };
@@ -260,6 +292,36 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     clearRequestOwnership();
     state = { ...state, coalescedSource: null };
     if (eligibleForAutosave) effects.push({ type: "autosave-slot-available" });
+  };
+  const handoffToRoot = (): void => {
+    state = { ...state, serverCapabilities: false };
+    rootHandoffSnapshot = {
+      resource: "deleted-root-handoff",
+      acceptedSource: "",
+      draft: "",
+      summary: null,
+      version: null,
+      versionUsable: false,
+      contentRevision: null,
+      updatedAt: null,
+      responseEtag: null,
+      acceptedApplyGeneration: null,
+      localGeneration: null,
+      displayGeneration: null,
+      lastSavedContent: "",
+      mutation: slot,
+      coalescedSource: null,
+      phase: "ordinary",
+      credential: { committed: null, pending: null },
+      autosave: { state: "clean", confirmedAt: null, failedAt: null },
+      lastAction: state.lastAction,
+      conflictCandidate: null,
+      terminalResponseSource: null,
+      terminalOrigin: null,
+      originalMutationFailure: null,
+      reconciliationRequired: false,
+      serverCapabilities: false,
+    };
   };
   const requestCredential = (intent: MutationIntent): string | null => {
     if (intent.kind === "password-set" || intent.kind === "password-clear" || intent.kind === "delete") return intent.authorizationPassword;
@@ -632,10 +694,10 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (slot.state !== "in-flight" || slot.token !== token || slot.intent.kind !== "delete" || !sameAcceptedBaseline(slot.capture, state)) return false;
     const failure: MutationFailure = result;
     if (result.status === 204) {
-      state = { ...state, acceptedSource: "", draft: "", lastSavedContent: "", credential: { committed: null, pending: null }, serverCapabilities: false, coalescedSource: null };
       settleLastAction("succeeded", at);
-      effects.push({ type: "root-handoff" });
       release(false);
+      handoffToRoot();
+      effects.push({ type: "root-handoff" });
       return true;
     }
     recordFailure(slot.intent, failure, at);

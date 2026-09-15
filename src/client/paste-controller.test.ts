@@ -421,7 +421,7 @@ describe("PasteController metadata, passwords, and delete", () => {
 
     expect(snapshot(controller).phase).toBe(phase);
     expect(snapshot(controller).mutation.state).toBe("idle");
-    expect(snapshot(controller).versionUsable).toBe(status === 409 ? false : true);
+    expect(snapshot(controller).versionUsable).toBe(status !== 204 && status !== 409);
     expect(controller.effects().some((effect) => effect.type === "root-handoff")).toBe(rootHandoff);
   });
 
@@ -434,6 +434,64 @@ describe("PasteController metadata, passwords, and delete", () => {
       expect(snapshot(controller).credential.committed).toBeNull();
       expect(snapshot(controller).credential.pending).toBe(status === 204 ? null : "replacement");
     }
+  });
+
+  it("clears deleted paste identity and capability state before root handoff", () => {
+    const prior = summary({
+      id: "prior-paste",
+      version: "prior.7",
+      contentRevision: 7,
+      updatedAt: "2026-09-15T00:00:07.000Z",
+      links: { view: "/p/prior-paste", raw: "/raw/prior-paste", html: "/html/prior-paste", markdown: "/md/prior-paste", file: "/file/prior-paste" },
+    });
+    const { controller } = pasteControllerFixture({
+      accepted: {
+        acceptedSource: "prior source",
+        draft: "prior source",
+        summary: prior,
+        version: prior.version,
+        versionUsable: true,
+        contentRevision: prior.contentRevision,
+        updatedAt: prior.updatedAt,
+        responseEtag: '"sha256-prior"',
+        acceptedApplyGeneration: 7,
+        localGeneration: 6,
+        displayGeneration: 5,
+      },
+    });
+    controller.setPendingCredential("replacement credential");
+    const deletion = dispatch(controller, { kind: "delete", action: "delete", authorizationPassword: "replacement credential" });
+
+    expect(controller.acceptDeleteMutation(deletion.token, { status: 204 }, 1)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      resource: "deleted-root-handoff",
+      acceptedSource: "",
+      draft: "",
+      lastSavedContent: "",
+      summary: null,
+      version: null,
+      versionUsable: false,
+      contentRevision: null,
+      updatedAt: null,
+      responseEtag: null,
+      acceptedApplyGeneration: null,
+      localGeneration: null,
+      displayGeneration: null,
+      credential: { committed: null, pending: null },
+      autosave: { state: "clean", confirmedAt: null, failedAt: null },
+      conflictCandidate: null,
+      terminalResponseSource: null,
+      terminalOrigin: null,
+      originalMutationFailure: null,
+      reconciliationRequired: false,
+      serverCapabilities: false,
+      coalescedSource: null,
+      lastAction: { state: "succeeded", key: "delete" },
+    });
+    expect(controller.takeEffects().filter((effect) => effect.type === "root-handoff")).toEqual([{ type: "root-handoff" }]);
+    expect(controller.acceptDeleteMutation(deletion.token, { status: 204 }, 2)).toBe(false);
+    expect(snapshot(controller).summary).toBeNull();
   });
 });
 
