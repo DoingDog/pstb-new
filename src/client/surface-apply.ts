@@ -334,7 +334,6 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
         fallback = fallback === attempt.retrySurface ? null : fallback;
         status = fallback === null ? "committed" : "fallback";
       }
-      if (!attempt.terminalLocal && attempt.retrySurface === undefined) terminalLocalAttempt = null;
       activeAttempt = undefined;
       return true;
     } catch {

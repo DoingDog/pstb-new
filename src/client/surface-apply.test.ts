@@ -607,6 +607,23 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
   });
 
+  it("retains an invalidated terminal-local receipt through an unrelated full apply", async () => {
+    const fixture = surfaceFixture();
+    const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
+    const terminal = fixture.apply.applyTerminalLocal("two", entry);
+    fixture.apply.invalidate();
+    const ordinary = fixture.apply.apply("three");
+    await resolveStages(fixture, 1);
+    await expect(ordinary).resolves.toBe(true);
+    await resolveStages(fixture, 0);
+
+    const receipt = await terminal;
+    expect(receipt).toMatchObject({ applied: false });
+    if (receipt === null) throw new Error("expected terminal-local receipt");
+    expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
+    expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
+  });
+
   it("settles a remounted terminal-local receipt after its stages finish", async () => {
     const fixture = surfaceFixture();
     const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
