@@ -131,7 +131,6 @@ type Attempt = {
   failure: SurfaceFallback;
   retrySurface?: Surface;
   terminalLocal: boolean;
-  terminalLocalToken?: TerminalLocalToken;
   retired: boolean;
   owned: Set<Surface>;
   disposed: Set<Surface>;
@@ -216,11 +215,10 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   const abandonActive = (): void => {
     if (activeAttempt === undefined) return;
     const previous = activeAttempt;
-    if (previous.terminalLocal && previous.terminalLocalToken === terminalLocalAttempt?.token) terminalLocalAttempt = null;
     retire(previous);
     restorePresentation(previous);
   };
-  const allocate = (source: string, activeUntil?: number, terminalLocal = false, terminalLocalToken?: TerminalLocalToken): Attempt => {
+  const allocate = (source: string, activeUntil?: number, terminalLocal = false): Attempt => {
     abandonActive();
     const base = copyCapture(current);
     const retryToken = Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff);
@@ -242,7 +240,6 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       staged: {},
       failure: null,
       terminalLocal,
-      ...(terminalLocalToken === undefined ? {} : { terminalLocalToken }),
       retired: false,
       owned: new Set(),
       disposed: new Set(),
@@ -349,15 +346,15 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     }
   };
 
-  const runAll = async (source: string, activeUntil?: number, terminalLocal = false, terminalLocalToken?: TerminalLocalToken): Promise<boolean> => {
-    const attempt = allocate(source, activeUntil, terminalLocal, terminalLocalToken);
+  const runAll = async (source: string, activeUntil?: number, terminalLocal = false): Promise<boolean> => {
+    const attempt = allocate(source, activeUntil, terminalLocal);
     await Promise.all([stageOne(attempt, "preview"), stageOne(attempt, "visual"), stageOne(attempt, "diff")]);
     return publish(attempt);
   };
   const runTerminalLocal = async (source: string): Promise<TerminalLocalApplyReceipt> => {
     const terminalLocalToken = Symbol("terminal-local");
     terminalLocalAttempt = { token: terminalLocalToken, settled: false };
-    return { terminalLocalToken, applied: await runAll(source, undefined, true, terminalLocalToken) };
+    return { terminalLocalToken, applied: await runAll(source, undefined, true) };
   };
 
   const runRetry = async (source: string, surface: Surface): Promise<boolean> => {
@@ -421,19 +418,16 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       abandonActive();
       current = copyCapture(capture);
       currentSource = capture.currentExactSource;
-      terminalLocalAttempt = null;
       syncCaptureCounters();
     },
     invalidate() {
       abandonActive();
       current = { ...current, parentApplyGeneration: current.parentApplyGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-      terminalLocalAttempt = null;
       syncCaptureCounters();
     },
     remount() {
       abandonActive();
       current = { ...current, hostGeneration: current.hostGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-      terminalLocalAttempt = null;
       syncCaptureCounters();
     },
     settleTerminal(origin, result) {
