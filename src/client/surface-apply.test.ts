@@ -474,21 +474,122 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     });
   });
 
-  it("settles use-consumed-response per committed terminal-local parent attempt", async () => {
+  it("allocates retry tokens above every surface counter across preview and visual retries", async () => {
+    const fixture = surfaceFixture();
+    const initial = fixture.apply.apply("two");
+    fixture.previews[0]!.reject(new Error("preview failed"));
+    fixture.visuals[0]!.resolve("visual");
+    fixture.diffs[0]!.resolve("diff");
+    await settle();
+    await expect(initial).resolves.toBe(true);
+
+    const committed = fixture.apply.snapshot().capture;
+    const tokens = [committed.derivedRetryToken];
+    const firstPreview = fixture.apply.retryPreview("two");
+    fixture.previews[1]!.resolve("preview retry one");
+    await settle();
+    await expect(firstPreview).resolves.toBe(true);
+    tokens.push(fixture.apply.snapshot().capture.derivedRetryToken);
+
+    const secondPreview = fixture.apply.retryPreview("two");
+    fixture.previews[2]!.resolve("preview retry two");
+    await settle();
+    await expect(secondPreview).resolves.toBe(true);
+    tokens.push(fixture.apply.snapshot().capture.derivedRetryToken);
+
+    const visual = fixture.apply.retryVisual("two");
+    fixture.visuals[1]!.resolve("visual retry");
+    await settle();
+    await expect(visual).resolves.toBe(true);
+    expect(fixture.apply.snapshot().capture).toEqual({ ...committed, derivedRetryToken: 4 });
+    tokens.push(fixture.apply.snapshot().capture.derivedRetryToken);
+
+    expect(tokens).toEqual([1, 2, 3, 4]);
+  });
+
+  it("allocates a higher diff retry token after a preview retry", async () => {
+    const fixture = surfaceFixture();
+    const initial = fixture.apply.apply("two");
+    await resolveStages(fixture);
+    await expect(initial).resolves.toBe(true);
+
+    const tokens = [fixture.apply.snapshot().capture.derivedRetryToken];
+    const preview = fixture.apply.retryPreview("two");
+    fixture.previews[1]!.resolve("preview retry");
+    await settle();
+    await expect(preview).resolves.toBe(true);
+    tokens.push(fixture.apply.snapshot().capture.derivedRetryToken);
+
+    const diff = fixture.apply.retryDiff("two");
+    fixture.diffs[1]!.resolve("diff retry");
+    await settle();
+    await expect(diff).resolves.toBe(true);
+    tokens.push(fixture.apply.snapshot().capture.derivedRetryToken);
+
+    expect(tokens).toEqual([1, 2, 3]);
+  });
+
+  it("settles use-consumed-response per terminal-local receipt", async () => {
     const fixture = surfaceFixture();
     const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
-    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
 
     const first = fixture.apply.applyTerminalLocal("two", entry);
     await resolveStages(fixture, 0);
-    await expect(first).resolves.toBe(true);
-    expect(fixture.apply.settleUseConsumedResponse("display-failed")).toBe("use-consumed-response-display-failed");
-    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
+    const firstReceipt = await first;
+    expect(firstReceipt).toMatchObject({ applied: true });
+    if (firstReceipt === null) throw new Error("expected terminal-local receipt");
+    expect(typeof firstReceipt.terminalLocalToken).toBe("symbol");
+    expect(fixture.apply.settleUseConsumedResponse(firstReceipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
+    expect(fixture.apply.settleUseConsumedResponse(firstReceipt.terminalLocalToken, "displayed")).toBeNull();
 
     const second = fixture.apply.applyTerminalLocal("three", entry);
     await resolveStages(fixture, 1);
-    await expect(second).resolves.toBe(true);
-    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBe("use-consumed-response-displayed");
-    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
+    const secondReceipt = await second;
+    expect(secondReceipt).toMatchObject({ applied: true });
+    if (secondReceipt === null) throw new Error("expected terminal-local receipt");
+    expect(fixture.apply.settleUseConsumedResponse(secondReceipt.terminalLocalToken, "displayed")).toBe("use-consumed-response-displayed");
+    expect(fixture.apply.settleUseConsumedResponse(secondReceipt.terminalLocalToken, "displayed")).toBeNull();
+  });
+
+  it("keeps a terminal-local receipt when its commit fails", async () => {
+    const fixture = surfaceFixture();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      throw new Error("commit failed");
+    });
+    const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
+    const attempt = fixture.apply.applyTerminalLocal("two", entry);
+    await resolveStages(fixture);
+
+    const receipt = await attempt;
+    expect(receipt).toMatchObject({ applied: false });
+    if (receipt === null) throw new Error("expected terminal-local receipt");
+    expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
+    expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
+  });
+
+  it("rejects a stale terminal-local receipt without consuming the latest receipt", async () => {
+    const fixture = surfaceFixture();
+    const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
+
+    const first = fixture.apply.applyTerminalLocal("two", entry);
+    const second = fixture.apply.applyTerminalLocal("three", entry);
+    await resolveStages(fixture, 1);
+    const secondReceipt = await second;
+    expect(secondReceipt).toMatchObject({ applied: true });
+    if (secondReceipt === null) throw new Error("expected second terminal-local receipt");
+
+    await resolveStages(fixture, 0);
+    const firstReceipt = await first;
+    expect(firstReceipt).toMatchObject({ applied: false });
+    if (firstReceipt === null) throw new Error("expected first terminal-local receipt");
+
+    expect(fixture.apply.settleUseConsumedResponse(firstReceipt.terminalLocalToken, "display-failed")).toBeNull();
+    expect(fixture.apply.settleUseConsumedResponse(secondReceipt.terminalLocalToken, "displayed")).toBe("use-consumed-response-displayed");
+  });
+
+  it("does not create a terminal-local receipt when its entry guard rejects", async () => {
+    const fixture = surfaceFixture();
+    await expect(fixture.apply.applyTerminalLocal("two", { terminalEpochCurrent: true, displayGenerationCurrent: false, selectedSourceCurrent: true })).resolves.toBeNull();
+    expect(fixture.ports.stagePreview).not.toHaveBeenCalled();
   });
 });
