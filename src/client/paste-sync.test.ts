@@ -285,6 +285,36 @@ describe("PasteSync timing", () => {
     expect(fixture.reads[0]?.request.signal.aborted).toBe(true);
   });
 
+  it("releases a response that settles at the deadline before its queued deadline callback", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.clock.now = 300_000;
+    fixture.resolve304(0);
+    await fixture.flush();
+    fixture.controller.recordUserActivity(fixture.clock.now);
+    fixture.controller.localWorkChanged();
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("releases a rejection that settles at the deadline before its queued deadline callback", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.clock.now = 300_000;
+    fixture.reject(0, new Error("network unavailable"));
+    await fixture.flush();
+    fixture.controller.recordUserActivity(fixture.clock.now);
+    fixture.controller.localWorkChanged();
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    fixture.clock.advance(3_000);
+
+    expect(fixture.reads).toHaveLength(2);
+  });
+
   it("keeps terminal view-once precedence but retires ordinary authority at the deadline", async () => {
     const fixture = syncFixture({ loadAt: 0 });
 
@@ -461,17 +491,82 @@ describe("PasteSync ordering and recovery", () => {
     fixture.resolve200(0, remote);
     await fixture.flush();
 
-    expect(fixture.events.some((event) => event.type === "proven-newer")).toBe(true);
+    const apply = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    expect(apply).toBeDefined();
     expect(fixture.lastState()).toBe("checking");
     fixture.clock.advance(3_000);
     expect(fixture.reads).toHaveLength(1);
 
-    expect(fixture.controller.completeRemoteApply(fixture.clock.now)).toBe(true);
+    expect(fixture.controller.completeRemoteApply(apply!.attempt, fixture.clock.now)).toBe(true);
     expect(fixture.lastState()).toBe("remote-applied");
     fixture.clock.advance(2_999);
     expect(fixture.reads).toHaveLength(1);
     fixture.clock.advance(1);
     expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("does not let a late completion from cancelled A settle B", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const applyA = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    if (!applyA) throw new Error("missing remote apply A");
+    expect(fixture.controller.cancelRemoteApply(applyA.attempt, fixture.clock.now)).toBe(true);
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(1, remote);
+    await fixture.flush();
+    const applyB = fixture.events.filter(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    ).at(-1);
+    if (!applyB) throw new Error("missing remote apply B");
+    expect(applyB.attempt).toBeGreaterThan(applyA.attempt);
+
+    expect(fixture.controller.completeRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
+    expect(fixture.controller.cancelRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
+    expect(fixture.lastState()).toBe("error");
+  });
+
+  it("does not let a late cancellation from cancelled A settle B", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const applyA = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    if (!applyA) throw new Error("missing remote apply A");
+    expect(fixture.controller.cancelRemoteApply(applyA.attempt, fixture.clock.now)).toBe(true);
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(1, remote);
+    await fixture.flush();
+    const applyB = fixture.events.filter(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    ).at(-1);
+    if (!applyB) throw new Error("missing remote apply B");
+    expect(applyB.attempt).toBeGreaterThan(applyA.attempt);
+
+    expect(fixture.controller.cancelRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
+    expect(fixture.controller.completeRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
+    expect(fixture.lastState()).toBe("remote-applied");
   });
 
   it("accepts an unconditional marker-equal 200 after mutation when its complete public summary matches", async () => {
