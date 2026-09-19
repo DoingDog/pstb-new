@@ -715,6 +715,54 @@ describe("management hardening regressions", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it("retains authoritative pending settings authority after Discard and forced saves", async () => {
+    const saveTitle = vi.fn();
+    const saveFormat = vi.fn();
+    const saveExpiration = vi.fn();
+    const saveViewOnce = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })}
+        onActivity={vi.fn()}
+        saveTitle={saveTitle}
+        saveFormat={saveFormat}
+        saveExpiration={saveExpiration}
+        saveViewOnce={saveViewOnce}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    const result = () => fixture.element.querySelector("[data-settings-result]")?.getAttribute("data-settings-result");
+    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
+    expect(result()).toBe("pending");
+    expect(discardButton.disabled).toBe(true);
+    click(discardButton);
+    expect(discard).not.toHaveBeenCalled();
+    expect(result()).toBe("pending");
+    discardButton.disabled = false;
+    click(discardButton);
+    flushSync(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(discard).not.toHaveBeenCalled();
+    expect(result()).toBe("pending");
+
+    const saves = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent?.startsWith("Save "));
+    expect(saves).toHaveLength(4);
+    for (const save of saves) {
+      expect(save.disabled).toBe(true);
+      save.disabled = false;
+      click(save);
+      flushSync(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    }
+    expect(saveTitle).not.toHaveBeenCalled();
+    expect(saveFormat).not.toHaveBeenCalled();
+    expect(saveExpiration).not.toHaveBeenCalled();
+    expect(saveViewOnce).not.toHaveBeenCalled();
+  });
+
   it("keeps password drafts and exposes Reload only for an unusable conflict", async () => {
     const reload = vi.fn();
     const fixture = await mount(
@@ -803,6 +851,73 @@ describe("management hardening regressions", () => {
     expect(reconcileButton.disabled).toBe(true);
     click(reconcileButton);
     expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it("retains authoritative pending password authority after Discard and forced actions", async () => {
+    const setPassword = vi.fn();
+    const clearPassword = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <PasswordPanel
+        state={passwordState({ result: { action: "set", state: "pending", message: "Saving password" } })}
+        onActivity={vi.fn()}
+        setPassword={setPassword}
+        clearPassword={clearPassword}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    const result = () => fixture.element.querySelector("[data-password-result]")?.getAttribute("data-password-result");
+    let discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
+    expect(result()).toBe("pending");
+    expect(discardButton.disabled).toBe(true);
+    click(discardButton);
+    expect(discard).not.toHaveBeenCalled();
+    expect(result()).toBe("pending");
+    discardButton.disabled = false;
+    click(discardButton);
+    flushSync(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(discard).not.toHaveBeenCalled();
+    expect(result()).toBe("pending");
+
+    const set = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Set password")!;
+    expect(set.disabled).toBe(true);
+    set.disabled = false;
+    click(set);
+    flushSync(() => set.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(setPassword).not.toHaveBeenCalled();
+
+    await fixture.render(
+      <PasswordPanel
+        key="protected"
+        state={passwordState({ protected: true, result: { action: "set", state: "pending", message: "Saving password" } })}
+        onActivity={vi.fn()}
+        setPassword={setPassword}
+        clearPassword={clearPassword}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+    discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
+    const changePassword = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Change password")!;
+    const clearPasswordButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Clear password")!;
+    expect(result()).toBe("pending");
+    expect(discardButton.disabled).toBe(true);
+    click(discardButton);
+    expect(discard).not.toHaveBeenCalled();
+    for (const action of [changePassword, clearPasswordButton]) {
+      expect(action.disabled).toBe(true);
+      action.disabled = false;
+      click(action);
+      flushSync(() => action.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    }
+    expect(setPassword).not.toHaveBeenCalled();
+    expect(clearPassword).not.toHaveBeenCalled();
   });
 
   it("uses the blocked delete predicate for credential and conflict retries", async () => {

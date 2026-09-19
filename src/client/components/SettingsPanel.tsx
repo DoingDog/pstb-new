@@ -141,7 +141,8 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
-  const mutationBlocked = result.state === "pending" || !state.versionUsable;
+  const pending = state.result.state === "pending";
+  const mutationBlocked = pending || !state.versionUsable;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const activity = (event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>) => onActivity(event.timeStamp);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
@@ -155,6 +156,7 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
   }, [result, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce]);
 
   const reset = () => {
+    if (pending) return;
     title.discard(state.accepted.title);
     format.discard(state.accepted.format);
     expiration.discard(inputExpiration(state.accepted.expiration));
@@ -186,7 +188,7 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
         <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); activity(event); }} />{copy.viewOnce}</label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
       </div>
-      <Button type="button" variant="outline" onClick={reset}>{copy.discard}</Button>
+      <Button type="button" variant="outline" disabled={pending} onClick={reset}>{copy.discard}</Button>
       <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
