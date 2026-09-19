@@ -19,7 +19,7 @@ export function PasswordPage({ locale, errorCode }: PasswordPageProps) {
       <Field>
         <FieldLabel htmlFor="password">{copy.password}</FieldLabel>
         <div className="flex gap-2">
-          <Input id="password" name="password" type={visible ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} />
+          <Input id="password" name="password" type={visible ? "text" : "password"} className="min-h-11" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} />
           <Button type="button" variant="outline" data-action="reveal" className="min-h-11" onClick={() => setVisible((current) => !current)}>{copy.reveal}</Button>
         </div>
       </Field>

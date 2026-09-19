@@ -1,5 +1,5 @@
 import * as React from "react";
-import { labels, type Locale } from "../../i18n";
+import { errorMessage, labels, type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
 import { LocalActions, type ClipboardPort, type DownloadPort, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
@@ -30,26 +30,59 @@ export function LocalOnlyPastePage({ locale, phase, source, initialMarkdown, cli
   const [wrap, setWrap] = React.useState(false);
   const [sourceVisible, setSourceVisible] = React.useState(false);
   const [preview, setPreview] = React.useState<TrustedMarkdownHtml | null>(initialMarkdown);
+  const [previewFailure, setPreviewFailure] = React.useState<string | null>(null);
+  const mounted = React.useRef(true);
+  const generation = React.useRef(0);
+  const currentSource = React.useRef(source);
+  const currentInitialPreview = React.useRef(initialMarkdown);
 
-  React.useEffect(() => {
+  React.useEffect(() => () => {
+    mounted.current = false;
+    generation.current += 1;
+  }, []);
+
+  React.useLayoutEffect(() => {
+    currentSource.current = source;
+    currentInitialPreview.current = initialMarkdown;
+    generation.current += 1;
     setPreview(initialMarkdown);
+    setPreviewFailure(null);
     setSourceVisible(false);
   }, [initialMarkdown, source]);
 
   const recomputePreview = async () => {
-    const { createMarkdownModes } = await import("../markdown");
-    const sourceAdapter = { value: source } as Pick<HTMLTextAreaElement, "value">;
-    const detachedHost = document.createElement("div");
-    const modes = createMarkdownModes({
-      source: sourceAdapter,
-      visualRoot: detachedHost,
-      onDocumentChange: () => undefined,
-      onPreview: ({ html }) => setPreview(html as TrustedMarkdownHtml),
-    });
+    const attempt = ++generation.current;
+    const sourceIdentity = source;
+    const initialPreviewIdentity = initialMarkdown;
+    const isCurrent = () =>
+      mounted.current
+      && attempt === generation.current
+      && currentSource.current === sourceIdentity
+      && currentInitialPreview.current === initialPreviewIdentity;
+    let destroy: (() => Promise<void>) | undefined;
+
     try {
+      const { createMarkdownModes } = await import("../markdown");
+      if (!isCurrent()) return;
+      const sourceAdapter = { value: sourceIdentity } as Pick<HTMLTextAreaElement, "value">;
+      const detachedHost = document.createElement("div");
+      const modes = createMarkdownModes({
+        source: sourceAdapter,
+        visualRoot: detachedHost,
+        onDocumentChange: () => undefined,
+        onPreview: ({ html }) => {
+          if (isCurrent()) {
+            setPreview(html as TrustedMarkdownHtml);
+            setPreviewFailure(null);
+          }
+        },
+      });
+      destroy = modes.destroy;
       await modes.enterPreview();
+    } catch {
+      if (isCurrent()) setPreviewFailure(errorMessage(locale, "RENDER_FAILED"));
     } finally {
-      await modes.destroy();
+      if (destroy !== undefined) await destroy();
     }
   };
 
@@ -62,6 +95,7 @@ export function LocalOnlyPastePage({ locale, phase, source, initialMarkdown, cli
       {phase === "delete-uncertain"
         ? <p role="alert">{phaseLabel(locale, phase)}</p>
         : <p>{phaseLabel(locale, phase)}</p>}
+      {previewFailure !== null && <p role="alert">{previewFailure}</p>}
       <LocalActions
         actionScope={`local:${phase}:${source}`}
         source={source}
