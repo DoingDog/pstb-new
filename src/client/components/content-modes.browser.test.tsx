@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import type { ReactNode } from "react";
 import type { TrustedMarkdownHtml } from "../bootstrap";
+import type { SourceEvent } from "../contracts";
 import type { PasteLinks } from "../../types";
 import { OrdinaryPastePage } from "./OrdinaryPastePage";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
@@ -120,6 +121,7 @@ type CrepeControls = {
   failGetMarkdown: boolean;
   getMarkdownCalls: number;
   destroyCalls: number;
+  rejectCreate: boolean;
   rejectDestroy: boolean;
   restore(): void;
 };
@@ -188,12 +190,14 @@ function controlCrepe(): CrepeControls {
     failGetMarkdown: false,
     getMarkdownCalls: 0,
     destroyCalls: 0,
+    rejectCreate: false,
     rejectDestroy: false,
     restore: () => undefined,
   };
   const restore = [
     interceptCrepeMethod("create", (editor, original) => async () => {
       controls.active = editor;
+      if (controls.rejectCreate) throw new Error("create failed");
       return await original();
     }),
     interceptCrepeMethod("getMarkdown", (_editor, original) => () => {
@@ -811,6 +815,63 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     expect(currentMarkdownTab(host)).toBe("Visual");
   });
 
+  it("publishes a recovered serializer once during a current Preview teardown", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await waitForCrepe();
+    crepeControls.failGetMarkdown = true;
+    replaceVisualDocument("recovered");
+    await nextTask();
+    await nextTask();
+    expect(currentMarkdownTab(host)).toBe("Source");
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    crepeControls.failGetMarkdown = false;
+    await page.getByRole("tab", { name: "Preview" }).click();
+    await waitForMarkdownTab(host, "Preview");
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "crepe-change", content: "recovered\n" });
+    expect(autosave.input).toHaveBeenCalledTimes(1);
+    expect(autosave.input).toHaveBeenCalledWith("recovered\n", events[0]!.eventAt);
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("recovered\n");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(currentMarkdownTab(host)).toBe("Preview");
+  });
+
+  it("falls back to Source when real Crepe create rejects and retries startup", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    crepeControls.rejectCreate = true;
+    const host = mount(<RealMarkdownHarness
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={() => undefined}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await waitForCrepe();
+    const failedEditor = crepeControls.active;
+    await nextTask();
+    await nextTask();
+
+    expect(currentMarkdownTab(host)).toBe("Source");
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false);
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    crepeControls.rejectCreate = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+    await waitForMarkdownTab(host, "Visual");
+
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(crepeControls.active).not.toBe(failedEditor);
+    expect(currentMarkdownTab(host)).toBe("Visual");
+  });
+
   it.each(["Source", "Preview"] as const)("keeps the current %s teardown request recoverable", async (target) => {
     markdownModes.state.useActual = true;
     crepeControls = controlCrepe();
@@ -981,7 +1042,7 @@ function RealMarkdownHarness({
   onSourceEvent,
 }: {
   autosave: { input(content: string, eventAt: number): void; compositionStart(): void; compositionEnd(): void };
-  onSourceEvent(event: { content: string }): void;
+  onSourceEvent(event: SourceEvent): void;
 }) {
   const [source, setSource] = React.useState("first");
   return <MarkdownWorkbench
