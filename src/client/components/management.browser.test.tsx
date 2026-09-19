@@ -952,7 +952,10 @@ describe("management hardening regressions", () => {
         discard={vi.fn()}
       />,
     );
-    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save expiration")).toBeDefined();
+    const resultButtons = () => Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("[data-settings-result] button"));
+    expect(resultButtons()).toHaveLength(1);
+    expect(resultButtons()[0]?.textContent).toBe("Save expiration");
+    expect(resultButtons().some((button) => button.textContent === "Reconcile")).toBe(false);
 
     await fixture.render(
       <SettingsPanel
@@ -968,7 +971,9 @@ describe("management hardening regressions", () => {
         discard={vi.fn()}
       />,
     );
-    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")).toBeDefined();
+    expect(resultButtons()).toHaveLength(1);
+    expect(resultButtons()[0]?.textContent).toBe("Reconcile");
+    expect(resultButtons().some((button) => button.textContent === "Save expiration")).toBe(false);
 
     await fixture.render(
       <SettingsPanel
@@ -984,7 +989,9 @@ describe("management hardening regressions", () => {
         discard={vi.fn()}
       />,
     );
-    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")).toBeDefined();
+    expect(resultButtons()).toHaveLength(1);
+    expect(resultButtons()[0]?.textContent).toBe("Reconcile");
+    expect(resultButtons().some((button) => button.textContent === "Save expiration")).toBe(false);
   });
 
   it("uses status for pending and success, and alerts only for blocking failures", async () => {
