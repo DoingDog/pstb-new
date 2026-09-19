@@ -4,6 +4,7 @@ import type { LastAction, OperationRecords, TerminalOutcomeKey } from "../contra
 
 export interface OperationStatusProps {
   locale: Locale;
+  pageIdentity: string;
   records: OperationRecords;
   ordinary: boolean;
 }
@@ -67,21 +68,27 @@ function lastActionInstant(action: LastAction): string | null {
   return action.state === "pending" ? action.startedAt : action.settledAt;
 }
 
-function signature(id: StatusRecordId, record: unknown): string {
-  return JSON.stringify([id, record]);
+function signature(...values: readonly (string | number | null)[]): string {
+  return JSON.stringify(values);
+}
+
+function lastActionSignature(action: LastAction): string {
+  if (action.state === "idle") return signature("last-action", action.state, null, null, null, null);
+  if (action.state === "pending") return signature("last-action", action.state, action.key, action.attempt, action.startedAt, null);
+  return signature("last-action", action.state, action.key, action.attempt, action.startedAt, action.settledAt, action.outcomeKey);
 }
 
 function statusRecords(locale: Locale, records: OperationRecords, ordinary: boolean): StatusRecord[] {
   const copy = labels(locale);
   const dictionary = dictionaries[locale];
   const current: StatusRecord[] = [
-    { id: "network", label: copy.network, state: dictionary.status.network[records.network.state], instant: records.network.changedAt, signature: signature("network", records.network) },
-    { id: "last-action", label: copy.lastAction, state: lastActionState(locale, records.lastAction), instant: lastActionInstant(records.lastAction), signature: signature("last-action", records.lastAction) },
+    { id: "network", label: copy.network, state: dictionary.status.network[records.network.state], instant: records.network.changedAt, signature: signature("network", records.network.state, records.network.changedAt) },
+    { id: "last-action", label: copy.lastAction, state: lastActionState(locale, records.lastAction), instant: lastActionInstant(records.lastAction), signature: lastActionSignature(records.lastAction) },
   ];
   if (!ordinary) return current;
   return [
-    { id: "autosave", label: copy.autosave, state: dictionary.status.autosave[records.autosave.state], instant: autosaveInstant(records), signature: signature("autosave", records.autosave) },
-    { id: "autosync", label: copy.autosync, state: dictionary.status.autosync[records.autosync.state], instant: autosyncInstant(records), signature: signature("autosync", records.autosync) },
+    { id: "autosave", label: copy.autosave, state: dictionary.status.autosave[records.autosave.state], instant: autosaveInstant(records), signature: signature("autosave", records.autosave.state, records.autosave.confirmedAt, records.autosave.failedAt) },
+    { id: "autosync", label: copy.autosync, state: dictionary.status.autosync[records.autosync.state], instant: autosyncInstant(records), signature: signature("autosync", records.autosync.state, records.autosync.stateChangedAt, records.autosync.checkedAt, records.autosync.appliedAt) },
     ...current,
   ];
 }
@@ -92,28 +99,28 @@ function announcement(locale: Locale, record: StatusRecord): string {
     : `${record.label}: ${record.state}, ${formatDate(locale, record.instant)}`;
 }
 
-export function OperationStatus({ locale, records, ordinary }: OperationStatusProps) {
+export function OperationStatus({ locale, pageIdentity, records, ordinary }: OperationStatusProps) {
   const current = statusRecords(locale, records, ordinary);
-  const previous = React.useRef<{ locale: Locale; ordinary: boolean; signatures: ReadonlyMap<StatusRecordId, string> } | null>(null);
-  const [message, setMessage] = React.useState("");
+  const previous = React.useRef<{ locale: Locale; pageIdentity: string; ordinary: boolean; signatures: ReadonlyMap<StatusRecordId, string> } | null>(null);
+  const [liveEvent, setLiveEvent] = React.useState({ sequence: 0, message: "" });
 
   React.useEffect(() => {
     const signatures = new Map(current.map((record) => [record.id, record.signature] as const));
     const baseline = previous.current;
-    previous.current = { locale, ordinary, signatures };
-    if (baseline === null || baseline.ordinary !== ordinary) {
-      setMessage("");
+    previous.current = { locale, pageIdentity, ordinary, signatures };
+    if (baseline === null || baseline.pageIdentity !== pageIdentity || baseline.ordinary !== ordinary) {
+      setLiveEvent((event) => event.message === "" ? event : { sequence: event.sequence + 1, message: "" });
       return;
     }
     const changed = current.filter((record) => baseline.signatures.get(record.id) !== record.signature);
-    if (changed.length > 0) setMessage(changed.map((record) => announcement(locale, record)).join(" "));
-    else if (baseline.locale !== locale) setMessage("");
-  }, [current, locale, ordinary]);
+    if (changed.length > 0) setLiveEvent((event) => ({ sequence: event.sequence + 1, message: changed.map((record) => announcement(locale, record)).join(" ") }));
+    else if (baseline.locale !== locale) setLiveEvent((event) => event.message === "" ? event : { sequence: event.sequence + 1, message: "" });
+  }, [current, locale, ordinary, pageIdentity]);
 
   return (
     <section aria-label={labels(locale).operationStatus} className="border-t border-border py-3">
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-operation-announcement="true">
-        {message}
+        {liveEvent.message !== "" && <span key={liveEvent.sequence}>{liveEvent.message}</span>}
       </div>
       <dl className="grid gap-3 text-[13px] leading-[1.45] sm:grid-cols-2 lg:grid-cols-4">
         {current.map((record) => (

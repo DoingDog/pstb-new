@@ -147,6 +147,22 @@ function isOrdinaryPage(initialPage: InitialPage): boolean {
   return initialPage.ok && initialPage.bootstrap.page === "paste" && !initialPage.bootstrap.consumed;
 }
 
+function operationStatusPageIdentity(initialPage: InitialPage): string {
+  if (!initialPage.ok) return `error:${initialPage.errorCode}`;
+  const { bootstrap } = initialPage;
+  switch (bootstrap.page) {
+    case "create": return "create";
+    case "password": return `password:${bootstrap.errorCode ?? ""}`;
+    case "error": return `error:${bootstrap.status}:${bootstrap.errorCode}`;
+    case "paste": return bootstrap.consumed ? "paste:consumed" : `paste:${bootstrap.paste.id}`;
+    case "markdown": return `markdown:${bootstrap.id}`;
+    default: {
+      const exhaustive: never = bootstrap;
+      return exhaustive;
+    }
+  }
+}
+
 export function App({ initialPage }: AppProps) {
   const documentLocale = bootstrapLocale(initialPage);
   const [locale, setLocale] = React.useState<Locale>(() => resolveBrowserLocale(navigator.languages, documentLocale));
@@ -184,7 +200,7 @@ export function App({ initialPage }: AppProps) {
       locale={locale}
       breadcrumb={[copy.paste, heading]}
       headingId={headingId}
-      destinations={[{ id: "current-document", label: heading, selected: true, headingId }]}
+      destinationGroups={[{ id: "paste-views", label: copy.pasteViews, destinations: [{ id: "current-document", label: heading, selected: true, headingId }] }]}
       metadata={sidebarMetadata(initialPage, locale)}
       headerActions={
         <DocumentControls
@@ -196,7 +212,7 @@ export function App({ initialPage }: AppProps) {
       }
     >
       <PageContent initialPage={initialPage} locale={locale} headingId={headingId} />
-      <OperationStatus locale={locale} records={records} ordinary={isOrdinaryPage(initialPage)} />
+      <OperationStatus locale={locale} pageIdentity={operationStatusPageIdentity(initialPage)} records={records} ordinary={isOrdinaryPage(initialPage)} />
     </WorkbenchShell>
   );
 }

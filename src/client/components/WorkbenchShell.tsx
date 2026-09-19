@@ -3,16 +3,16 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbS
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { labels, type Locale } from "../../i18n";
-import { AppSidebar, type SidebarDestination, type SidebarMetadata } from "./app-sidebar";
+import { AppSidebar, type SidebarActionGroup, type SidebarDestination, type SidebarDestinationGroup, type SidebarMetadata } from "./app-sidebar";
 import { HelpProvider } from "./HelpTrigger";
 
 export interface WorkbenchShellProps {
   locale: Locale;
   breadcrumb: readonly string[];
   headingId: string;
-  destinations: readonly SidebarDestination[];
+  destinationGroups: readonly SidebarDestinationGroup[];
   metadata?: readonly SidebarMetadata[];
-  actions?: React.ReactNode;
+  actionGroups?: readonly SidebarActionGroup[];
   headerActions?: React.ReactNode;
   children: React.ReactNode;
   onDestinationSelect?(destination: SidebarDestination): void;
@@ -22,9 +22,9 @@ export function WorkbenchShell({
   locale,
   breadcrumb,
   headingId,
-  destinations,
+  destinationGroups,
   metadata,
-  actions,
+  actionGroups,
   headerActions,
   children,
   onDestinationSelect,
@@ -46,10 +46,9 @@ export function WorkbenchShell({
     <HelpProvider>
       <SidebarProvider>
         <AppSidebar
-          destinations={destinations}
-          destinationLabel={copy.pasteViews}
+          destinationGroups={destinationGroups}
           {...(metadata === undefined ? {} : { metadata, metadataLabel: copy.documentStatus })}
-          {...(actions === undefined ? {} : { actions, actionsLabel: copy.localActions })}
+          {...(actionGroups === undefined ? {} : { actionGroups })}
           onDestinationSelect={selectDestination}
         />
         <SidebarInset>

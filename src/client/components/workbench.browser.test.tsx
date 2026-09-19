@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { page } from "vitest/browser";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
@@ -8,7 +9,7 @@ import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { OperationRecords } from "../contracts";
 import { App } from "../App";
 import { HelpProvider, HelpTrigger } from "./HelpTrigger";
-import { LocalActions } from "./LocalActions";
+import { LocalActions, type LocalActionCapabilities, type LocalActionsProps } from "./LocalActions";
 import { OperationStatus } from "./OperationStatus";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { WorkbenchShell } from "./WorkbenchShell";
@@ -164,7 +165,7 @@ describe("HelpTrigger", () => {
           locale="en"
           breadcrumb={["Paste", "New"]}
           headingId="document-heading"
-          destinations={[]}
+          destinationGroups={[]}
         >
           <h1 id="document-heading" tabIndex={-1}>New paste</h1>
           <HelpTrigger
@@ -188,6 +189,7 @@ describe("OperationStatus", () => {
     const rendered = mount(
       <OperationStatus
         locale="en"
+        pageIdentity="status-test"
         ordinary
         records={records({
           autosave: {
@@ -218,7 +220,7 @@ describe("OperationStatus", () => {
     expect(rendered.querySelector('[data-operation-record="network"] time')?.getAttribute("datetime")).toBe("2026-09-13T10:00:00.000Z");
     expect(rendered.querySelector('[data-operation-record="last-action"] time')?.getAttribute("datetime")).toBe("2026-09-13T11:00:00.000Z");
 
-    const initial = mount(<OperationStatus locale="en" ordinary records={records()} />);
+    const initial = mount(<OperationStatus locale="en" pageIdentity="status-test" ordinary records={records()} />);
     expect(initial.querySelector('[data-operation-record="autosave"] time')).toBeNull();
     expect(initial.querySelector('[data-operation-record="autosync"] time')).toBeNull();
     expect(initial.querySelector('[data-operation-record="last-action"] time')).toBeNull();
@@ -235,7 +237,7 @@ describe("OperationStatus", () => {
         outcomeKey: "reload-terminal-response-displayed",
       },
     });
-    const rendered = mount(<OperationStatus locale="en" ordinary={false} records={terminal} />);
+    const rendered = mount(<OperationStatus locale="en" pageIdentity="status-test" ordinary={false} records={terminal} />);
     expect(rendered.textContent).toContain(dictionaries.en.terminal["reload-terminal-response-displayed"]);
 
   });
@@ -311,7 +313,7 @@ describe("local workbench boundaries", () => {
 });
 
 function localActions(props: Record<string, unknown>): ReactNode {
-  return React.createElement(LocalActions as unknown as React.ComponentType<Record<string, unknown>>, props);
+  return React.createElement(LocalActions as unknown as React.ComponentType<Record<string, unknown>>, { actionScope: "test-page", ...props });
 }
 
 function deferred<T>() {
@@ -358,28 +360,30 @@ describe("LocalActions regressions", () => {
     expect(sourceVisible).toEqual([true]);
   });
 
-  it("renders a server representation instead of a Blob HTML action when requested", () => {
-    const rendered = mount(localActions({
+  it("renders a typed server HTML capability instead of a Blob HTML action", () => {
+    const capabilities: LocalActionCapabilities = { html: { href: "/p/demo.html?password=p", label: "HTML representation" } };
+    const noLegacyNavigation: LocalActionsProps = {
+      actionScope: "test-page",
       source: "exact source",
       locale: "en",
       filename: "document.txt",
-      capabilities: { html: { href: "/p/demo.html?password=p", label: "HTML representation" } },
-    }));
+      capabilities,
+      // @ts-expect-error HTML navigation is only available through capabilities.html.
+      representationHref: "/p/demo/raw",
+    };
+    void noLegacyNavigation;
+    const rendered = mount(
+      <LocalActions
+        actionScope="test-page"
+        source="exact source"
+        locale="en"
+        filename="document.txt"
+        capabilities={capabilities}
+      />,
+    );
 
     expect(rendered.querySelector('a[href="/p/demo.html?password=p"]')?.textContent).toBe("HTML representation");
     expect(rendered.textContent).not.toContain("Open HTML locally");
-  });
-
-  it("keeps the existing named representation navigation available", () => {
-    const rendered = mount(localActions({
-      source: "exact source",
-      locale: "en",
-      filename: "document.txt",
-      capabilities: {},
-      representationHref: "/p/demo/raw",
-      representationLabel: "Raw representation",
-    }));
-    expect(rendered.querySelector('a[href="/p/demo/raw"]')?.textContent).toBe("Raw representation");
   });
 
   it("preserves CR and CRLF clipboard bytes and cleans fallback nodes after false or throw", async () => {
@@ -485,6 +489,48 @@ describe("LocalActions regressions", () => {
     expect(calls[0]).toMatchObject({ key: "copy", state: "pending" });
   });
 
+  it("invalidates pending actions when their action scope changes", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const firstStates: Array<{ state: string }> = [];
+    const secondStates: Array<{ state: string }> = [];
+    const firstClipboard = vi.fn(() => first.promise);
+    const secondClipboard = vi.fn(() => second.promise);
+    const rendered = mount(localActions({
+      actionScope: "document-a",
+      source: "first source",
+      locale: "en",
+      filename: "first.txt",
+      clipboard: { writeText: firstClipboard },
+      capabilities: { copy: true },
+      onActionState: (value: { state: string }) => firstStates.push(value),
+    }));
+    click(rendered.querySelector("button")!);
+
+    rerender(rendered, localActions({
+      actionScope: "document-b",
+      source: "second source",
+      locale: "en",
+      filename: "second.txt",
+      clipboard: { writeText: secondClipboard },
+      capabilities: { copy: true },
+      onActionState: (value: { state: string }) => secondStates.push(value),
+    }));
+    click(rendered.querySelector("button")!);
+    expect(secondClipboard).toHaveBeenCalledTimes(1);
+
+    first.resolve();
+    await settle();
+    expect(firstStates).toHaveLength(1);
+    expect(firstStates[0]).toMatchObject({ state: "pending" });
+    expect(secondStates).toHaveLength(1);
+    expect(secondStates[0]).toMatchObject({ state: "pending" });
+
+    second.resolve();
+    await settle();
+    expect(secondStates.map((value) => value.state)).toEqual(["pending", "succeeded"]);
+  });
+
   it("releases download Blob URLs after dispatch and dispatch failure", async () => {
     const revoked: string[] = [];
     const success = mount(localActions({
@@ -518,6 +564,37 @@ describe("LocalActions regressions", () => {
     await settle();
     expect(revoked).toEqual(["blob:success", "blob:failure"]);
   });
+
+  it("contains delayed Blob cleanup errors after successful dispatch", async () => {
+    const states: Array<{ state: string }> = [];
+    const errors: ErrorEvent[] = [];
+    const onError = (event: ErrorEvent) => {
+      errors.push(event);
+      event.preventDefault();
+    };
+    window.addEventListener("error", onError);
+    try {
+      const rendered = mount(localActions({
+        source: "exact source",
+        locale: "en",
+        filename: "document.txt",
+        download: {
+          createObjectURL: () => "blob:success",
+          revokeObjectURL: () => { throw new Error("revoke failed"); },
+          dispatchDownload: () => undefined,
+        },
+        capabilities: { download: true },
+        onActionState: (value: { state: string }) => states.push(value),
+      }));
+      click(rendered.querySelector("button")!);
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(states.map((value) => value.state)).toEqual(["pending", "succeeded"]);
+      expect(errors).toEqual([]);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+  });
 });
 
 describe("AppSidebar regressions", () => {
@@ -527,9 +604,9 @@ describe("AppSidebar regressions", () => {
         locale="en"
         breadcrumb={["Paste"]}
         headingId="document-heading"
-        destinations={[{ id: "view", label: "View", selected: true }]}
+        destinationGroups={[{ id: "views", label: "Views", destinations: [{ id: "view", label: "View", selected: true }] }]}
         metadata={[{ label: "ID", value: "demo" }]}
-        actions={<button type="button">Copy</button>}
+        actionGroups={[{ id: "actions", label: "Actions", content: <button type="button">Copy</button> }]}
       >
         <h1 id="document-heading">Paste</h1>
       </WorkbenchShell>,
@@ -538,55 +615,107 @@ describe("AppSidebar regressions", () => {
     expect(document.querySelectorAll("[data-slot=collapsible]")).toHaveLength(3);
   });
 
-  it("keeps the desktop rail hit target at 44 CSS pixels without widening the divider", () => {
+  it("centers the 44 px rail and divider on the sidebar edge when expanded and collapsed", async () => {
+    await page.viewport(1024, 768);
     const rendered = mount(
-      <WorkbenchShell locale="en" breadcrumb={["Paste"]} headingId="document-heading" destinations={[]}>
+      <WorkbenchShell locale="en" breadcrumb={["Paste"]} headingId="document-heading" destinationGroups={[]}>
         <h1 id="document-heading">Paste</h1>
       </WorkbenchShell>,
     );
     const rail = rendered.querySelector<HTMLElement>("[data-sidebar=rail]")!;
     const container = rail.closest<HTMLElement>("[data-slot=sidebar-container]")!;
-    container.parentElement!.style.display = "block";
-    container.style.display = "flex";
-    rail.style.display = "flex";
-    rail.style.position = "fixed";
-    rail.style.top = "0";
-    rail.style.left = "0";
-    rail.style.height = "44px";
-    const rect = rail.getBoundingClientRect();
-    expect(rect.width).toBeGreaterThanOrEqual(44);
-    expect(rect.height).toBeGreaterThanOrEqual(44);
-    expect(getComputedStyle(rail, "::after").width).toBe("2px");
+    const divider = getComputedStyle(rail, "::after");
+    const expanded = rail.getBoundingClientRect();
+    const expandedContainer = container.getBoundingClientRect();
+    expect(expanded.width).toBe(44);
+    expect(expanded.left + expanded.width / 2).toBeCloseTo(expandedContainer.right, 1);
+    expect(expanded.left + Number.parseFloat(divider.left)).toBeCloseTo(expandedContainer.right, 1);
+    expect(divider.width).toBe("2px");
+
+    click(rendered.querySelector("[data-sidebar=trigger]")!);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const collapsed = rail.getBoundingClientRect();
+    const collapsedContainer = container.getBoundingClientRect();
+    expect(collapsed.width).toBe(44);
+    expect(collapsed.left + collapsed.width / 2).toBeCloseTo(collapsedContainer.right, 1);
+    expect(collapsed.left + Number.parseFloat(getComputedStyle(rail, "::after").left)).toBeCloseTo(collapsedContainer.right, 1);
   });
 });
 
 describe("OperationStatus regressions", () => {
   it("announces every changed raw record without locale or page-structure pseudo-events", async () => {
     const initial = records();
-    const rendered = mount(<OperationStatus locale="en" ordinary records={initial} />);
+    const rendered = mount(<OperationStatus locale="en" pageIdentity="status-test" ordinary records={initial} />);
     await nextFrame();
 
     const changed = records({
       autosync: { state: "paused-offline", stateChangedAt: "2026-09-13T11:00:00.000Z", checkedAt: null, appliedAt: null },
       network: { state: "offline", changedAt: "2026-09-13T11:00:00.000Z" },
     });
-    rerender(rendered, <OperationStatus locale="en" ordinary records={changed} />);
+    rerender(rendered, <OperationStatus locale="en" pageIdentity="status-test" ordinary records={changed} />);
     await nextFrame();
     const announcement = rendered.querySelector<HTMLElement>("[data-operation-announcement]")!;
     expect(announcement.textContent).toContain("Autosync: Paused offline");
     expect(announcement.textContent).toContain("Network: Offline");
 
-    rerender(rendered, <OperationStatus locale="zh-CN" ordinary records={changed} />);
+    rerender(rendered, <OperationStatus locale="zh-CN" pageIdentity="status-test" ordinary records={changed} />);
     await nextFrame();
     expect(announcement.textContent).toBe("");
 
-    rerender(rendered, <OperationStatus locale="zh-CN" ordinary={false} records={changed} />);
+    rerender(rendered, <OperationStatus locale="zh-CN" pageIdentity="status-test" ordinary={false} records={changed} />);
     await nextFrame();
     expect(announcement.textContent).toBe("");
   });
 
+  it("emits a DOM event for equal-text action attempts", async () => {
+    const rendered = mount(<OperationStatus locale="en" pageIdentity="document" ordinary records={records()} />);
+    await nextFrame();
+    const first = records({
+      lastAction: { state: "pending", key: "copy", attempt: 1, startedAt: "2026-09-13T10:00:00.000Z" },
+    });
+    rerender(rendered, <OperationStatus locale="en" pageIdentity="document" ordinary records={first} />);
+    await nextFrame();
+    const live = rendered.querySelector<HTMLElement>("[data-operation-announcement]")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((entries) => mutations.push(...entries));
+    observer.observe(live, { childList: true, characterData: true, subtree: true });
+
+    const second = records({
+      lastAction: { state: "pending", key: "copy", attempt: 2, startedAt: "2026-09-13T10:00:00.000Z" },
+    });
+    rerender(rendered, <OperationStatus locale="en" pageIdentity="document" ordinary records={second} />);
+    await nextFrame();
+    observer.disconnect();
+    expect(mutations.length).toBeGreaterThan(0);
+  });
+
+  it("does not announce records with identical semantic values in a different property order", async () => {
+    const timestamp = "2026-09-13T10:00:00.000Z";
+    const rendered = mount(<OperationStatus locale="en" pageIdentity="document" ordinary={false} records={records({ network: { state: "online", changedAt: timestamp } })} />);
+    await nextFrame();
+    rerender(rendered, <OperationStatus locale="en" pageIdentity="document" ordinary={false} records={records({ network: { changedAt: timestamp, state: "online" } })} />);
+    await nextFrame();
+    expect(rendered.querySelector("[data-operation-announcement]")?.textContent).toBe("");
+  });
+
+  it("silently replaces page baselines with the same visible record shape", async () => {
+    const first = records({ network: { state: "online", changedAt: "2026-09-13T10:00:00.000Z" } });
+    const second = records({ network: { state: "online", changedAt: "2026-09-13T11:00:00.000Z" } });
+    const nonordinary = mount(<OperationStatus locale="en" pageIdentity="nonordinary-a" ordinary={false} records={first} />);
+    await nextFrame();
+    rerender(nonordinary, <OperationStatus locale="en" pageIdentity="nonordinary-b" ordinary={false} records={second} />);
+    await nextFrame();
+    expect(nonordinary.querySelector("[data-operation-announcement]")?.textContent).toBe("");
+
+    const ordinary = mount(<OperationStatus locale="en" pageIdentity="document-a" ordinary records={first} />);
+    await nextFrame();
+    rerender(ordinary, <OperationStatus locale="en" pageIdentity="document-b" ordinary records={second} />);
+    await nextFrame();
+    expect(ordinary.querySelector("[data-operation-announcement]")?.textContent).toBe("");
+  });
+
   it("uses the visible 13 px status typography in light and dark themes", () => {
-    const rendered = mount(<OperationStatus locale="en" ordinary records={records()} />);
+    const rendered = mount(<OperationStatus locale="en" pageIdentity="status-test" ordinary records={records()} />);
     const list = rendered.querySelector("dl")!;
     for (const theme of ["light", "dark"]) {
       document.documentElement.dataset.theme = theme;

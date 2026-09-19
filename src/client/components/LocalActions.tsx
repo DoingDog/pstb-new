@@ -42,6 +42,7 @@ export interface LocalActionCapabilities {
 }
 
 export interface LocalActionsProps {
+  actionScope: string;
   source: string;
   locale: Locale;
   filename: string;
@@ -49,8 +50,6 @@ export interface LocalActionsProps {
   clipboard?: ClipboardPort;
   download?: DownloadPort;
   navigation?: NavigationPort;
-  representationHref?: string;
-  representationLabel?: string;
   onActionState?(state: LocalActionState): void;
 }
 
@@ -106,6 +105,7 @@ async function copySource(source: string, clipboard: ClipboardPort | undefined):
 }
 
 export function LocalActions({
+  actionScope,
   source,
   locale,
   filename,
@@ -113,8 +113,6 @@ export function LocalActions({
   clipboard,
   download = browserDownload,
   navigation = browserNavigation,
-  representationHref,
-  representationLabel,
   onActionState,
 }: LocalActionsProps) {
   const [outcomes, setOutcomes] = React.useState<Partial<Record<LocalActionKey, LocalActionState>>>({});
@@ -123,10 +121,22 @@ export function LocalActions({
   const latestByKey = React.useRef<Partial<Record<LocalActionKey, number>>>({});
   const latestAttempt = React.useRef(0);
   const pendingKeys = React.useRef<Partial<Record<LocalActionKey, boolean>>>({});
+  const scope = React.useRef(actionScope);
+  const generation = React.useRef(0);
   const callback = React.useRef(onActionState);
   callback.current = onActionState;
   const copy = labels(locale);
-  const html = capabilities.html ?? (representationHref === undefined ? undefined : { href: representationHref, label: representationLabel });
+  const html = capabilities.html;
+
+  React.useLayoutEffect(() => {
+    if (scope.current === actionScope) return;
+    scope.current = actionScope;
+    generation.current += 1;
+    latestAttempt.current = ++nextAttempt.current;
+    latestByKey.current = {};
+    pendingKeys.current = {};
+    setOutcomes({});
+  }, [actionScope]);
 
   React.useEffect(() => {
     mounted.current = true;
@@ -145,6 +155,7 @@ export function LocalActions({
   const run = React.useCallback(async (key: LocalActionKey, operation: () => Promise<void>) => {
     if (pendingKeys.current[key]) return;
     const attempt = ++nextAttempt.current;
+    const actionGeneration = generation.current;
     const startedAt = new Date().toISOString();
     pendingKeys.current[key] = true;
     latestByKey.current[key] = attempt;
@@ -152,11 +163,11 @@ export function LocalActions({
     report({ key, state: "pending", attempt, startedAt }, true);
     try {
       await operation();
-      if (!mounted.current || latestByKey.current[key] !== attempt) return;
+      if (!mounted.current || generation.current !== actionGeneration || latestByKey.current[key] !== attempt) return;
       pendingKeys.current[key] = false;
       report({ key, state: "succeeded", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     } catch {
-      if (!mounted.current || latestByKey.current[key] !== attempt) return;
+      if (!mounted.current || generation.current !== actionGeneration || latestByKey.current[key] !== attempt) return;
       pendingKeys.current[key] = false;
       report({ key, state: "failed", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     }
@@ -174,7 +185,13 @@ export function LocalActions({
       download.dispatchDownload(url, filename);
       dispatched = true;
     } finally {
-      if (dispatched) setTimeout(() => download.revokeObjectURL(url), 0);
+      if (dispatched) setTimeout(() => {
+        try {
+          download.revokeObjectURL(url);
+        } catch {
+          // The successful download has already been dispatched.
+        }
+      }, 0);
       else download.revokeObjectURL(url);
     }
   };

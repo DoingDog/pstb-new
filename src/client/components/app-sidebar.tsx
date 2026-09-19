@@ -42,14 +42,10 @@ export interface SidebarActionGroup {
 }
 
 export interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
-  destinations?: readonly SidebarDestination[];
-  destinationGroups?: readonly SidebarDestinationGroup[];
-  destinationLabel?: string;
+  destinationGroups: readonly SidebarDestinationGroup[];
   metadata?: readonly SidebarMetadata[];
   metadataLabel?: string;
-  actions?: React.ReactNode;
   actionGroups?: readonly SidebarActionGroup[];
-  actionsLabel?: string;
   onDestinationSelect?(destination: SidebarDestination): void;
 }
 
@@ -100,26 +96,18 @@ function SidebarDestinations({ destinations, onDestinationSelect }: {
 }
 
 export function AppSidebar({
-  destinations,
   destinationGroups,
-  destinationLabel,
   metadata,
   metadataLabel,
-  actions,
-  actionGroups,
-  actionsLabel,
+  actionGroups = [],
   onDestinationSelect,
   ...props
 }: AppSidebarProps) {
-  const navigation = destinationGroups ?? (destinations === undefined || destinations.length === 0
-    ? []
-    : [{ id: "destinations", label: destinationLabel ?? "", destinations }]);
-  const actionSections = actionGroups ?? (actions === undefined ? [] : [{ id: "actions", label: actionsLabel ?? "", content: actions }]);
 
   return (
     <Sidebar {...props}>
       <SidebarContent>
-        {navigation.map((group) => (
+        {destinationGroups.map((group) => (
           <SidebarSection key={group.id} label={group.label}>
             <SidebarDestinations destinations={group.destinations} onDestinationSelect={onDestinationSelect} />
           </SidebarSection>
@@ -137,12 +125,12 @@ export function AppSidebar({
           </SidebarSection>
         )}
       </SidebarContent>
-      {actionSections.length > 0 && (
+      {actionGroups.length > 0 && (
         <SidebarFooter>
-          {actionSections.map((group) => <SidebarSection key={group.id} label={group.label}>{group.content}</SidebarSection>)}
+          {actionGroups.map((group) => <SidebarSection key={group.id} label={group.label}>{group.content}</SidebarSection>)}
         </SidebarFooter>
       )}
-      <SidebarRail className="w-11 group-data-[side=left]:-right-[22px] group-data-[side=right]:-left-[22px]" style={{ width: "44px", minHeight: "44px" }} />
+      <SidebarRail className="w-11 group-data-[side=left]:-right-[45px] [[data-side=left][data-collapsible=offcanvas]_&]:-right-[23px] [[data-side=left][data-collapsible=offcanvas]_&]:after:left-1/2 group-data-[side=right]:-left-px [[data-side=right][data-collapsible=offcanvas]_&]:-left-[23px] [[data-side=right][data-collapsible=offcanvas]_&]:after:left-1/2" />
     </Sidebar>
   );
 }
