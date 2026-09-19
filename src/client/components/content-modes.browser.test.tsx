@@ -13,6 +13,7 @@ import { PlaintextEditor } from "./PlaintextEditor";
 import { LocalActions } from "./LocalActions";
 import { useAutosave } from "../hooks/use-autosave";
 import { AutosaveController, type AutosaveControllerApi, type AutosaveSaveRequest } from "../autosave";
+import "../index.css";
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx } from "@milkdown/kit/core";
 
@@ -946,6 +947,31 @@ describe("ordinary direct actions", () => {
     await page.getByRole("tab", { name: "Edit" }).click();
     await page.getByRole("button", { name: "Wrap" }).click();
     expect(host.querySelector("textarea")?.wrap).toBe("soft");
+  });
+
+  it("applies the Wrap action to ordinary Edit and Markdown Source layout", async () => {
+    const source = `${"unbroken".repeat(160)}\n${"multiline".repeat(160)}`;
+    const host = mount(<OrdinaryPastePage {...ordinaryPageProps({ source })} />);
+    host.style.width = "480px";
+
+    await page.getByRole("tab", { name: "Edit" }).click();
+    const edit = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    expect(edit.wrap).toBe("off");
+    expect(getComputedStyle(edit).whiteSpace).toBe("pre");
+    expect(edit.scrollWidth).toBeGreaterThan(edit.clientWidth);
+
+    await page.getByRole("button", { name: "Wrap" }).click();
+    expect(edit.wrap).toBe("soft");
+    expect(getComputedStyle(edit).whiteSpace).toBe("pre-wrap");
+    expect(edit.scrollWidth).toBeLessThanOrEqual(edit.clientWidth);
+    expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth);
+
+    await page.getByRole("tab", { name: "Markdown" }).click();
+    const markdownSource = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    expect(markdownSource.wrap).toBe("soft");
+    expect(getComputedStyle(markdownSource).whiteSpace).toBe("pre-wrap");
+    expect(markdownSource.scrollWidth).toBeLessThanOrEqual(markdownSource.clientWidth);
+    expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth);
   });
 
   it("opens local HTML through a text/html Blob", async () => {
