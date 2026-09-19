@@ -14,7 +14,7 @@ export interface ContentModesProps {
   mode: ContentMode;
   format: "text" | "markdown";
   source: string;
-  acceptedSource?: string;
+  initialSource?: string;
   initialMarkdown: TrustedMarkdownHtml | null;
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
@@ -28,7 +28,7 @@ export function ContentModes({
   mode,
   format,
   source,
-  acceptedSource = source,
+  initialSource = source,
   initialMarkdown,
   wrap,
   autosave,
@@ -45,7 +45,7 @@ export function ContentModes({
     return (
       <MarkdownWorkbench
         source={source}
-        initialSource={acceptedSource}
+        initialSource={initialSource}
         initialMarkdown={initialMarkdown}
         wrap={wrap}
         autosave={autosave}
@@ -56,7 +56,7 @@ export function ContentModes({
       />
     );
   }
-  if (format === "markdown" && initialMarkdown !== null && source === acceptedSource) {
+  if (format === "markdown" && initialMarkdown !== null && source === initialSource) {
     return <SafeMarkdown html={initialMarkdown} />;
   }
   return <pre data-plain-view="true" className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>;

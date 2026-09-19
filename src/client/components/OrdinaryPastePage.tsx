@@ -47,7 +47,6 @@ function OrdinaryPastePageBody({
   pasteIdentity,
   format,
   source,
-  acceptedSource,
   initialMarkdown,
   links,
   password,
@@ -64,12 +63,13 @@ function OrdinaryPastePageBody({
   loadCrepeStyle,
 }: OrdinaryPastePageProps) {
   const copy = labels(locale);
+  const [initialSource] = React.useState(source);
   const [active, setActive] = React.useState<ContentMode | "history" | "settings">("view");
   const [wrap, setWrap] = React.useState(false);
   const contentProps = {
     format,
     source,
-    acceptedSource,
+    initialSource,
     initialMarkdown,
     wrap: wrap ? "soft" as const : "off" as const,
     autosave,

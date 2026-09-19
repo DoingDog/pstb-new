@@ -9,8 +9,98 @@ import type { PasteLinks } from "../../types";
 import { OrdinaryPastePage } from "./OrdinaryPastePage";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
 import { PlaintextEditor } from "./PlaintextEditor";
+import { LocalActions } from "./LocalActions";
 import { useAutosave } from "../hooks/use-autosave";
-import type { AutosaveSaveRequest } from "../autosave";
+import { AutosaveController, type AutosaveControllerApi, type AutosaveSaveRequest } from "../autosave";
+
+const markdownModes = vi.hoisted(() => {
+  type Options = {
+    autosave: { input(content: string, eventAt: number): void };
+    source: Pick<HTMLTextAreaElement, "value">;
+    onCrepeChange(content: string, eventAt: number): void;
+    onModeChange?(mode: "source" | "visual" | "preview"): void;
+    onPreview?(preview: { source: string; html: string }): void;
+    onVisualError?(error: { message: string; retry(): Promise<void> }): void;
+  };
+  type Deferred = { promise: Promise<void>; resolve(): void; reject(reason?: unknown): void };
+  const instances: Array<{
+    options: Options;
+    enterVisual: ReturnType<typeof vi.fn>;
+    enterPreview: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+    retryVisual: ReturnType<typeof vi.fn>;
+    emitChange(content: string, eventAt?: number): void;
+    emitError(): void;
+  }> = [];
+  let nextVisual: Deferred | null = null;
+  let nextDestroy: Deferred | null = null;
+
+  const createDeferred = (): Deferred => {
+    let resolve!: () => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<void>((nextResolve, nextReject) => {
+      resolve = nextResolve;
+      reject = nextReject;
+    });
+    return { promise, resolve, reject };
+  };
+
+  const create = vi.fn((options: Options) => {
+    const destroyWait = nextDestroy;
+    nextDestroy = null;
+    const retryVisual = vi.fn(async () => undefined);
+    const instance = {
+      options,
+      enterSource: vi.fn(async () => { options.onModeChange?.("source"); }),
+      enterVisual: vi.fn(async () => {
+        const visualWait = nextVisual;
+        nextVisual = null;
+        await visualWait?.promise;
+        options.onModeChange?.("visual");
+      }),
+      enterPreview: vi.fn(async () => {
+        options.onPreview?.({ source: options.source.value, html: "<p>preview</p>" });
+        options.onModeChange?.("preview");
+      }),
+      leaveVisual: vi.fn(async () => { options.onModeChange?.("source"); }),
+      destroy: vi.fn(async () => { await destroyWait?.promise; }),
+      retryVisual,
+      emitChange(content: string, eventAt = 100): void {
+        options.onCrepeChange(content, eventAt);
+        options.autosave.input(content, eventAt);
+      },
+      emitError(): void {
+        options.onVisualError?.({ message: "serialize failed", retry: retryVisual });
+      },
+    };
+    instances.push(instance);
+    return instance;
+  });
+
+  return {
+    instances,
+    create,
+    deferVisual(): Deferred {
+      nextVisual = createDeferred();
+      return nextVisual;
+    },
+    deferDestroy(): Deferred {
+      nextDestroy = createDeferred();
+      return nextDestroy;
+    },
+    reset(): void {
+      instances.splice(0);
+      create.mockClear();
+      nextVisual = null;
+      nextDestroy = null;
+    },
+  };
+});
+
+vi.mock("../autosave", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../autosave")>();
+  return { ...original, createAutosaveMarkdownModes: markdownModes.create };
+});
 
 const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
 
@@ -88,6 +178,7 @@ afterEach(() => {
     entry.host.remove();
   }
   document.body.replaceChildren();
+  markdownModes.reset();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -119,6 +210,31 @@ describe("default content mode", () => {
 
     const second = mount(<OrdinaryPastePage {...ordinaryPageProps({ format: "markdown", initialMarkdown: trustedHtml("<p>exact</p>") })} />);
     expect(second.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("View");
+  });
+
+  it("uses initial trusted Markdown only for the immutable initial source", () => {
+    const first = ordinaryPageProps({
+      format: "markdown",
+      source: "# initial",
+      acceptedSource: "# initial",
+      autosaveAcceptedSource: "# initial",
+      lastSavedContent: "# initial",
+      initialMarkdown: trustedHtml("<h1>initial</h1>"),
+    });
+    const host = mount(<OrdinaryPastePage {...first} />);
+    expect(host.querySelector("h1")?.textContent).toBe("initial");
+
+    rerender(host, <OrdinaryPastePage {...ordinaryPageProps({
+      format: "markdown",
+      source: "# accepted later",
+      acceptedSource: "# accepted later",
+      autosaveAcceptedSource: "# accepted later",
+      lastSavedContent: "# accepted later",
+      initialMarkdown: trustedHtml("<h1>initial</h1>"),
+    })} />);
+
+    expect(host.querySelector("h1")).toBeNull();
+    expect(host.querySelector("pre")?.textContent).toBe("# accepted later");
   });
 });
 
@@ -163,18 +279,76 @@ describe("plaintext autosave", () => {
     expect(textarea.wrap).toBe("off");
   });
 
+  it("preserves exact CR, CRLF, and mixed-newline input and composition events", () => {
+    const events: Array<{ type: string; content: string }> = [];
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<PlaintextEditor value="first" wrap="off" autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    const textarea = host.querySelector("textarea")!;
+    let rawValue = "first";
+    Object.defineProperty(textarea, "value", {
+      configurable: true,
+      get: () => rawValue,
+      set: (value: string) => { rawValue = value; },
+    });
+
+    rawValue = "a\rb\r\nc";
+    flushSync(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
+    rawValue = "a\rb\r\nc";
+    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+    rawValue = "中\r\n文\r字";
+    flushSync(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
+    rawValue = "中\r\n文\r字";
+    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+
+    expect(events.map(({ type, content }) => [type, content])).toEqual([
+      ["input", "a\rb\r\nc"],
+      ["composition-start", "a\rb\r\nc"],
+      ["composition-input", "中\r\n文\r字"],
+      ["composition-end", "中\r\n文\r字"],
+    ]);
+    expect(autosave.input).toHaveBeenLastCalledWith("中\r\n文\r字", expect.any(Number));
+    expect(autosave.compositionEnd).toHaveBeenLastCalledWith("中\r\n文\r字", expect.any(Number));
+  });
+
+  it("waits exactly 1,000 ms after ordinary and composition input", () => {
+    vi.useFakeTimers();
+    const requests: AutosaveSaveRequest[] = [];
+    let ordinaryController: AutosaveControllerApi | null = null;
+    const ordinary = mount(<AutosaveHarness identity="ordinary-debounce" requests={requests} onController={(controller) => { ordinaryController = controller; }} />);
+    ordinaryController!.input("ordinary", performance.now());
+    vi.advanceTimersByTime(999);
+    expect(requests).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(requests).toEqual([{ action: "autosave", content: "ordinary", version: "g.1" }]);
+    unmount(ordinary);
+
+    let composedController: AutosaveControllerApi | null = null;
+    mount(<AutosaveHarness identity="composition-debounce" requests={requests} onController={(controller) => { composedController = controller; }} />);
+    composedController!.compositionStart();
+    composedController!.compositionEnd("composed input", performance.now());
+    vi.advanceTimersByTime(999);
+    expect(requests).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(requests).toEqual([
+      { action: "autosave", content: "ordinary", version: "g.1" },
+      { action: "autosave", content: "composed input", version: "g.1" },
+    ]);
+  });
+
   it("uses one controller for a paste identity, schedules once, and disposes before a remount", () => {
     vi.useFakeTimers();
     const requests: AutosaveSaveRequest[] = [];
-    const first = mount(<AutosaveHarness identity="demo" requests={requests} />);
-    input(first.querySelector("textarea")!, "second");
+    let firstController: AutosaveControllerApi | null = null;
+    const first = mount(<AutosaveHarness identity="demo" requests={requests} onController={(controller) => { firstController = controller; }} />);
+    firstController!.input("second", performance.now());
     vi.advanceTimersByTime(999);
     expect(requests).toEqual([]);    unmount(first);
     vi.advanceTimersByTime(1_000);
     expect(requests).toEqual([]);
 
-    const second = mount(<AutosaveHarness identity="demo" requests={requests} />);
-    input(second.querySelector("textarea")!, "third");
+    let secondController: AutosaveControllerApi | null = null;
+    mount(<AutosaveHarness identity="demo" requests={requests} onController={(controller) => { secondController = controller; }} />);
+    secondController!.input("third", performance.now());
     vi.advanceTimersByTime(1_000);
     expect(requests).toEqual([{ action: "autosave", content: "third", version: "g.1" }]);
   });
@@ -201,9 +375,271 @@ describe("useAutosave authoritative state", () => {
 
     expect(host.querySelector("output")?.textContent).toBe("local draft");
   });
+
+  it("replaces a local draft when the authoritative source and version change", async () => {
+    const host = mount(<MetadataAutosaveHarness source="first" version="g.1" />);
+    await page.getByRole("button", { name: "Edit draft" }).click();
+    expect(host.querySelector("output")?.textContent).toBe("local draft");
+
+    rerender(host, <MetadataAutosaveHarness source="server replacement" version="g.2" />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(host.querySelector("output")?.textContent).toBe("server replacement");
+  });
+
+  it("keeps the committed controller live through StrictMode effect replay", async () => {
+    vi.useFakeTimers();
+    const requests: AutosaveSaveRequest[] = [];
+    let controller: AutosaveControllerApi | null = null;
+    mount(<React.StrictMode><AutosaveHarness identity="strict" requests={requests} onController={(next) => { controller = next; }} /></React.StrictMode>);
+
+    expect(controller).not.toBeNull();
+    controller!.input("after replay", performance.now());
+    vi.advanceTimersByTime(1_000);
+
+    expect(requests).toEqual([{ action: "autosave", content: "after replay", version: "g.1" }]);
+  });
+
+  it("does not dispose the committed controller from an abandoned identity render", async () => {
+    const dispose = vi.spyOn(AutosaveController.prototype, "dispose");
+    const blocked = new Promise<void>(() => undefined);
+    const host = mount(<React.Suspense fallback={<output>loading</output>}><SuspendingAutosaveHarness identity="first" blocked={null} /></React.Suspense>);
+    const entry = mounted.find((value) => value.host === host)!;
+
+    React.startTransition(() => entry.root.render(<React.Suspense fallback={<output>loading</output>}><SuspendingAutosaveHarness identity="second" blocked={blocked} /></React.Suspense>));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(host.querySelector("output")?.textContent).toBe("first");
+    expect(dispose).not.toHaveBeenCalled();
+  });
 });
 
 describe("Markdown lifecycle", () => {
+  it("keeps the later Preview request selected when a delayed Visual style load completes", async () => {
+    let resolveStyle!: (value: unknown) => void;
+    const style = new Promise<unknown>((resolve) => { resolveStyle = resolve; });
+    const host = mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={() => style}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await page.getByRole("tab", { name: "Preview" }).click();
+    resolveStyle({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(Array.from(host.querySelectorAll('[role="tab"]')).find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent).toBe("Preview");
+  });
+
+  it("does not create an editor after an unmounted style request resolves", async () => {
+    let resolveStyle!: (value: unknown) => void;
+    const style = new Promise<unknown>((resolve) => { resolveStyle = resolve; });
+    const host = mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={() => style}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    const controller = markdownModes.instances[0]!;
+    unmount(host);
+    resolveStyle({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.enterVisual).not.toHaveBeenCalled();
+  });
+
+  it("does not save when tabs change without a document transaction", async () => {
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={autosave}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={async () => undefined}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await page.getByRole("tab", { name: "Source" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await page.getByRole("tab", { name: "Preview" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(host.querySelector("p")?.textContent).toBe("preview");
+    expect(autosave.input).not.toHaveBeenCalled();
+  });
+
+  it("waits exactly 1,000 ms after an accepted visual transaction", async () => {
+    const requests: AutosaveSaveRequest[] = [];
+    mount(<VisualAutosaveHarness requests={requests} />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    vi.useFakeTimers();
+    flushSync(() => markdownModes.instances[0]!.emitChange("visual transaction", performance.now()));
+    vi.advanceTimersByTime(999);
+    expect(requests).toEqual([]);
+    vi.advanceTimersByTime(1);
+
+    expect(requests).toEqual([{ action: "autosave", content: "visual transaction", version: "g.1" }]);
+  });
+
+  it("retries current CSS, editor initialization, and serialization failures", async () => {
+    let failStyle = true;
+    const initialization = markdownModes.deferVisual();
+    const host = mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={() => failStyle ? Promise.reject(new Error("css failed")) : Promise.resolve()}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    failStyle = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    initialization.reject(new Error("editor failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    await page.getByRole("button", { name: "Retry" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(markdownModes.instances[0]!.enterVisual).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a current visual serialization failure once", async () => {
+    const host = mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={async () => undefined}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const current = markdownModes.instances[0]!;
+    flushSync(() => current.emitError());
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    await page.getByRole("button", { name: "Retry" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(current.retryVisual).toHaveBeenCalledOnce();
+  });
+
+  it("rejects stale visual serialization after the current visual request fails", async () => {
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: string[] = [];
+    mount(<MarkdownWorkbench
+      source="# source"
+      initialSource="# source"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={autosave}
+      onSourceEvent={(event) => events.push(event.content)}
+      loadCrepeStyle={async () => undefined}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const current = markdownModes.instances[0]!;
+    flushSync(() => current.emitError());
+    current.emitChange("stale serializer", 102);
+
+    expect(events).toEqual([]);
+    expect(autosave.input).not.toHaveBeenCalled();
+  });
+
+  it("retires an authoritative source owner and rejects its later transactions", async () => {
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: string[] = [];
+    const props = (source: string) => <MarkdownWorkbench
+      source={source}
+      initialSource="first"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={autosave}
+      onSourceEvent={(event) => events.push(event.content)}
+      loadCrepeStyle={async () => undefined}
+    />;
+    const host = mount(props("first"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(markdownModes.instances).toHaveLength(1);
+    const original = markdownModes.instances[0]!;
+    expect(original.enterVisual).toHaveBeenCalledOnce();
+    expect(Array.from(host.querySelectorAll('[role="tab"]')).find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent).toBe("Visual");
+
+    original.emitChange("local", 101);
+    rerender(host, props("local"));
+    await Promise.resolve();
+    expect(original.destroy).not.toHaveBeenCalled();
+
+    rerender(host, props("server replacement"));
+    await Promise.resolve();
+    expect(original.destroy).toHaveBeenCalledOnce();
+    expect(markdownModes.instances).toHaveLength(2);
+
+    original.emitChange("stale serializer", 102);
+    original.emitError();
+    expect(events).toEqual(["local"]);
+    expect(autosave.input).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("contains retired destroy failures without letting the retired owner publish", async () => {
+    const teardown = markdownModes.deferDestroy();
+    const events: string[] = [];
+    const props = (source: string) => <MarkdownWorkbench
+      source={source}
+      initialSource="first"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={(event) => events.push(event.content)}
+      loadCrepeStyle={async () => undefined}
+    />;
+    const host = mount(props("first"));
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const retired = markdownModes.instances[0]!;
+
+    rerender(host, props("server"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(retired.destroy).toHaveBeenCalledOnce();
+    teardown.reject(new Error("destroy failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    retired.emitChange("retired", 103);
+
+    expect(events).toEqual([]);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(markdownModes.instances).toHaveLength(2);
+  });
+
   it("keeps source mode available while visual and preview own separate mode surfaces", async () => {
     const host = mount(<MarkdownWorkbench
       source={"# exact\r\n"}
@@ -222,26 +658,74 @@ describe("Markdown lifecycle", () => {
 });
 
 describe("ordinary direct actions", () => {
-  it("regenerates credential-bearing anchors without settling direct HTML navigation", () => {
+  it("copies source, downloads the exact binary Blob, and toggles editor wrapping", async () => {
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:download");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const host = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
+
+    await page.getByRole("button", { name: "Copy" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(copy).toHaveBeenCalledWith("exact\r\nsource");
+
+    await page.getByRole("button", { name: "Download" }).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    const blob = createObjectURL.mock.calls[0]![0] as Blob;
+    expect(blob.type).toBe("application/octet-stream");
+    expect(new TextDecoder().decode(await blob.arrayBuffer())).toBe("exact\r\nsource");
+    expect(click).toHaveBeenCalledOnce();
+
+    await page.getByRole("tab", { name: "Edit" }).click();
+    await page.getByRole("button", { name: "Wrap" }).click();
+    expect(host.querySelector("textarea")?.wrap).toBe("soft");
+  });
+
+  it("opens local HTML through a text/html Blob", async () => {
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:html");
+    const navigation = { assign: vi.fn() };
+    const host = mount(<LocalActions
+      actionScope="html"
+      source="<main>exact</main>"
+      locale="en"
+      filename="exact.html"
+      capabilities={{ html: "blob" }}
+      download={{ createObjectURL, revokeObjectURL: vi.fn(), dispatchDownload: vi.fn() }}
+      navigation={navigation}
+    />);
+
+    flushSync(() => host.querySelector<HTMLButtonElement>("button")!.click());
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    const blob = createObjectURL.mock.calls[0]![0] as Blob;
+    expect(blob.type).toBe("text/html");
+    expect(await blob.text()).toBe("<main>exact</main>");
+    expect(navigation.assign).toHaveBeenCalledWith("blob:html");
+  });
+
+  it("regenerates every credential-bearing representation href without settling direct navigation", () => {
     const states: string[] = [];
     const host = mount(<OrdinaryPastePage {...ordinaryPageProps({
       password: " +%&#? ",
       onActionState: (state) => states.push(state.state),
     })} />);
-    const html = Array.from(host.querySelectorAll<HTMLAnchorElement>("a")).find((anchor) => anchor.textContent === "HTML")!;
-    expect(html.href).toContain("password=+%2B%25%26%23%3F+");
-    expect(html.getAttribute("role")).toBeNull();
+    for (const label of ["Raw", "HTML", "Markdown", "File"]) {
+      const anchor = Array.from(host.querySelectorAll<HTMLAnchorElement>("a")).find((value) => value.textContent === label)!;
+      expect(anchor.href).toContain("password=+%2B%25%26%23%3F+");
+      expect(anchor.getAttribute("role")).toBeNull();
+    }
 
     rerender(host, <OrdinaryPastePage {...ordinaryPageProps({
       password: "next",
       onActionState: (state) => states.push(state.state),
     })} />);
-    const replaced = Array.from(host.querySelectorAll<HTMLAnchorElement>("a")).find((anchor) => anchor.textContent === "HTML")!;
-    expect(replaced.href).toContain("password=next");
+    for (const label of ["Raw", "HTML", "Markdown", "File"]) {
+      const anchor = Array.from(host.querySelectorAll<HTMLAnchorElement>("a")).find((value) => value.textContent === label)!;
+      expect(anchor.href).toContain("password=next");
+    }
     expect(states).toEqual([]);
   });
 });
-function AutosaveHarness({ identity, requests }: { identity: string; requests: AutosaveSaveRequest[] }) {
+function AutosaveHarness({ identity, requests, onController }: { identity: string; requests: AutosaveSaveRequest[]; onController?(controller: AutosaveControllerApi): void }) {
   const [source, setSource] = React.useState("first");
   const { controller } = useAutosave({
     pasteIdentity: identity,
@@ -256,7 +740,49 @@ function AutosaveHarness({ identity, requests }: { identity: string; requests: A
     },
     onCoalescedIntent: () => undefined,
   });
+  React.useLayoutEffect(() => { onController?.(controller); }, [controller, onController]);
   return <PlaintextEditor value={source} wrap="off" autosave={controller} onSourceEvent={(event) => setSource(event.content)} />;
+}
+
+function VisualAutosaveHarness({ requests }: { requests: AutosaveSaveRequest[] }) {
+  const [source, setSource] = React.useState("first");
+  const { controller } = useAutosave({
+    pasteIdentity: "visual-debounce",
+    acceptedSource: "first",
+    version: "g.1",
+    now: () => performance.now(),
+    setTimer: (callback, delay) => setTimeout(callback, delay),
+    clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    tryDispatch: (request) => {
+      requests.push(request);
+      return { kind: "started", completion: new Promise(() => {}) };
+    },
+    onCoalescedIntent: () => undefined,
+  });
+  return <MarkdownWorkbench
+    source={source}
+    initialSource="first"
+    initialMarkdown={null}
+    wrap="off"
+    autosave={controller}
+    onSourceEvent={(event) => setSource(event.content)}
+    loadCrepeStyle={async () => undefined}
+  />;
+}
+
+function SuspendingAutosaveHarness({ identity, blocked }: { identity: string; blocked: Promise<void> | null }) {
+  const { snapshot } = useAutosave({
+    pasteIdentity: identity,
+    acceptedSource: "first",
+    version: "g.1",
+    now: () => performance.now(),
+    setTimer: (callback, delay) => setTimeout(callback, delay),
+    clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    tryDispatch: () => ({ kind: "blocked" }),
+    onCoalescedIntent: () => undefined,
+  });
+  if (blocked !== null) throw blocked;
+  return <output>{snapshot.acceptedSource}</output>;
 }
 
 function AutosaveSnapshotHarness({ identity, source, version }: { identity: string; source: string; version: string }) {

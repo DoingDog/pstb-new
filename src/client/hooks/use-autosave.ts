@@ -23,65 +23,114 @@ type ControllerEntry = {
   controller: AutosaveController;
 };
 
-export function useAutosave(options: UseAutosaveOptions): UseAutosaveResult {
-  const latest = React.useRef(options);
-  latest.current = options;
-  const stateListener = React.useRef<(snapshot: AutosaveSnapshot) => void>(() => undefined);
-  const entry = React.useRef<ControllerEntry | null>(null);
-  let changedIdentity = false;
+function initialSnapshot(acceptedSource: string, version: string): AutosaveSnapshot {
+  return {
+    state: "clean",
+    draft: acceptedSource,
+    acceptedSource,
+    lastSavedContent: acceptedSource,
+    version,
+    lastInputAt: null,
+    dueAt: null,
+    inFlightContent: null,
+    dirtyWhileSaving: false,
+    failureStatus: null,
+    requiresExplicitRetry: false,
+    coalescedIntent: false,
+  };
+}
 
-  if (entry.current === null || entry.current.identity !== options.pasteIdentity) {
-    entry.current?.controller.dispose();
-    const controller = new AutosaveController({
-      content: options.acceptedSource,
-      version: options.version,
-      now: () => latest.current.now(),
-      setTimer: (callback, delay) => latest.current.setTimer(callback, delay),
-      clearTimer: (timer) => latest.current.clearTimer(timer),
-      tryDispatch: (request) => latest.current.tryDispatch(request),
-      onCoalescedIntent: () => latest.current.onCoalescedIntent(),
-      getPassword: () => latest.current.getPassword?.() ?? null,
-      onStateChange: (snapshot) => stateListener.current(snapshot),
-    });
-    entry.current = { identity: options.pasteIdentity, controller };
-    changedIdentity = true;
+export function useAutosave(options: UseAutosaveOptions): UseAutosaveResult {
+  const entry = React.useRef<ControllerEntry | null>(null);
+  const committedOptions = React.useRef(options);
+  const latestSnapshot = React.useRef(initialSnapshot(options.acceptedSource, options.version));
+  const appliedProps = React.useRef<{ identity: string; acceptedSource: string; version: string } | null>(null);
+  const [snapshot, setSnapshot] = React.useState<AutosaveSnapshot>(() => latestSnapshot.current);
+  const publicController = React.useRef<AutosaveControllerApi | null>(null);
+
+  if (publicController.current === null) {
+    publicController.current = {
+      snapshot: () => entry.current?.controller.snapshot() ?? latestSnapshot.current,
+      input: (content, eventAt) => entry.current?.controller.input(content, eventAt),
+      compositionStart: () => entry.current?.controller.compositionStart(),
+      compositionEnd: (content, eventAt) => entry.current?.controller.compositionEnd(content, eventAt),
+      retry: () => entry.current?.controller.retry(),
+      overwrite: () => entry.current?.controller.overwrite(),
+      applyAuthoritative: (transition) => entry.current?.controller.applyAuthoritative(transition),
+      slotAvailable: () => entry.current?.controller.slotAvailable(),
+      dispose: () => entry.current?.controller.dispose(),
+    };
   }
 
-  const controller = entry.current.controller;
-  const [snapshot, setSnapshot] = React.useState<AutosaveSnapshot>(() => controller.snapshot());
-  const propState = React.useRef({ controller, acceptedSource: options.acceptedSource, version: options.version });
+  React.useLayoutEffect(() => {
+    committedOptions.current = options;
+  });
 
-  stateListener.current = (next) => {
-    setSnapshot(next);
-    latest.current.onStateChange?.(next);
-  };
+  React.useLayoutEffect(() => {
+    let controller: AutosaveController | null = null;
+    const stateChanged = (next: AutosaveSnapshot): void => {
+      if (entry.current?.controller !== controller) return;
+      latestSnapshot.current = next;
+      setSnapshot(next);
+      committedOptions.current.onStateChange?.(next);
+    };
+    controller = new AutosaveController({
+      content: options.acceptedSource,
+      version: options.version,
+      now: () => committedOptions.current.now(),
+      setTimer: (callback, delay) => committedOptions.current.setTimer(callback, delay),
+      clearTimer: (timer) => committedOptions.current.clearTimer(timer),
+      tryDispatch: (request) => committedOptions.current.tryDispatch(request),
+      onCoalescedIntent: () => committedOptions.current.onCoalescedIntent(),
+      getPassword: () => committedOptions.current.getPassword?.() ?? null,
+      onStateChange: stateChanged,
+    });
+    const owner: ControllerEntry = { identity: options.pasteIdentity, controller };
+    entry.current = owner;
+    latestSnapshot.current = controller.snapshot();
+    setSnapshot(latestSnapshot.current);
 
-  React.useEffect(() => () => controller.dispose(), [controller]);
+    return () => {
+      if (entry.current !== owner) return;
+      entry.current = null;
+      controller.dispose();
+    };
+  }, [options.pasteIdentity]);
 
-  React.useEffect(() => {
-    const previous = propState.current;
+  React.useLayoutEffect(() => {
+    const current = entry.current;
+    const previous = appliedProps.current;
+    appliedProps.current = {
+      identity: options.pasteIdentity,
+      acceptedSource: options.acceptedSource,
+      version: options.version,
+    };
+    if (current === null || current.identity !== options.pasteIdentity || previous === null || previous.identity !== options.pasteIdentity) return;
+
     const sourceChanged = previous.acceptedSource !== options.acceptedSource;
     const versionChanged = previous.version !== options.version;
-    propState.current = { controller, acceptedSource: options.acceptedSource, version: options.version };
-    if (previous.controller !== controller || (!sourceChanged && !versionChanged)) return;
+    if (!sourceChanged && !versionChanged) return;
 
-    const current = controller.snapshot();
-    if (sourceChanged && (current.acceptedSource !== options.acceptedSource || current.version !== options.version)) {
-      controller.applyAuthoritative({
+    const currentSnapshot = current.controller.snapshot();
+    if (sourceChanged && (currentSnapshot.acceptedSource !== options.acceptedSource || currentSnapshot.version !== options.version)) {
+      current.controller.applyAuthoritative({
         kind: "replace",
         acceptedSource: options.acceptedSource,
         version: options.version,
       });
       return;
     }
-    if (versionChanged && current.version !== options.version) {
-      controller.applyAuthoritative({
+    if (versionChanged && currentSnapshot.version !== options.version) {
+      current.controller.applyAuthoritative({
         kind: "metadata",
         acceptedSource: options.acceptedSource,
         version: options.version,
       });
     }
-  }, [controller, options.acceptedSource, options.version]);
+  }, [options.pasteIdentity, options.acceptedSource, options.version]);
 
-  return { controller, snapshot: changedIdentity ? controller.snapshot() : snapshot };
+  const visibleSnapshot = entry.current?.identity === options.pasteIdentity
+    ? snapshot
+    : initialSnapshot(options.acceptedSource, options.version);
+  return { controller: publicController.current, snapshot: visibleSnapshot };
 }
