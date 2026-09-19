@@ -94,13 +94,13 @@ function fallbackCopy(source: string): void {
   }
 }
 
-async function copySource(source: string, clipboard: ClipboardPort | undefined): Promise<void> {
+async function copySource(source: string, clipboard: ClipboardPort | undefined, isCurrent: () => boolean): Promise<void> {
   try {
     const port = clipboard ?? navigator.clipboard;
     if (port === undefined || typeof port.writeText !== "function") throw new Error("clipboard unavailable");
     await port.writeText(source);
   } catch {
-    fallbackCopy(source);
+    if (isCurrent()) fallbackCopy(source);
   }
 }
 
@@ -152,22 +152,23 @@ export function LocalActions({
     if (reportLastAction && latestAttempt.current === state.attempt) callback.current?.(state);
   }, []);
 
-  const run = React.useCallback(async (key: LocalActionKey, operation: () => Promise<void>) => {
+  const run = React.useCallback(async (key: LocalActionKey, operation: (isCurrent: () => boolean) => Promise<void>) => {
     if (pendingKeys.current[key]) return;
     const attempt = ++nextAttempt.current;
     const actionGeneration = generation.current;
     const startedAt = new Date().toISOString();
+    const isCurrent = () => mounted.current && generation.current === actionGeneration && latestByKey.current[key] === attempt;
     pendingKeys.current[key] = true;
     latestByKey.current[key] = attempt;
     latestAttempt.current = attempt;
     report({ key, state: "pending", attempt, startedAt }, true);
     try {
-      await operation();
-      if (!mounted.current || generation.current !== actionGeneration || latestByKey.current[key] !== attempt) return;
+      await operation(isCurrent);
+      if (!isCurrent()) return;
       pendingKeys.current[key] = false;
       report({ key, state: "succeeded", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     } catch {
-      if (!mounted.current || generation.current !== actionGeneration || latestByKey.current[key] !== attempt) return;
+      if (!isCurrent()) return;
       pendingKeys.current[key] = false;
       report({ key, state: "failed", attempt, startedAt, settledAt: new Date().toISOString() }, true);
     }
@@ -200,7 +201,7 @@ export function LocalActions({
     <section aria-label={copy.localActions} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap gap-2">
         {capabilities.copy && (
-          <Button type="button" variant="outline" className="min-h-11" aria-disabled={copyPending || undefined} onClick={() => void run("copy", () => copySource(source, clipboard))}>
+          <Button type="button" variant="outline" className="min-h-11" aria-disabled={copyPending || undefined} onClick={() => void run("copy", (isCurrent) => copySource(source, clipboard, isCurrent))}>
             {copyLabel}
           </Button>
         )}

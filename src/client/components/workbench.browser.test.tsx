@@ -531,6 +531,48 @@ describe("LocalActions regressions", () => {
     expect(secondStates.map((value) => value.state)).toEqual(["pending", "succeeded"]);
   });
 
+  it("does not fall back to copying a rejected stale scope", async () => {
+    const first = deferred<void>();
+    const firstStates: Array<{ state: string }> = [];
+    const secondStates: Array<{ state: string }> = [];
+    const copied: string[] = [];
+    const fallback = vi.spyOn(document, "execCommand").mockImplementation(() => {
+      const event = new Event("copy", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { setData: (_type: string, value: string) => copied.push(value) } });
+      document.dispatchEvent(event);
+      return true;
+    });
+    const rendered = mount(localActions({
+      actionScope: "document-a",
+      source: "first source",
+      locale: "en",
+      filename: "first.txt",
+      clipboard: { writeText: () => first.promise },
+      capabilities: { copy: true },
+      onActionState: (value: { state: string }) => firstStates.push(value),
+    }));
+    click(rendered.querySelector("button")!);
+
+    rerender(rendered, localActions({
+      actionScope: "document-b",
+      source: "second source",
+      locale: "en",
+      filename: "second.txt",
+      clipboard: { writeText: async (value: string) => { copied.push(value); } },
+      capabilities: { copy: true },
+      onActionState: (value: { state: string }) => secondStates.push(value),
+    }));
+    click(rendered.querySelector("button")!);
+    await settle();
+    first.reject(new Error("clipboard unavailable"));
+    await settle();
+
+    expect(fallback).not.toHaveBeenCalled();
+    expect(copied).toEqual(["second source"]);
+    expect(secondStates.map((value) => value.state)).toEqual(["pending", "succeeded"]);
+    expect(firstStates.map((value) => value.state)).toEqual(["pending"]);
+  });
+
   it("releases download Blob URLs after dispatch and dispatch failure", async () => {
     const revoked: string[] = [];
     const success = mount(localActions({
