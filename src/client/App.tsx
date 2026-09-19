@@ -1,15 +1,41 @@
 // Derived from shadcn-ui/ui new-york-v4/sidebar-11 at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.
 import * as React from "react";
 import { errorMessage, formatDate, labels, resolveBrowserLocale, type Locale } from "../i18n";
-import type { InitialPage } from "./bootstrap";
-import type { OperationRecords } from "./contracts";
+import { createPasteApi } from "./api";
+import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
+import type { AppBootstrap, OperationRecords } from "./contracts";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
 import { OperationStatus } from "./components/OperationStatus";
 import { WorkbenchShell } from "./components/WorkbenchShell";
 
+const CreatePage = React.lazy(() => import("./pages/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
+const PasswordPage = React.lazy(() => import("./pages/PasswordPage").then(({ PasswordPage }) => ({ default: PasswordPage })));
+const ErrorPage = React.lazy(() => import("./pages/ErrorPage").then(({ ErrorPage }) => ({ default: ErrorPage })));
+const LocalOnlyPastePage = React.lazy(() => import("./pages/LocalOnlyPastePage").then(({ LocalOnlyPastePage }) => ({ default: LocalOnlyPastePage })));
+const MarkdownPage = React.lazy(() => import("./pages/MarkdownPage").then(({ MarkdownPage }) => ({ default: MarkdownPage })));
+const OrdinaryPage = React.lazy(() => import("./pages/OrdinaryPage").then(({ OrdinaryPage }) => ({ default: OrdinaryPage })));
+
 interface AppProps {
   initialPage: InitialPage;
 }
+
+type TerminalPage = {
+  phase: "armed-view-once" | "consumed" | "not-found" | "delete-uncertain";
+  source: string;
+  initialMarkdown: TrustedMarkdownHtml | null;
+};
+
+type SourceInitialPage = {
+  ok: true;
+  bootstrap: Extract<AppBootstrap, { page: "paste" | "markdown" }>;
+  exactSource: string;
+  initialMarkdown: TrustedMarkdownHtml | null;
+  password: string | null;
+};
+
+type OrdinaryInitialPage = SourceInitialPage & {
+  bootstrap: Extract<AppBootstrap, { page: "paste"; consumed: false }>;
+};
 
 function bootstrapLocale(initialPage: InitialPage): Locale {
   return initialPage.ok ? initialPage.bootstrap.locale : initialPage.locale;
@@ -37,18 +63,14 @@ function pageHeading(initialPage: InitialPage, locale: Locale): string {
   }
 }
 
-function PageContent({ initialPage, locale, headingId }: AppProps & { locale: Locale; headingId: string }) {
-  const heading = pageHeading(initialPage, locale);
-  if (!initialPage.ok) {
-    return (
-      <>
-        <h1 id={headingId} tabIndex={-1}>{heading}</h1>
-        <p role="alert">{errorMessage(locale, initialPage.errorCode)}</p>
-      </>
-    );
+function terminalHeading(page: TerminalPage, locale: Locale): string {
+  const copy = labels(locale);
+  switch (page.phase) {
+    case "armed-view-once": return copy.armedViewOnce;
+    case "consumed": return copy.consumed;
+    case "not-found": return copy.notFound;
+    case "delete-uncertain": return copy.deleteUncertain;
   }
-
-  return <h1 id={headingId} tabIndex={-1}>{heading}</h1>;
 }
 
 function initialRecords(): OperationRecords {
@@ -125,8 +147,8 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
   );
 }
 
-function sidebarMetadata(initialPage: InitialPage, locale: Locale) {
-  if (!initialPage.ok) return [];
+function sidebarMetadata(initialPage: InitialPage, locale: Locale, terminal: TerminalPage | null) {
+  if (terminal !== null || !initialPage.ok) return [];
   const copy = labels(locale);
   const { bootstrap } = initialPage;
   if (bootstrap.page === "paste" && !bootstrap.consumed) {
@@ -143,11 +165,13 @@ function sidebarMetadata(initialPage: InitialPage, locale: Locale) {
   return [];
 }
 
-function isOrdinaryPage(initialPage: InitialPage): boolean {
+function isOrdinaryPage(initialPage: InitialPage): initialPage is OrdinaryInitialPage {
   return initialPage.ok && initialPage.bootstrap.page === "paste" && !initialPage.bootstrap.consumed;
 }
 
-function operationStatusPageIdentity(initialPage: InitialPage): string {
+function operationStatusPageIdentity(initialPage: InitialPage, terminal: TerminalPage | null, rootHandoff: boolean): string {
+  if (rootHandoff) return "create";
+  if (terminal !== null) return `local:${terminal.phase}`;
   if (!initialPage.ok) return `error:${initialPage.errorCode}`;
   const { bootstrap } = initialPage;
   switch (bootstrap.page) {
@@ -163,13 +187,57 @@ function operationStatusPageIdentity(initialPage: InitialPage): string {
   }
 }
 
+function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onTerminal, onRootHandoff }: {
+  initialPage: InitialPage;
+  locale: Locale;
+  create: ReturnType<typeof createPasteApi>["create"] | null;
+  terminal: TerminalPage | null;
+  rootHandoff: boolean;
+  onRecordsChange(records: OperationRecords): void;
+  onTerminal(page: TerminalPage): void;
+  onRootHandoff(): void;
+}) {
+  if (rootHandoff) return create === null ? null : <CreatePage locale={locale} create={create} />;
+  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} />;
+  if (!initialPage.ok) return <ErrorPage locale={locale} status={500} errorCode={initialPage.errorCode} />;
+
+  const { bootstrap } = initialPage;
+  switch (bootstrap.page) {
+    case "create":
+      return create === null ? null : <CreatePage locale={locale} create={create} />;
+    case "password":
+      return <PasswordPage locale={locale} errorCode={bootstrap.errorCode} />;
+    case "error":
+      return <ErrorPage locale={locale} status={bootstrap.status} errorCode={bootstrap.errorCode} />;
+    case "paste": {
+      const sourcePage = initialPage as SourceInitialPage;
+      return bootstrap.consumed
+        ? <LocalOnlyPastePage locale={locale} phase="consumed" source={sourcePage.exactSource} initialMarkdown={sourcePage.initialMarkdown} />
+        : <OrdinaryPage initialPage={sourcePage as OrdinaryInitialPage} locale={locale} onRecordsChange={onRecordsChange} onTerminal={onTerminal} onRootHandoff={onRootHandoff} />;
+    }
+    case "markdown": {
+      const sourcePage = initialPage as SourceInitialPage;
+      return <MarkdownPage locale={locale} title={bootstrap.title} source={sourcePage.exactSource} initialMarkdown={sourcePage.initialMarkdown!} />;
+    }
+    default: {
+      const exhaustive: never = bootstrap;
+      return exhaustive;
+    }
+  }
+}
+
 export function App({ initialPage }: AppProps) {
   const documentLocale = bootstrapLocale(initialPage);
   const [locale, setLocale] = React.useState<Locale>(() => resolveBrowserLocale(navigator.languages, documentLocale));
   const [records, setRecords] = React.useState(initialRecords);
   const [theme, setTheme] = useDocumentTheme();
+  const [terminal, setTerminal] = React.useState<TerminalPage | null>(null);
+  const [rootHandoff, setRootHandoff] = React.useState(false);
+  const ordinary = terminal === null && !rootHandoff && isOrdinaryPage(initialPage);
+  const needsCreateApi = rootHandoff || (terminal === null && initialPage.ok && initialPage.bootstrap.page === "create");
+  const create = React.useMemo(() => needsCreateApi ? createPasteApi({ fetch: globalThis.fetch, crypto: globalThis.crypto }).create : null, [needsCreateApi]);
   const headingId = "workbench-heading";
-  const heading = pageHeading(initialPage, locale);
+  const heading = rootHandoff ? labels(locale).create : terminal === null ? pageHeading(initialPage, locale) : terminalHeading(terminal, locale);
   const copy = labels(locale);
 
   React.useLayoutEffect(() => {
@@ -179,6 +247,7 @@ export function App({ initialPage }: AppProps) {
   }, [copy.brand, heading, locale]);
 
   React.useEffect(() => {
+    if (ordinary) return;
     const updateNetwork = (state: "online" | "offline") => {
       setRecords((current) => current.network.state === state ? current : {
         ...current,
@@ -193,7 +262,7 @@ export function App({ initialPage }: AppProps) {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
     };
-  }, []);
+  }, [ordinary]);
 
   return (
     <WorkbenchShell
@@ -201,7 +270,7 @@ export function App({ initialPage }: AppProps) {
       breadcrumb={[copy.paste, heading]}
       headingId={headingId}
       destinationGroups={[{ id: "paste-views", label: copy.pasteViews, destinations: [{ id: "current-document", label: heading, selected: true, headingId }] }]}
-      metadata={sidebarMetadata(initialPage, locale)}
+      metadata={sidebarMetadata(initialPage, locale, terminal)}
       headerActions={
         <DocumentControls
           locale={locale}
@@ -211,8 +280,20 @@ export function App({ initialPage }: AppProps) {
         />
       }
     >
-      <PageContent initialPage={initialPage} locale={locale} headingId={headingId} />
-      <OperationStatus locale={locale} pageIdentity={operationStatusPageIdentity(initialPage)} records={records} ordinary={isOrdinaryPage(initialPage)} />
+      <h1 id={headingId} tabIndex={-1}>{heading}</h1>
+      <React.Suspense fallback={<p role="status">{heading}</p>}>
+        <Route
+          initialPage={initialPage}
+          locale={locale}
+          create={create}
+          terminal={terminal}
+          rootHandoff={rootHandoff}
+          onRecordsChange={setRecords}
+          onTerminal={setTerminal}
+          onRootHandoff={() => setRootHandoff(true)}
+        />
+      </React.Suspense>
+      <OperationStatus locale={locale} pageIdentity={operationStatusPageIdentity(initialPage, terminal, rootHandoff)} records={records} ordinary={ordinary} />
     </WorkbenchShell>
   );
 }
