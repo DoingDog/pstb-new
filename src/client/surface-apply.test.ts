@@ -42,7 +42,7 @@ function capture(overrides: Partial<DerivedSurfaceCapture> = {}): DerivedSurface
   };
 }
 
-function surfaceFixture(initial = capture()) {
+function surfaceFixture(initial = capture(), now = () => Date.now()) {
   const previews: Deferred<unknown>[] = [];
   const visuals: Deferred<unknown>[] = [];
   const diffs: Deferred<unknown>[] = [];
@@ -72,7 +72,7 @@ function surfaceFixture(initial = capture()) {
     visuals,
     diffs,
     ports,
-    apply: createStagedSurfaceApply({ ports, capture: initial }),
+    apply: createStagedSurfaceApply({ ports, capture: initial, now }),
   };
 }
 
@@ -184,6 +184,7 @@ describe("source-specific entry guards", () => {
       acceptedBaselineCurrent: true,
       localGenerationCurrent: true,
       active: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
       composing: false,
       autosaveTimer: false,
       autosaveInFlight: false,
@@ -197,6 +198,7 @@ describe("source-specific entry guards", () => {
       acceptedBaselineCurrent: true,
       localGenerationCurrent: true,
       active: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
       composing: false,
       autosaveTimer: false,
       autosaveInFlight: false,
@@ -281,8 +283,8 @@ describe("StagedSurfaceApply round-one regressions", () => {
     await resolveStages(fixture);
 
     await expect(attempt).resolves.toBe(false);
-    expect(fixture.ports.restoreOld).toHaveBeenCalledWith(1, "one");
-    expect(fixture.ports.showOldGenerationFailure).toHaveBeenCalledWith(1, "one");
+    expect(fixture.ports.restoreOld).toHaveBeenCalledWith(1, "one", 2);
+    expect(fixture.ports.showOldGenerationFailure).toHaveBeenCalledWith(1, "one", 2);
   });
 
   it("keeps a mounted fallback visible until a guarded retry publishes", async () => {
@@ -354,5 +356,139 @@ describe("StagedSurfaceApply round-one regressions", () => {
     expect(fixture.apply.settleTerminal({ actionKey: "reload-server", actionAttempt: 1, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBe("reload-terminal-response-displayed");
     expect(fixture.apply.settleTerminal({ actionKey: "reload-server", actionAttempt: 1, startedAt: "2026-09-15T00:00:00.000Z" }, "displayed")).toBeNull();
     expect(typeof (fixture.apply as unknown as { settleUseConsumedResponse?: unknown }).settleUseConsumedResponse).toBe("function");
+  });
+});
+
+describe("StagedSurfaceApply round-two coordination regressions", () => {
+  it("cancels an autosync apply that reaches its exclusive deadline while staging", async () => {
+    let time = 99;
+    const fixture = surfaceFixture(capture(), () => time);
+    const attempt = fixture.apply.applyAutosync("two", {
+      requestCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      active: true,
+      activeUntil: 100,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      localSourceWork: false,
+    });
+    time = 100;
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(false);
+    expect(fixture.ports.commit).not.toHaveBeenCalled();
+    expect(fixture.apply.snapshot()).toMatchObject({ capture: capture(), source: "one", status: "idle", fallback: null });
+  });
+
+  it("retains the committed capture and presentation after a restored commit failure", async () => {
+    const fixture = surfaceFixture();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      throw new Error("commit failed");
+    });
+    const attempt = fixture.apply.apply("two");
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(false);
+    expect(fixture.ports.restoreOld).toHaveBeenCalledWith(1, "one", 2);
+    expect(fixture.apply.snapshot()).toMatchObject({ capture: capture(), source: "one", status: "idle", fallback: null });
+  });
+
+  it("does not publish an older restoration failure after a newer parent commit", async () => {
+    const fixture = surfaceFixture();
+    const restoration = deferred<boolean>();
+    let commits = 0;
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      commits += 1;
+      if (commits === 1) throw new Error("first commit failed");
+    });
+    vi.mocked(fixture.ports.restoreOld).mockReturnValue(restoration.promise);
+    const first = fixture.apply.apply("two");
+    await resolveStages(fixture, 0);
+    expect(fixture.ports.restoreOld).toHaveBeenCalledWith(1, "one", 2);
+
+    const second = fixture.apply.apply("three");
+    await resolveStages(fixture, 1);
+    await expect(second).resolves.toBe(true);
+    expect(fixture.ports.commit).toHaveBeenLastCalledWith(expect.any(Object), 3);
+
+    restoration.resolve(false);
+    await expect(first).resolves.toBe(false);
+    expect(fixture.ports.showOldGenerationFailure).not.toHaveBeenCalled();
+  });
+
+  it("disposes every staged surface after a commit failure when one disposal throws", async () => {
+    const fixture = surfaceFixture();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      throw new Error("commit failed");
+    });
+    vi.mocked(fixture.ports.disposeAttemptResources).mockImplementation((attempt) => {
+      const staged = (attempt as { staged: Record<string, unknown> }).staged;
+      if ("preview" in staged) throw new Error("preview dispose failed");
+    });
+    const attempt = fixture.apply.apply("two");
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(false);
+    expect(fixture.ports.disposeAttemptResources).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(fixture.ports.disposeAttemptResources).mock.calls.map(([value]) => Object.keys((value as { staged: Record<string, unknown> }).staged))).toEqual([["preview"], ["visual"], ["diff"]]);
+  });
+
+  it("keeps fallback identity during a rejected retry and advances only that retry token", async () => {
+    const fixture = surfaceFixture();
+    const initial = fixture.apply.apply("two");
+    fixture.previews[0]!.reject(new Error("preview failed"));
+    fixture.visuals[0]!.resolve("visual");
+    fixture.diffs[0]!.resolve("diff");
+    await settle();
+    await expect(initial).resolves.toBe(true);
+    const committedFallback = fixture.apply.snapshot();
+
+    const rejected = fixture.apply.retryPreview("two");
+    expect(fixture.apply.snapshot()).toEqual(committedFallback);
+    fixture.previews[1]!.reject(new Error("preview retry failed"));
+    await settle();
+    await expect(rejected).resolves.toBe(false);
+    expect(fixture.apply.snapshot()).toEqual(committedFallback);
+    expect(fixture.ports.commit).toHaveBeenCalledTimes(1);
+
+    fixture.apply.invalidate();
+    fixture.apply.remount();
+    const accepted = fixture.apply.retryPreview("two");
+    fixture.previews[2]!.resolve("preview retry");
+    await settle();
+    await expect(accepted).resolves.toBe(true);
+    expect(fixture.apply.snapshot()).toMatchObject({
+      source: "two",
+      capture: {
+        currentDisplayGeneration: 2,
+        hostGeneration: 2,
+        parentApplyGeneration: 3,
+        parentApplyToken: 4,
+        derivedRetryToken: 4,
+      },
+    });
+  });
+
+  it("settles use-consumed-response per committed terminal-local parent attempt", async () => {
+    const fixture = surfaceFixture();
+    const entry = { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true };
+    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
+
+    const first = fixture.apply.applyTerminalLocal("two", entry);
+    await resolveStages(fixture, 0);
+    await expect(first).resolves.toBe(true);
+    expect(fixture.apply.settleUseConsumedResponse("display-failed")).toBe("use-consumed-response-display-failed");
+    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
+
+    const second = fixture.apply.applyTerminalLocal("three", entry);
+    await resolveStages(fixture, 1);
+    await expect(second).resolves.toBe(true);
+    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBe("use-consumed-response-displayed");
+    expect(fixture.apply.settleUseConsumedResponse("displayed")).toBeNull();
   });
 });

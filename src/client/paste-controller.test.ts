@@ -3,7 +3,9 @@ import type { MutationResult, PasteSummary } from "../types";
 import {
   createPasteController,
   type ContentReconcileResult,
+  type MetadataReconcileResult,
   type PasteController,
+  type ReconcileReadFailure,
   type PasteControllerSnapshot,
 } from "./paste-controller";
 
@@ -514,7 +516,11 @@ function reconcileSnapshot(source: string, overrides: Partial<PasteSummary> = {}
   return { kind: "snapshot", snapshot: remoteSnapshot(source, overrides) };
 }
 
-function reconcileFailure(kind: "forbidden" | "not-found" | "unavailable" | "network" | "malformed" | "not-modified"): ContentReconcileResult {
+function metadataSummary(overrides: Partial<PasteSummary> = {}): MetadataReconcileResult {
+  return { kind: "summary", summary: summary(overrides) };
+}
+
+function reconcileFailure(kind: "forbidden" | "not-found" | "unavailable" | "network" | "malformed" | "not-modified"): ReconcileReadFailure {
   return { kind };
 }
 
@@ -643,7 +649,7 @@ describe("PasteController round-one regressions", () => {
     const read = controller.startMetadataReconcile(2);
     expect(read).toMatchObject({ kind: "dispatch", type: "reconcile-settings" });
     if (read.kind !== "dispatch" || read.type !== "reconcile-settings") throw new Error("expected settings read");
-    controller.acceptMetadataReconcile(read.requestToken, reconcileSnapshot("one", { version: "g.2", contentRevision: 1 }), 3);
+    controller.acceptMetadataReconcile(read.requestToken, metadataSummary({ version: "g.2", contentRevision: 1 }), 3);
 
     expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "dispatch-relative-expiration-retry", version: "g.2", now: 3 }));
   });
@@ -704,14 +710,115 @@ describe("PasteController round-one regressions", () => {
     absolute.failMutation(permanent.token, { status: 500 }, 1);
     const permanentRead = absolute.startMetadataReconcile(2);
     if (permanentRead.kind !== "dispatch" || permanentRead.type !== "reconcile-settings") throw new Error("expected settings reconcile");
-    absolute.acceptMetadataReconcile(permanentRead.requestToken, reconcileSnapshot("one", { expiration: { kind: "permanent" }, expiresAt: null }), 3);
+    absolute.acceptMetadataReconcile(permanentRead.requestToken, metadataSummary({ expiration: { kind: "permanent" }, expiresAt: null }), 3);
     expect(snapshot(absolute).lastAction).toMatchObject({ state: "succeeded", key: "settings-reconcile" });
 
     const offset = dispatch(absolute, { kind: "settings-expiration", action: "settings-expiration", expiration: "2026-09-15T02:00:00+02:00" });
     absolute.failMutation(offset.token, { status: 500 }, 4);
     const offsetRead = absolute.startMetadataReconcile(5);
     if (offsetRead.kind !== "dispatch" || offsetRead.type !== "reconcile-settings") throw new Error("expected settings reconcile");
-    absolute.acceptMetadataReconcile(offsetRead.requestToken, reconcileSnapshot("one", { expiration: { kind: "absolute" }, expiresAt: "2026-09-15T00:00:00.000Z" }), 6);
+    absolute.acceptMetadataReconcile(offsetRead.requestToken, metadataSummary({ expiration: { kind: "absolute" }, expiresAt: "2026-09-15T00:00:00.000Z" }), 6);
     expect(snapshot(absolute).lastAction).toMatchObject({ state: "succeeded", key: "settings-reconcile" });
+  });
+});
+
+describe("PasteController round-two reconciliation regressions", () => {
+  it("arms before releasing a settings read whose requested title did not apply", () => {
+    const { controller } = pasteControllerFixture();
+    const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "local title" });
+    controller.failMutation(title.token, { status: 502 }, 1);
+    const read = controller.startMetadataReconcile(2);
+    if (read.kind !== "dispatch") throw new Error("expected settings read");
+
+    expect(controller.acceptMetadataReconcile(read.requestToken, metadataSummary({ title: "server title", viewOnce: true, version: "g.2", contentRevision: 1 }), 3)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      phase: "armed-view-once",
+      serverCapabilities: false,
+      acceptedSource: "one",
+      summary: expect.objectContaining({ title: "server title", viewOnce: true }),
+      responseEtag: null,
+    });
+    expect(controller.effects().some((effect) => effect.type === "autosave-slot-available" || effect.type === "dispatch-relative-expiration-retry")).toBe(false);
+  });
+
+  it("arms before rewriting a relative expiration from a view-once settings read", () => {
+    const { controller } = pasteControllerFixture();
+    const expiry = dispatch(controller, { kind: "settings-expiration", action: "settings-expiration", expiration: 60 });
+    controller.failMutation(expiry.token, { status: 502 }, 1);
+    const read = controller.startMetadataReconcile(2);
+    if (read.kind !== "dispatch") throw new Error("expected settings read");
+
+    expect(controller.acceptMetadataReconcile(read.requestToken, metadataSummary({ viewOnce: true, version: "g.2", contentRevision: 1 }), 3)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({ phase: "armed-view-once", acceptedSource: "one", summary: expect.objectContaining({ viewOnce: true }) });
+    expect(controller.effects().some((effect) => effect.type === "autosave-slot-available" || effect.type === "dispatch-relative-expiration-retry")).toBe(false);
+  });
+
+  it("arms before treating a view-once settings read as an authorization probe", () => {
+    const { controller } = pasteControllerFixture();
+    const password = dispatch(controller, { kind: "password-set", action: "password-set", newPassword: "new", authorizationPassword: "old" });
+    controller.failMutation(password.token, { status: 502 }, 1);
+    const intended = controller.startMetadataReconcile(2);
+    if (intended.kind !== "dispatch") throw new Error("expected intended settings read");
+    controller.acceptMetadataReconcile(intended.requestToken, reconcileFailure("forbidden"), 3);
+    const authorization = controller.effects().find((effect) => effect.type === "dispatch-metadata-reconcile");
+    if (authorization === undefined || authorization.type !== "dispatch-metadata-reconcile") throw new Error("expected authorization settings read");
+
+    expect(controller.acceptMetadataReconcile(authorization.requestToken, metadataSummary({ protected: true, viewOnce: true, version: "g.2", contentRevision: 1 }), 4)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({ phase: "armed-view-once", acceptedSource: "one", summary: expect.objectContaining({ viewOnce: true }) });
+    expect(controller.effects().some((effect) => effect.type === "autosave-slot-available" || effect.type === "dispatch-relative-expiration-retry")).toBe(false);
+  });
+
+  it("uses validated settings summaries for relative rewrites and clears resource ETags", () => {
+    const { controller } = pasteControllerFixture();
+    const expiry = dispatch(controller, { kind: "settings-expiration", action: "settings-expiration", expiration: 60 });
+    controller.failMutation(expiry.token, { status: 502 }, 1);
+    const read = controller.startMetadataReconcile(2);
+    if (read.kind !== "dispatch") throw new Error("expected settings read");
+
+    expect(controller.acceptMetadataReconcile(read.requestToken, metadataSummary({ version: "g.2", contentRevision: 1 }), 3)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({ responseEtag: null, summary: expect.objectContaining({ version: "g.2" }) });
+    expect(controller.effects()).toContainEqual(expect.objectContaining({ type: "dispatch-relative-expiration-retry", version: "g.2" }));
+  });
+
+  it.each([
+    [{ status: 503, mutationMayHaveApplied: false }],
+    [{ status: 403 }],
+    [{ status: 409 }],
+    [{ status: 422, mutationMayHaveApplied: false }],
+  ] as const)("retains relative-expiration reconciliation after retry failure %o", (failure) => {
+    const { controller } = pasteControllerFixture();
+    const expiry = dispatch(controller, { kind: "settings-expiration", action: "settings-expiration", expiration: 60 });
+    controller.failMutation(expiry.token, { status: 502 }, 1);
+    const read = controller.startMetadataReconcile(2);
+    if (read.kind !== "dispatch") throw new Error("expected settings read");
+    controller.acceptMetadataReconcile(read.requestToken, metadataSummary({ version: "g.2", contentRevision: 1 }), 3);
+    const rewrite = controller.effects().find((effect) => effect.type === "dispatch-relative-expiration-retry");
+    if (rewrite === undefined || rewrite.type !== "dispatch-relative-expiration-retry") throw new Error("expected relative rewrite");
+
+    expect(controller.failMutation(rewrite.token, failure, 4)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      mutation: { state: "metadata-reconciliation", intent: expect.objectContaining({ kind: "settings-expiration", expiration: 60 }) },
+      reconciliationRequired: true,
+      lastAction: { state: "failed", key: "settings-reconcile" },
+    });
+    expect(controller.startMetadataReconcile(5)).toMatchObject({ kind: "dispatch", type: "reconcile-settings" });
+  });
+
+  it("fails invalidated reconciliation when a terminal entry supplies no origin", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 502 }, 1);
+    const read = controller.startContentReconcile(2);
+    if (read.kind !== "dispatch") throw new Error("expected content read");
+
+    controller.enterTerminal("consumed", 3);
+
+    expect(snapshot(controller)).toMatchObject({ phase: "consumed", terminalOrigin: null, lastAction: { state: "failed", key: "content-reconcile", attempt: read.requestToken } });
+    expect(controller.settleTerminal("content-reconcile-terminal-current-kept", 4)).toBe(false);
   });
 });

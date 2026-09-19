@@ -42,7 +42,7 @@ export type ReconcileReadFailure =
   | { kind: "malformed" }
   | { kind: "not-modified" };
 export type ContentReconcileResult = { kind: "snapshot"; snapshot: RemoteSnapshot } | ReconcileReadFailure;
-export type MetadataReconcileResult = { kind: "snapshot"; snapshot: RemoteSnapshot } | ReconcileReadFailure;
+export type MetadataReconcileResult = { kind: "summary"; summary: PasteSummary } | ReconcileReadFailure;
 export type DeleteResult = MutationFailure & { status: number | null };
 
 export type MutationEffect =
@@ -187,12 +187,9 @@ function sameAcceptedBaseline(left: BaselineCapture, state: InternalState): bool
     && left.acceptedSource === state.acceptedSource;
 }
 
-function sameMetadataMarkers(baseline: BaselineCapture, snapshot: RemoteSnapshot): boolean {
-  const generation = snapshot.identity.kind === "legacy" ? "legacy" : snapshot.identity.generation;
-  return snapshot.source === baseline.acceptedSource
-    && generation === baseline.generation
-    && snapshot.contentRevision === baseline.contentRevision
-    && snapshot.summary.contentRevision === baseline.contentRevision;
+function sameMetadataMarkers(baseline: BaselineCapture, summary: PasteSummary): boolean {
+  return generationOf(summary.version) === baseline.generation
+    && summary.contentRevision === baseline.contentRevision;
 }
 
 function isUncertain(failure: MutationFailure): boolean {
@@ -366,13 +363,17 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   const adoptSnapshotMetadata = (snapshotResult: RemoteSnapshot): void => {
     state = { ...state, summary: snapshotResult.summary, version: snapshotResult.summary.version, versionUsable: true, contentRevision: snapshotResult.contentRevision, updatedAt: snapshotResult.summary.updatedAt, responseEtag: snapshotResult.etag, reconciliationRequired: false };
   };
+  const adoptSettingsMetadata = (summary: PasteSummary): void => {
+    state = { ...state, summary, version: summary.version, versionUsable: true, contentRevision: summary.contentRevision, updatedAt: summary.updatedAt, responseEtag: null, reconciliationRequired: false };
+  };
   const acceptsMetadata = (baseline: BaselineCapture, result: MutationSuccess): boolean => {
     return sameAcceptedBaseline(baseline, state)
       && generationOf(result.paste.version) === baseline.generation
       && result.paste.contentRevision === baseline.contentRevision;
   };
-  const enterArmedViewOnce = (): void => {
+  const enterArmedViewOnce = (at?: number): void => {
     if (state.phase !== "ordinary") return;
+    settleLastAction("succeeded", at);
     nextToken += 1;
     slot = { state: "idle", nextToken };
     clearRequestOwnership();
@@ -466,6 +467,20 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (failure.status === 404) {
       settleLastAction("failed", at);
       enterTerminal("not-found", at);
+      return true;
+    }
+    if (isRelativeExpiration(intent) && intent.action === "settings-reconcile") {
+      if (failure.status === 403) {
+        state = { ...state, autosave: { state: "password-required", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
+        effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
+      } else if (failure.status === 409) {
+        state = { ...state, versionUsable: false, autosave: { state: "conflict", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
+        effects.push({ type: "pause", state: "conflict", failureStatus: 409 });
+      }
+      slot = { state: "metadata-reconciliation", token: current.token, intent, capture: current.capture };
+      clearRequestOwnership();
+      state = { ...state, responseEtag: null, reconciliationRequired: true };
+      settleLastAction("failed", at);
       return true;
     }
     if (failure.status === 409) {
@@ -639,9 +654,9 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     return true;
   };
 
-  const retryRelativeExpiration = (current: Extract<MutationSlot, { state: "metadata-reconciliation" }>, remote: RemoteSnapshot, credential: string | null, at: number | undefined): boolean => {
+  const retryRelativeExpiration = (current: Extract<MutationSlot, { state: "metadata-reconciliation" }>, remote: PasteSummary, credential: string | null, at: number | undefined): boolean => {
     if (current.intent.kind !== "settings-expiration") return false;
-    adoptSnapshotMetadata(remote);
+    adoptSettingsMetadata(remote);
     commitCredential(credential);
     slot = { state: "idle", nextToken };
     metadataRequest = undefined;
@@ -658,10 +673,15 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     const request = metadataRequest;
     const decoded = result;
     metadataRequest = undefined;
-    if (decoded.kind !== "snapshot") return failMetadataRead(decoded, current, request, at);
-    const remote = decoded.snapshot;
+    if (decoded.kind !== "summary") return failMetadataRead(decoded, current, request, at);
+    const remote = decoded.summary;
     if (!sameAcceptedBaseline(current.capture, state) || !sameMetadataMarkers(current.capture, remote)) {
       settleLastAction("failed", at);
+      return true;
+    }
+    if (remote.viewOnce) {
+      adoptSettingsMetadata(remote);
+      enterArmedViewOnce(at);
       return true;
     }
     if (request.probe === "authorization") {
@@ -672,21 +692,20 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       return true;
     }
     if (isRelativeExpiration(current.intent)) return retryRelativeExpiration(current, remote, request.credential, at);
-    if (!targetsMetadata(current.intent, remote.summary)) {
+    if (!targetsMetadata(current.intent, remote)) {
       commitCredential(request.credential);
       state = { ...state, reconciliationRequired: false };
       settleLastAction("failed", at);
       release(false);
       return true;
     }
-    adoptSnapshotMetadata(remote);
+    adoptSettingsMetadata(remote);
     if (current.intent.kind === "password-set") commitCredential(current.intent.newPassword === "" ? null : current.intent.newPassword);
     else if (current.intent.kind === "password-clear") commitCredential(null);
     else commitCredential(request.credential);
     settleLastAction("succeeded", at);
-    effects.push({ type: "apply-authoritative", kind: "metadata", acceptedSource: state.acceptedSource, version: remote.summary.version });
-    if (remote.summary.viewOnce) enterArmedViewOnce();
-    else release(true);
+    effects.push({ type: "apply-authoritative", kind: "metadata", acceptedSource: state.acceptedSource, version: remote.version });
+    release(true);
     return true;
   };
 
@@ -744,9 +763,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
 
   const enterTerminal = (phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void => {
     if (state.phase !== "ordinary") return;
-    const inferredOrigin = origin ?? (state.lastAction.state === "pending" && state.lastAction.key === "content-reconcile"
-      ? { actionKey: "content-reconcile" as const, actionAttempt: state.lastAction.attempt, startedAt: state.lastAction.startedAt }
-      : undefined);
     nextToken += 1;
     slot = { state: "idle", nextToken };
     clearRequestOwnership();
@@ -757,12 +773,12 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       coalescedSource: null,
       responseEtag: null,
       reconciliationRequired: false,
-      terminalOrigin: inferredOrigin ?? null,
+      terminalOrigin: origin ?? null,
       autosave: { state: phase === "not-found" ? "not-found" : state.autosave.state, confirmedAt: state.autosave.confirmedAt, failedAt: phase === "not-found" ? instant(at) : state.autosave.failedAt },
     };
     invalidate("terminal");
     effects.push({ type: "dispose-server-capabilities", phase });
-    if (inferredOrigin === undefined) settleLastAction("failed", at);
+    if (origin === undefined) settleLastAction("failed", at);
   };
 
   const settleTerminal = (outcome: TerminalOutcomeKey, at?: number): boolean => {
