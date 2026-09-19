@@ -674,6 +674,47 @@ describe("management hardening regressions", () => {
     expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry" || button.textContent === "Reconcile")).toBe(false);
   });
 
+  it("keeps settings writes blocked and Reload visible after Discard on an unusable version", async () => {
+    const saveTitle = vi.fn();
+    const saveFormat = vi.fn();
+    const saveExpiration = vi.fn();
+    const saveViewOnce = vi.fn();
+    const reload = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({ versionUsable: false, result: { field: "title", state: "conflict", message: "The paste changed." } })}
+        onActivity={vi.fn()}
+        saveTitle={saveTitle}
+        saveFormat={saveFormat}
+        saveExpiration={saveExpiration}
+        saveViewOnce={saveViewOnce}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={reload}
+        discard={discard}
+      />,
+    );
+
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(discard).toHaveBeenCalledOnce();
+    const saves = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent?.startsWith("Save "));
+    expect(saves).toHaveLength(4);
+    for (const save of saves) {
+      expect(save.disabled).toBe(true);
+      save.disabled = false;
+      click(save);
+      flushSync(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    }
+    expect(saveTitle).not.toHaveBeenCalled();
+    expect(saveFormat).not.toHaveBeenCalled();
+    expect(saveExpiration).not.toHaveBeenCalled();
+    expect(saveViewOnce).not.toHaveBeenCalled();
+
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reload")!);
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
   it("keeps password drafts and exposes Reload only for an unusable conflict", async () => {
     const reload = vi.fn();
     const fixture = await mount(

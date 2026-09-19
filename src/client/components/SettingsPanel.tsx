@@ -113,11 +113,10 @@ function resultMessage(result: SettingsPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-function ResultActions({ result, versionUsable, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; locale: Locale }) {
+function ResultActions({ result, versionUsable, mutationBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; locale: Locale }) {
   const [credential, setCredential] = React.useState("");
   const copy = labels(locale);
-  if (result.state === "idle") return null;
-  const retryDisabled = result.state === "conflict" && !versionUsable;
+  if (result.state === "idle") return !versionUsable ? <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button> : null;
   const recovery = result.state === "credential-required" || result.state === "retryable" || result.state === "conflict";
   const rewriteExpiration = result.state === "reconciliation-required" && result.field === "expiration" && result.reconciliationIntent === "relative";
   const role = result.state === "pending" || result.state === "succeeded" ? "status" : "alert";
@@ -126,9 +125,9 @@ function ResultActions({ result, versionUsable, retry, reconcile, reload, onActi
     <div data-settings-result={result.state} className="flex flex-wrap items-center gap-2">
       <p role={role} className="basis-full">{resultMessage(result, locale)}</p>
       {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp); }} /></label>}
-      {recovery && <Button type="button" disabled={retryDisabled} onClick={() => retry(credential === "" ? null : credential)}>{copy.retry}</Button>}
-      {result.state === "conflict" && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" onClick={reconcile}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
+      {recovery && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; retry(credential === "" ? null : credential); }}>{copy.retry}</Button>}
+      {(!versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
+      {result.state === "reconciliation-required" && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
     </div>
   );
 }
@@ -142,7 +141,7 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
-  const pending = result.state === "pending";
+  const mutationBlocked = result.state === "pending" || !state.versionUsable;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const activity = (event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>) => onActivity(event.timeStamp);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
@@ -170,25 +169,25 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
       <label>{copy.customId}<Input name="id" value={state.accepted.id} readOnly /></label>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); activity(event); }} /></label>
-        <Button type="button" disabled={pending} onClick={() => saveTitle(title.submit())}>{copy.saveTitle}</Button>
+        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveTitle(title.submit()); }}>{copy.saveTitle}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); activity(event); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
-        <Button type="button" disabled={pending} onClick={() => saveFormat(format.submit())}>{copy.saveFormat}</Button>
+        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveFormat(format.submit()); }}>{copy.saveFormat}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); activity(event); }}>
           {!standardExpirations.includes(expiration.value) && <option value={expiration.value}>{expiration.value}</option>}
           <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31536000">{copy.oneYear}</option>
         </select></label>
-        <Button type="button" disabled={pending} onClick={() => saveExpiration(parseExpiration(expiration.submit()))}>{copy.saveExpiration}</Button>
+        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveExpiration(parseExpiration(expiration.submit())); }}>{copy.saveExpiration}</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); activity(event); }} />{copy.viewOnce}</label>
-        <Button type="button" disabled={pending} onClick={() => saveViewOnce(viewOnce.submit())}>{copy.saveViewOnce}</Button>
+        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
       </div>
       <Button type="button" variant="outline" onClick={reset}>{copy.discard}</Button>
-      <ResultActions result={result} versionUsable={state.versionUsable} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
+      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
 }
