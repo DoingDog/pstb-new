@@ -13,7 +13,7 @@ const ACTIVE_WINDOW_MS = 300_000;
 type Etag = `"sha256-${string}"`;
 
 declare const remoteApplyAttemptBrand: unique symbol;
-export type RemoteApplyAttempt = number & { readonly [remoteApplyAttemptBrand]: never };
+export type RemoteApplyAttempt = { readonly [remoteApplyAttemptBrand]: never };
 
 function baselineVersionCounter(baseline: BaselineCapture): number | null {
   if (baseline.generation === "legacy") return null;
@@ -175,7 +175,6 @@ export class PasteSync implements PasteSyncController {
   private candidate: Candidate | null = null;
   private locallyCleanOverride = false;
   private remoteApplyAttempt: RemoteApplyAttempt | null = null;
-  private remoteApplyAttemptCounter = 0;
   private permanentlyStopped = false;
   private terminal = false;
   private state: AutosyncStatus = "inactive";
@@ -520,7 +519,7 @@ export class PasteSync implements PasteSyncController {
       if (order === "definitely-newer") {
         this.candidate = null;
         this.locallyCleanOverride = false;
-        const attempt = ++this.remoteApplyAttemptCounter as RemoteApplyAttempt;
+        const attempt = {} as RemoteApplyAttempt;
         this.remoteApplyAttempt = attempt;
         this.options.emit({ type: "proven-newer", snapshot: result.snapshot, capture: read.capture, attempt, checkedAt: receivedAt });
         this.armTimer();

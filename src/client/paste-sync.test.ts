@@ -507,6 +507,37 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(2);
   });
 
+  it("rejects a remote apply token from another controller's first attempt", async () => {
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+    const fixtureA = syncFixture({ loadAt: 0 });
+    const fixtureB = syncFixture({ loadAt: 0 });
+
+    fixtureA.clock.advance(3_000);
+    fixtureB.clock.advance(3_000);
+    fixtureA.resolve200(0, remote);
+    fixtureB.resolve200(0, remote);
+    await fixtureA.flush();
+    await fixtureB.flush();
+
+    const applyA = fixtureA.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    const applyB = fixtureB.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    if (!applyA || !applyB) throw new Error("missing remote apply");
+    expect(applyA.attempt).not.toBe(applyB.attempt);
+
+    expect(fixtureA.controller.cancelRemoteApply(applyA.attempt, fixtureA.clock.now)).toBe(true);
+    expect(fixtureB.controller.completeRemoteApply(applyA.attempt, fixtureB.clock.now)).toBe(false);
+    expect(fixtureB.controller.completeRemoteApply(applyB.attempt, fixtureB.clock.now)).toBe(true);
+    expect(fixtureB.lastState()).toBe("remote-applied");
+  });
+
   it("does not let a late completion from cancelled A settle B", async () => {
     const fixture = syncFixture({ loadAt: 0 });
     const remote = snapshot({
@@ -531,7 +562,7 @@ describe("PasteSync ordering and recovery", () => {
       (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
     ).at(-1);
     if (!applyB) throw new Error("missing remote apply B");
-    expect(applyB.attempt).toBeGreaterThan(applyA.attempt);
+    expect(applyB.attempt).not.toBe(applyA.attempt);
 
     expect(fixture.controller.completeRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
     expect(fixture.controller.cancelRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
@@ -562,7 +593,7 @@ describe("PasteSync ordering and recovery", () => {
       (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
     ).at(-1);
     if (!applyB) throw new Error("missing remote apply B");
-    expect(applyB.attempt).toBeGreaterThan(applyA.attempt);
+    expect(applyB.attempt).not.toBe(applyA.attempt);
 
     expect(fixture.controller.cancelRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
     expect(fixture.controller.completeRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
