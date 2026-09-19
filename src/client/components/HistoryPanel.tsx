@@ -63,18 +63,17 @@ function Detail({ state, computeDiff, back, mobile, locale }: { state: HistoryPa
 
 export function HistoryPanel({ active, state, openHistory, selectRevision, computeDiff, back, locale = "en" }: HistoryPanelProps) {
   const wasActive = React.useRef(false);
+  const wasMobileActive = React.useRef(false);
   const mobile = useIsMobile();
-  const [mobileDetail, setMobileDetail] = React.useState(() => state.selected !== null || state.snapshotState !== "idle");
-  const wasDetail = React.useRef(state.selected !== null || state.snapshotState !== "idle");
+  const [mobileDetail, setMobileDetail] = React.useState(false);
   React.useEffect(() => {
     if (active && !wasActive.current) openHistory();
     wasActive.current = active;
   }, [active, openHistory]);
   React.useLayoutEffect(() => {
-    const detail = state.selected !== null || state.snapshotState !== "idle";
-    if (detail && !wasDetail.current) setMobileDetail(true);
-    wasDetail.current = detail;
-  }, [state.selected, state.snapshotState]);
+    if (!active || !wasMobileActive.current) setMobileDetail(false);
+    wasMobileActive.current = active;
+  }, [active]);
   if (!active) return null;
 
   const copy = labels(locale);

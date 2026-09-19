@@ -7,6 +7,10 @@ import { Input } from "@/components/ui/input";
 export type SettingsField = "title" | "format" | "expiration" | "viewOnce";
 export type ManagementResultState = "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required";
 export type ReconciliationIntent = "permanent" | "relative" | "absolute";
+export type SettingsResult =
+  | { field: "expiration"; state: "reconciliation-required"; message: string | null; reconciliationIntent: ReconciliationIntent }
+  | { field: Exclude<SettingsField, "expiration"> | null; state: "reconciliation-required"; message: string | null; reconciliationIntent?: never }
+  | { field: SettingsField | null; state: Exclude<ManagementResultState, "reconciliation-required">; message: string | null; reconciliationIntent?: never };
 
 export interface SettingsPanelState {
   accepted: {
@@ -17,7 +21,7 @@ export interface SettingsPanelState {
     viewOnce: boolean;
   };
   versionUsable: boolean;
-  result: { field: SettingsField | null; state: ManagementResultState; message: string | null; reconciliationIntent?: ReconciliationIntent };
+  result: SettingsResult;
 }
 
 export interface SettingsPanelProps {

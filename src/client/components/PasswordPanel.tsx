@@ -44,9 +44,8 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { action: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
-  const locked = result.state === "conflict" && !state.versionUsable;
   const pending = result.state === "pending";
-  const disabled = pending || locked;
+  const mutationBlocked = pending || !state.versionUsable;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
@@ -75,6 +74,25 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const activity = (event: React.SyntheticEvent<HTMLInputElement>) => onActivity(event.timeStamp);
   const authorization = state.protected ? (currentPassword === "" ? null : currentPassword) : null;
   const retryAuthorization = retryCredential === "" ? null : retryCredential;
+  const submitPassword = () => {
+    if (mutationBlocked) return;
+    capture("newPassword", "currentPassword");
+    setPassword(newPassword, authorization);
+  };
+  const clear = () => {
+    if (mutationBlocked) return;
+    capture("currentPassword");
+    clearPassword(authorization);
+  };
+  const retryPassword = () => {
+    if (mutationBlocked) return;
+    capture("retryCredential");
+    retry(retryAuthorization);
+  };
+  const reconcilePassword = () => {
+    if (mutationBlocked) return;
+    reconcile();
+  };
   const reset = () => {
     submitted.current = {};
     setNewPassword("");
@@ -91,14 +109,15 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
       {state.protected && <label>{copy.currentPassword}<Input name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); activity(event); }} /></label>}
       <label>{copy.newPassword}<Input name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); activity(event); }} /></label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" disabled={disabled} onClick={() => { capture("newPassword", "currentPassword"); setPassword(newPassword, authorization); }}>{state.protected ? copy.changePassword : copy.setPassword}</Button>
-        {state.protected && <Button type="button" variant="outline" disabled={disabled} onClick={() => { capture("currentPassword"); clearPassword(authorization); }}>{copy.clearPassword}</Button>}
+        <Button type="button" disabled={mutationBlocked} onClick={submitPassword}>{state.protected ? copy.changePassword : copy.setPassword}</Button>
+        {state.protected && <Button type="button" variant="outline" disabled={mutationBlocked} onClick={clear}>{copy.clearPassword}</Button>}
       </div>
       {result.state !== "idle" && <p role={role} data-password-result={result.state}>{resultMessage(result, locale)}</p>}
-      {result.state === "credential-required" && !locked && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); activity(event); }} /></label><Button type="button" onClick={() => { capture("retryCredential"); retry(retryAuthorization); }}>{copy.retry}</Button></div>}
-      {result.state === "retryable" && !locked && <Button type="button" onClick={() => { capture("retryCredential"); retry(retryAuthorization); }}>{copy.retry}</Button>}
-      {result.state === "conflict" && (locked ? <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button> : <><Button type="button" onClick={() => retry(retryAuthorization)}>{copy.retry}</Button><Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button></>)}
-      {result.state === "reconciliation-required" && !locked && <Button type="button" onClick={() => reconcile()}>{copy.reconcile}</Button>}
+      {result.state === "credential-required" && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); activity(event); }} /></label><Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
+      {result.state === "retryable" && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
+      {result.state === "conflict" && state.versionUsable && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
+      {result.state === "reconciliation-required" && <Button type="button" disabled={mutationBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
+      {(!state.versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
       <Button type="button" variant="outline" onClick={reset}>{copy.discard}</Button>
       <nav aria-label={copy.representations} className="flex flex-wrap gap-2"><a aria-label={copy.paste} href={state.currentUrl}>{copy.paste}</a>{state.representations.map((representation) => <a key={representation.href} href={representation.href}>{representation.label}</a>)}</nav>
     </section>

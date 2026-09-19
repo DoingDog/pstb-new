@@ -57,6 +57,10 @@ export function DeleteFlow({ state, deletePaste, retry, reload, locale = "en" }:
     setOpen(false);
     deletePaste(null);
   };
+  const retryDelete = (authorizationPassword: string | null) => {
+    if (blocked) return;
+    retry(authorizationPassword);
+  };
   const resultRole = state.result.state === "pending" || state.result.state === "succeeded" ? "status" : "alert";
   return (
     <section aria-label={copy.delete} data-server-controls="true" className="flex flex-wrap items-center gap-2">
@@ -77,8 +81,8 @@ export function DeleteFlow({ state, deletePaste, retry, reload, locale = "en" }:
         </DialogContent>
       </Dialog>
       {state.result.state !== "idle" && <p role={resultRole}>{resultMessage(state, locale)}</p>}
-      {state.result.state === "credential-required" && <div className="flex items-end gap-2"><label>{copy.currentPassword}<Input name="deleteCredential" type="password" value={credential} onInput={(event) => setCredential(event.currentTarget.value)} /></label><Button type="button" onClick={() => retry(credential === "" ? null : credential)}>{copy.retry}</Button></div>}
-      {state.result.state === "conflict" && (state.versionUsable ? <><Button type="button" onClick={() => retry(null)}>{copy.retry}</Button><Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button></> : <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>)}
+      {state.result.state === "credential-required" && <div className="flex items-end gap-2"><label>{copy.currentPassword}<Input name="deleteCredential" type="password" value={credential} onInput={(event) => setCredential(event.currentTarget.value)} /></label><Button type="button" disabled={blocked} onClick={() => retryDelete(credential === "" ? null : credential)}>{copy.retry}</Button></div>}
+      {state.result.state === "conflict" && (state.versionUsable ? <><Button type="button" disabled={blocked} onClick={() => retryDelete(null)}>{copy.retry}</Button><Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button></> : <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>)}
     </section>
   );
 }
