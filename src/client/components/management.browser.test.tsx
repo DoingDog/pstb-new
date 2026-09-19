@@ -190,6 +190,7 @@ function settingsState(overrides: Record<string, unknown> = {}) {
 function passwordState(overrides: Record<string, unknown> = {}) {
   return {
     protected: false,
+    versionUsable: true,
     result: { action: null, state: "idle" as const, message: null },
     currentUrl: "/demo",
     representations: [
@@ -242,6 +243,7 @@ describe("settings result table", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
 
@@ -284,6 +286,7 @@ describe("settings result table", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     expect(fixture.element.querySelector('[name="title"]')?.getAttribute("aria-invalid")).toBe("true");
@@ -302,6 +305,7 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={vi.fn()}
         reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     expect(fixture.element.textContent).toContain("Password is missing or incorrect.");
@@ -323,6 +327,7 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
+        discard={vi.fn()}
       />,
     );
     const retryButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
@@ -341,6 +346,7 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
+        discard={vi.fn()}
       />,
     );
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!);
@@ -348,7 +354,7 @@ describe("settings result table", () => {
 
     await fixture.render(
       <SettingsPanel
-        state={settingsState({ accepted: { id: "demo", title: "Latest accepted", format: "text", expiration: 3_600, viewOnce: false }, result: { field: "expiration", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
+        state={settingsState({ accepted: { id: "demo", title: "Latest accepted", format: "text", expiration: 3_600, viewOnce: false }, result: { field: "expiration", state: "reconciliation-required", message: "Request outcome is uncertain.", reconciliationIntent: "relative" } })}
         onActivity={vi.fn()}
         saveTitle={vi.fn()}
         saveFormat={vi.fn()}
@@ -357,9 +363,10 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
+        discard={vi.fn()}
       />,
     );
-    const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent?.includes("new full rewrite"))!;
+    const reconcileButton = fixture.element.querySelector<HTMLButtonElement>("[data-settings-result] button")!;
     click(reconcileButton);
     expect(reconcile).toHaveBeenCalledTimes(1);
     const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
@@ -383,6 +390,8 @@ describe("password result table", () => {
         clearPassword={clearPassword}
         retry={vi.fn()}
         reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     const next = fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')!;
@@ -399,10 +408,12 @@ describe("password result table", () => {
         clearPassword={clearPassword}
         retry={vi.fn()}
         reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     expect(fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')?.value).toBe("");
-    expect(fixture.element.querySelector('a[aria-label="Current URL"]')?.getAttribute("href")).toBe("/demo?password=intended%20password");
+    expect(fixture.element.querySelector('a[aria-label="Paste"]')?.getAttribute("href")).toBe("/demo?password=intended%20password");
     expect(fixture.element.querySelector('a[href="/raw/demo?password=intended%20password"]')?.textContent).toBe("Raw");
     expect(fixture.element.textContent).not.toContain("intended password");
     const exposed = Array.from(fixture.element.querySelectorAll("[data-password-status], [data-password-result]"))
@@ -427,6 +438,8 @@ describe("password result table", () => {
         clearPassword={vi.fn()}
         retry={retry}
         reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     input(fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')!, "new password");
@@ -441,6 +454,8 @@ describe("password result table", () => {
         clearPassword={vi.fn()}
         retry={retry}
         reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     const replacement = fixture.element.querySelector<HTMLInputElement>('input[name="retryCredential"]')!;
@@ -457,9 +472,11 @@ describe("password result table", () => {
         clearPassword={vi.fn()}
         retry={retry}
         reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
-    expect(fixture.element.querySelector('a[aria-label="Current URL"]')?.getAttribute("href")).toBe("/demo");
+    expect(fixture.element.querySelector('a[aria-label="Paste"]')?.getAttribute("href")).toBe("/demo");
   });
 
   it("asks the controller to reconcile uncertain password state without exposing a credential", async () => {
@@ -472,6 +489,8 @@ describe("password result table", () => {
         clearPassword={vi.fn()}
         retry={vi.fn()}
         reconcile={reconcile}
+        reload={vi.fn()}
+        discard={vi.fn()}
       />,
     );
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
@@ -532,8 +551,7 @@ describe("Delete result", () => {
     expect(retry).toHaveBeenCalledWith("replacement");
 
     await fixture.render(<DeleteFlow state={deleteState({ versionUsable: false, result: { state: "conflict", message: "The paste changed." } })} deletePaste={vi.fn()} retry={retry} reload={reload} />);
-    const conflictRetry = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
-    expect(conflictRetry.disabled).toBe(true);
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry")).toBe(false);
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reload")!);
     expect(reload).toHaveBeenCalledTimes(1);
   });
@@ -548,5 +566,315 @@ describe("Delete result", () => {
     expect(fixture.element.textContent).toContain("Delete outcome is uncertain.");
     expect(fixture.element.querySelector("button")).toBeNull();
     expect(fixture.element.querySelector("[data-server-controls]")).toBeNull();
+  });
+});
+
+describe("management hardening regressions", () => {
+  it("preserves each settings draft edited after its save dispatch", async () => {
+    const saveTitle = vi.fn();
+    const saveFormat = vi.fn();
+    const saveExpiration = vi.fn();
+    const saveViewOnce = vi.fn();
+    const accepted = { id: "demo", title: "Accepted title", format: "text" as const, expiration: 3_600, viewOnce: false };
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({ accepted })}
+        onActivity={vi.fn()}
+        saveTitle={saveTitle}
+        saveFormat={saveFormat}
+        saveExpiration={saveExpiration}
+        saveViewOnce={saveViewOnce}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+
+    const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
+    const format = fixture.element.querySelector('select[name="format"]') as unknown as { value: string; dispatchEvent(event: Event): boolean };
+    const expiration = fixture.element.querySelector('select[name="expiration"]') as unknown as { value: string; dispatchEvent(event: Event): boolean };
+    const viewOnce = fixture.element.querySelector<HTMLInputElement>('input[name="viewOnce"]')!;
+    input(title, "Submitted title");
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save title")!);
+    input(title, "Newer title");
+    change(format, "markdown");
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save format")!);
+    change(format, "text");
+    change(expiration, "60");
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save expiration")!);
+    change(expiration, "3600");
+    click(viewOnce);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save view once")!);
+    click(viewOnce);
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({ accepted: { ...accepted, title: "Submitted title", format: "markdown", expiration: 60, viewOnce: true }, result: { field: "title", state: "succeeded", message: "Title saved." } })}
+        onActivity={vi.fn()}
+        saveTitle={saveTitle}
+        saveFormat={saveFormat}
+        saveExpiration={saveExpiration}
+        saveViewOnce={saveViewOnce}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    expect(title.value).toBe("Newer title");
+    expect(format.value).toBe("text");
+    expect(expiration.value).toBe("3600");
+    expect(viewOnce.checked).toBe(false);
+  });
+
+  it("retires settings and password recovery when Discard resets local drafts", async () => {
+    const settingsDiscard = vi.fn();
+    const passwordDiscard = vi.fn();
+    const fixture = await mount(
+      <>
+        <SettingsPanel
+          state={settingsState({ result: { field: "title", state: "retryable", message: "Storage write failed." } })}
+          onActivity={vi.fn()}
+          saveTitle={vi.fn()}
+          saveFormat={vi.fn()}
+          saveExpiration={vi.fn()}
+          saveViewOnce={vi.fn()}
+          retry={vi.fn()}
+          reconcile={vi.fn()}
+          reload={vi.fn()}
+          discard={settingsDiscard}
+        />
+        <PasswordPanel
+          state={passwordState({ result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
+          onActivity={vi.fn()}
+          setPassword={vi.fn()}
+          clearPassword={vi.fn()}
+          retry={vi.fn()}
+          reconcile={vi.fn()}
+          reload={vi.fn()}
+          discard={passwordDiscard}
+        />
+      </>,
+    );
+
+    const discards = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent === "Discard");
+    expect(discards).toHaveLength(2);
+    click(discards[0]!);
+    click(discards[1]!);
+    expect(settingsDiscard).toHaveBeenCalledOnce();
+    expect(passwordDiscard).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry" || button.textContent === "Reconcile")).toBe(false);
+  });
+
+  it("keeps password drafts and exposes Reload only for an unusable conflict", async () => {
+    const reload = vi.fn();
+    const fixture = await mount(
+      <PasswordPanel
+        state={passwordState({ versionUsable: false, result: { action: "set", state: "conflict", message: "The paste changed." } })}
+        onActivity={vi.fn()}
+        setPassword={vi.fn()}
+        clearPassword={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={reload}
+        discard={vi.fn()}
+      />,
+    );
+
+    const password = fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')!;
+    input(password, "newer password");
+    const set = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Set password")!;
+    expect(set.disabled).toBe(true);
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry" || button.textContent === "Reconcile")).toBe(false);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reload")!);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(password.value).toBe("newer password");
+  });
+
+  it("blocks delete before opening when the version is unusable and offers Reload only", async () => {
+    const deletePaste = vi.fn();
+    const reload = vi.fn();
+    const fixture = await mount(<DeleteFlow state={deleteState({ versionUsable: false, result: { state: "conflict", message: "The paste changed." } })} deletePaste={deletePaste} retry={vi.fn()} reload={reload} />);
+    const trigger = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Delete")!;
+    expect(trigger.disabled).toBe(true);
+    click(trigger);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry")).toBe(false);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reload")!);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(deletePaste).not.toHaveBeenCalled();
+  });
+
+  it("closes or disables a delete confirmation when another mutation begins", async () => {
+    const deletePaste = vi.fn();
+    const fixture = await mount(<DeleteFlow state={deleteState()} deletePaste={deletePaste} retry={vi.fn()} reload={vi.fn()} />);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Delete")!);
+    await Promise.resolve();
+    await fixture.render(<DeleteFlow state={deleteState({ mutationPending: true })} deletePaste={deletePaste} retry={vi.fn()} reload={vi.fn()} />);
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const destructive = dialog?.querySelector<HTMLButtonElement>('button[data-variant="destructive"]');
+    expect(dialog === null || destructive?.disabled === true).toBe(true);
+    destructive?.click();
+    expect(deletePaste).not.toHaveBeenCalled();
+  });
+
+  it("renders exact options for absolute and non-preset relative expiration drafts", async () => {
+    const saveExpiration = vi.fn();
+    const absolute = "2026-10-01T12:34:56.000Z";
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({ accepted: { id: "demo", title: "Accepted title", format: "text", expiration: absolute, viewOnce: false } })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={saveExpiration}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+    const expiration = fixture.element.querySelector('select[name="expiration"]') as unknown as { value: string; selectedOptions: { [index: number]: { textContent: string | null } | undefined } };
+    expect(expiration.value).toBe(absolute);
+    expect(expiration.selectedOptions[0]?.textContent).toBe(absolute);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save expiration")!);
+    expect(saveExpiration).toHaveBeenCalledWith(absolute);
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({ accepted: { id: "demo", title: "Accepted title", format: "text", expiration: 42, viewOnce: false } })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={saveExpiration}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(expiration.value).toBe("42");
+    expect(expiration.selectedOptions[0]?.textContent).toBe("42");
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save expiration")!);
+    expect(saveExpiration).toHaveBeenLastCalledWith(42);
+  });
+
+  it("uses list-only and detail-only mobile history states with Back in every detail phase", async () => {
+    await page.viewport(375, 720);
+    const back = vi.fn();
+    const selectRevision = vi.fn();
+    const fixture = await mount(history(
+      <HistoryPanel
+        active
+        state={historyState({ selected: null, snapshotState: "idle", diff: { state: "idle", lines: [] } })}
+        openHistory={vi.fn()}
+        selectRevision={selectRevision}
+        computeDiff={vi.fn()}
+        back={back}
+      />,
+    ));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(fixture.element.querySelector("[data-history-list]")).not.toBeNull();
+    expect(fixture.element.querySelector("[data-history-detail]")).toBeNull();
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2")!);
+    expect(selectRevision).toHaveBeenCalledWith(2);
+
+    await fixture.render(history(
+      <HistoryPanel active state={historyState({ selected: null, snapshotState: "loading", diff: { state: "idle", lines: [] } })} openHistory={vi.fn()} selectRevision={selectRevision} computeDiff={vi.fn()} back={back} />,
+    ));
+    expect(fixture.element.querySelector("[data-history-list]")).toBeNull();
+    expect(fixture.element.querySelector("[data-history-detail]")).not.toBeNull();
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Back")!);
+    expect(back).toHaveBeenCalledOnce();
+    await fixture.render(history(
+      <HistoryPanel active state={historyState({ selected: null, snapshotState: "idle", diff: { state: "idle", lines: [] } })} openHistory={vi.fn()} selectRevision={selectRevision} computeDiff={vi.fn()} back={back} />,
+    ));
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2")!);
+
+    await fixture.render(history(
+      <HistoryPanel active state={historyState({ selected: null, snapshotState: "failed", failure: { target: "snapshot", value: { status: 503, code: "STORAGE_READ_FAILED" } }, diff: { state: "idle", lines: [] } })} openHistory={vi.fn()} selectRevision={selectRevision} computeDiff={vi.fn()} back={back} />,
+    ));
+    expect(fixture.element.querySelector("[data-history-list]")).toBeNull();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Back")).toBe(true);
+  });
+
+  it("localizes management names and status copy in Chinese", async () => {
+    const fixture = await mount(history(
+      <>
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: null } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} locale="zh-CN" />
+        <PasswordPanel state={passwordState({ result: { action: "set", state: "pending", message: null } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} locale="zh-CN" />
+        <DeleteFlow state={deleteState({ result: { state: "pending", message: null } })} deletePaste={vi.fn()} retry={vi.fn()} reload={vi.fn()} locale="zh-CN" />
+        <HistoryPanel active state={historyState({ diff: { state: "computing", lines: [] } })} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} locale="zh-CN" />
+      </>,
+    ));
+    expect(fixture.element.querySelector('[aria-label="设置"]')).not.toBeNull();
+    expect(fixture.element.textContent).toContain("保存标题");
+    expect(fixture.element.querySelector('[aria-label="密码"]')).not.toBeNull();
+    expect(fixture.element.textContent).toContain("设置密码");
+    expect(fixture.element.querySelector('[aria-label="删除剪贴板"]')).not.toBeNull();
+    expect(fixture.element.textContent).toContain("正在删除");
+    expect(fixture.element.querySelector('[aria-label="历史记录"]')).not.toBeNull();
+    expect(fixture.element.textContent).toContain("计算差异");
+  });
+
+  it("uses expiration intent to reserve rewrite copy for relative seconds", async () => {
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({ result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "relative" } })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save expiration")).toBeDefined();
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({ result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "absolute" } })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={vi.fn()}
+      />,
+    );
+    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")).toBeDefined();
+  });
+
+  it("uses status for pending and success, and alerts only for blocking failures", async () => {
+    const fixture = await mount(
+      <>
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
+        <PasswordPanel state={passwordState({ result: { action: "set", state: "succeeded", message: "Password saved." } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
+        <DeleteFlow state={deleteState({ result: { state: "pending", message: "Deleting" } })} deletePaste={vi.fn()} retry={vi.fn()} reload={vi.fn()} />
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "validation-error", message: "Title is too long." } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
+      </>,
+    );
+    expect(fixture.element.querySelectorAll('[role="status"]')).toHaveLength(3);
+    expect(fixture.element.querySelectorAll('[role="alert"]')).toHaveLength(1);
+  });
+
+  it("does not attach large-diff help to an empty history", async () => {
+    const fixture = await mount(history(
+      <HistoryPanel active state={historyState({ list: { id: "demo", currentRevision: 0, currentVersion: "generation.0", revisions: [] }, selected: null, snapshotState: "idle", diff: { state: "idle", lines: [] } })} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} />,
+    ));
+    expect(fixture.element.textContent).toContain("No revisions");
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.getAttribute("aria-label") === "Help")).toBe(false);
   });
 });

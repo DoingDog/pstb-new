@@ -1,10 +1,12 @@
 import * as React from "react";
-import type { ExpirationInput } from "../contracts";
+import type { ActionKey, ExpirationInput } from "../contracts";
+import { dictionaries, labels, type Locale } from "../../i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export type SettingsField = "title" | "format" | "expiration" | "viewOnce";
 export type ManagementResultState = "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required";
+export type ReconciliationIntent = "permanent" | "relative" | "absolute";
 
 export interface SettingsPanelState {
   accepted: {
@@ -15,7 +17,7 @@ export interface SettingsPanelState {
     viewOnce: boolean;
   };
   versionUsable: boolean;
-  result: { field: SettingsField | null; state: ManagementResultState; message: string | null };
+  result: { field: SettingsField | null; state: ManagementResultState; message: string | null; reconciliationIntent?: ReconciliationIntent };
 }
 
 export interface SettingsPanelProps {
@@ -28,7 +30,16 @@ export interface SettingsPanelProps {
   retry(credential: string | null): void;
   reconcile(): void;
   reload(): void;
+  discard(): void;
+  locale?: Locale;
 }
+
+const fieldActions: Record<SettingsField, ActionKey> = {
+  title: "settings-title",
+  format: "settings-format",
+  expiration: "settings-expiration",
+  viewOnce: "settings-view-once",
+};
 
 function inputExpiration(value: ExpirationInput): string {
   return value === null ? "permanent" : String(value);
@@ -39,66 +50,141 @@ function parseExpiration(value: string): ExpirationInput {
   return /^\d+$/.test(value) ? Number(value) : value;
 }
 
-function ResultActions({ state, retry, reconcile, reload, onActivity }: Pick<SettingsPanelProps, "state" | "retry" | "reconcile" | "reload" | "onActivity">) {
+function useDraft<Value>(accepted: Value) {
+  const [value, setValue] = React.useState(accepted);
+  const valueRef = React.useRef(value);
+  const acceptedRef = React.useRef(accepted);
+  const generation = React.useRef(0);
+  const acceptedGeneration = React.useRef(0);
+  const submitted = React.useRef<{ value: Value; generation: number } | null>(null);
+
+  const apply = React.useCallback((next: Value) => {
+    valueRef.current = next;
+    setValue(next);
+  }, []);
+  const settle = React.useCallback((nextAccepted: Value) => {
+    const submittedValue = submitted.current;
+    if (submittedValue === null || !Object.is(submittedValue.value, nextAccepted)) return false;
+    submitted.current = null;
+    if (generation.current === submittedValue.generation) {
+      acceptedGeneration.current = generation.current;
+      apply(nextAccepted);
+    }
+    return true;
+  }, [apply]);
+
+  React.useEffect(() => {
+    if (Object.is(acceptedRef.current, accepted)) return;
+    acceptedRef.current = accepted;
+    if (settle(accepted)) return;
+    if (generation.current === acceptedGeneration.current) apply(accepted);
+  }, [accepted, apply, settle]);
+
+  return {
+    value,
+    edit(next: Value) {
+      generation.current += 1;
+      apply(next);
+    },
+    submit() {
+      submitted.current = { value: valueRef.current, generation: generation.current };
+      return valueRef.current;
+    },
+    settle,
+    discard(nextAccepted: Value) {
+      generation.current += 1;
+      acceptedGeneration.current = generation.current;
+      submitted.current = null;
+      acceptedRef.current = nextAccepted;
+      apply(nextAccepted);
+    },
+  };
+}
+
+function resultMessage(result: SettingsPanelState["result"], locale: Locale): string {
+  if (result.message !== null) return result.message;
+  const action = result.field === null ? undefined : dictionaries[locale].actions[fieldActions[result.field]];
+  if (result.state === "pending") return action?.pending ?? dictionaries[locale].status.lastAction.pending;
+  if (result.state === "succeeded") return action?.succeeded ?? dictionaries[locale].status.lastAction.succeeded;
+  return action?.failed ?? dictionaries[locale].status.lastAction.failed;
+}
+
+function ResultActions({ result, versionUsable, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; locale: Locale }) {
   const [credential, setCredential] = React.useState("");
-  const result = state.result;
-  if (result.state === "idle" || result.state === "pending" || result.state === "succeeded") return null;
-  const retryDisabled = result.state === "conflict" && !state.versionUsable;
-  const fullRewrite = result.state === "reconciliation-required" && result.field === "expiration";
+  const copy = labels(locale);
+  if (result.state === "idle") return null;
+  const retryDisabled = result.state === "conflict" && !versionUsable;
+  const recovery = result.state === "credential-required" || result.state === "retryable" || result.state === "conflict";
+  const rewriteExpiration = result.state === "reconciliation-required" && result.field === "expiration" && result.reconciliationIntent === "relative";
+  const role = result.state === "pending" || result.state === "succeeded" ? "status" : "alert";
+
   return (
     <div data-settings-result={result.state} className="flex flex-wrap items-center gap-2">
-      {result.message !== null && <p role="alert" className="basis-full">{result.message}</p>}
-      {result.state === "credential-required" && <Input name="retryCredential" type="password" aria-label="Current password" value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp); }} />}
-      {(result.state === "credential-required" || result.state === "retryable" || result.state === "conflict") && <Button type="button" disabled={retryDisabled} onClick={() => retry(credential === "" ? null : credential)}>Retry</Button>}
-      {result.state === "conflict" && <Button type="button" variant="outline" onClick={reload}>Reload</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" onClick={reconcile}>{fullRewrite ? "Reconcile expiration as a new full rewrite" : "Reconcile"}</Button>}
+      <p role={role} className="basis-full">{resultMessage(result, locale)}</p>
+      {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp); }} /></label>}
+      {recovery && <Button type="button" disabled={retryDisabled} onClick={() => retry(credential === "" ? null : credential)}>{copy.retry}</Button>}
+      {result.state === "conflict" && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
+      {result.state === "reconciliation-required" && <Button type="button" onClick={reconcile}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
     </div>
   );
 }
 
-export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload }: SettingsPanelProps) {
-  const [title, setTitle] = React.useState(state.accepted.title);
-  const [format, setFormat] = React.useState(state.accepted.format);
-  const [expiration, setExpiration] = React.useState(inputExpiration(state.accepted.expiration));
-  const [viewOnce, setViewOnce] = React.useState(state.accepted.viewOnce);
-  const result = state.result;
+export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload, discard, locale = "en" }: SettingsPanelProps) {
+  const title = useDraft(state.accepted.title);
+  const format = useDraft(state.accepted.format);
+  const expiration = useDraft(inputExpiration(state.accepted.expiration));
+  const viewOnce = useDraft(state.accepted.viewOnce);
+  const discardedResult = React.useRef<SettingsPanelState["result"] | null>(null);
+  const [, render] = React.useState(0);
+  const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
+  const copy = labels(locale);
   const pending = result.state === "pending";
-
-  React.useEffect(() => { setTitle(state.accepted.title); }, [state.accepted.title]);
-  React.useEffect(() => { setFormat(state.accepted.format); }, [state.accepted.format]);
-  React.useEffect(() => { setExpiration(inputExpiration(state.accepted.expiration)); }, [state.accepted.expiration]);
-  React.useEffect(() => { setViewOnce(state.accepted.viewOnce); }, [state.accepted.viewOnce]);
-
+  const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const activity = (event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>) => onActivity(event.timeStamp);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
-  const discard = () => {
-    setTitle(state.accepted.title);
-    setFormat(state.accepted.format);
-    setExpiration(inputExpiration(state.accepted.expiration));
-    setViewOnce(state.accepted.viewOnce);
+
+  React.useEffect(() => {
+    if (result.state !== "succeeded" || result.field === null) return;
+    if (result.field === "title") title.settle(state.accepted.title);
+    if (result.field === "format") format.settle(state.accepted.format);
+    if (result.field === "expiration") expiration.settle(inputExpiration(state.accepted.expiration));
+    if (result.field === "viewOnce") viewOnce.settle(state.accepted.viewOnce);
+  }, [result, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce]);
+
+  const reset = () => {
+    title.discard(state.accepted.title);
+    format.discard(state.accepted.format);
+    expiration.discard(inputExpiration(state.accepted.expiration));
+    viewOnce.discard(state.accepted.viewOnce);
+    discardedResult.current = state.result;
+    render((value) => value + 1);
+    discard();
   };
 
   return (
-    <section aria-label="Settings" className="grid gap-4">
-      <label>ID<Input name="id" value={state.accepted.id} readOnly /></label>
+    <section aria-label={copy.settings} className="grid gap-4">
+      <label>{copy.customId}<Input name="id" value={state.accepted.id} readOnly /></label>
       <div className="flex flex-wrap items-end gap-2">
-        <label>Title<Input name="title" value={title} aria-invalid={invalid("title")} onInput={(event) => { setTitle(event.currentTarget.value); activity(event); }} /></label>
-        <Button type="button" disabled={pending} onClick={() => saveTitle(title)}>Save title</Button>
+        <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); activity(event); }} /></label>
+        <Button type="button" disabled={pending} onClick={() => saveTitle(title.submit())}>{copy.saveTitle}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label>Format<select name="format" value={format} aria-invalid={invalid("format")} onChange={(event) => { setFormat(event.currentTarget.value as "text" | "markdown"); activity(event); }}><option value="text">Text</option><option value="markdown">Markdown</option></select></label>
-        <Button type="button" disabled={pending} onClick={() => saveFormat(format)}>Save format</Button>
+        <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); activity(event); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
+        <Button type="button" disabled={pending} onClick={() => saveFormat(format.submit())}>{copy.saveFormat}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label>Expiration<select name="expiration" value={expiration} aria-invalid={invalid("expiration")} onChange={(event) => { setExpiration(event.currentTarget.value); activity(event); }}><option value="permanent">Permanent</option><option value="60">1 minute</option><option value="3600">1 hour</option><option value="86400">1 day</option><option value="604800">1 week</option><option value="2592000">30 days</option><option value="31536000">1 year</option></select></label>
-        <Button type="button" disabled={pending} onClick={() => saveExpiration(parseExpiration(expiration))}>Save expiration</Button>
+        <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); activity(event); }}>
+          {!standardExpirations.includes(expiration.value) && <option value={expiration.value}>{expiration.value}</option>}
+          <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31536000">{copy.oneYear}</option>
+        </select></label>
+        <Button type="button" disabled={pending} onClick={() => saveExpiration(parseExpiration(expiration.submit()))}>{copy.saveExpiration}</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label><Input name="viewOnce" type="checkbox" checked={viewOnce} aria-invalid={invalid("viewOnce")} onChange={(event) => { setViewOnce(event.currentTarget.checked); activity(event); }} />View once</label>
-        <Button type="button" disabled={pending} onClick={() => saveViewOnce(viewOnce)}>Save view once</Button>
+        <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); activity(event); }} />{copy.viewOnce}</label>
+        <Button type="button" disabled={pending} onClick={() => saveViewOnce(viewOnce.submit())}>{copy.saveViewOnce}</Button>
       </div>
-      <Button type="button" variant="outline" onClick={discard}>Discard</Button>
-      <ResultActions state={state} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} />
+      <Button type="button" variant="outline" onClick={reset}>{copy.discard}</Button>
+      <ResultActions result={result} versionUsable={state.versionUsable} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
 }
