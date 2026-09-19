@@ -35,6 +35,8 @@ type ModeOwner = {
   target: MarkdownMode;
   request: number;
   editorGeneration: number;
+  serializerGeneration: number;
+  failedTarget: MarkdownMode | null;
   localAcknowledgement: string | null;
   pendingAutosave: { content: string; eventAt: number; request: number } | null;
   controller: MarkdownModes;
@@ -107,11 +109,13 @@ export function MarkdownWorkbench({
       if (next !== "source") setMode(next);
       return;
     }
+    if (owner.failedTarget === next) return;
+    owner.failedTarget = null;
 
     const request = ++requestGeneration.current;
     owner.request = request;
     owner.target = next;
-    owner.editorGeneration = next === "visual" ? request : 0;
+    if (next === "visual") owner.editorGeneration = request;
     owner.pendingAutosave = null;
     setFailure(null);
     if (next === "preview") setPreview(null);
@@ -123,13 +127,26 @@ export function MarkdownWorkbench({
       (owner.source === sourceAdapter.current.value || owner.localAcknowledgement === sourceAdapter.current.value);
     const publishFailure = (): void => {
       if (!current()) return;
+      const failedRequest = ++requestGeneration.current;
+      const failedSource = sourceAdapter.current.value;
+      owner.request = failedRequest;
+      owner.target = "source";
       owner.editorGeneration = 0;
+      owner.failedTarget = next;
       owner.pendingAutosave = null;
-      ++requestGeneration.current;
       setMode("source");
       setFailure({
         retry: () => {
-          if (isCurrentOwner(owner) && owner.generation === ownerGeneration.current) void runMode(next);
+          if (
+            isCurrentOwner(owner) &&
+            owner.generation === ownerGeneration.current &&
+            owner.request === failedRequest &&
+            owner.target === "source" &&
+            sourceAdapter.current.value === failedSource
+          ) {
+            owner.failedTarget = null;
+            void runMode(next);
+          }
         },
       });
     };
@@ -189,39 +206,76 @@ export function MarkdownWorkbench({
     const owner = {} as ModeOwner;
     const current = (): boolean => isCurrentOwner(owner);
     const fail = (retry: () => Promise<void>): void => {
+      if (!current()) return;
+
       if (
-        !current() ||
-        owner.target !== "visual" ||
-        owner.editorGeneration === 0 ||
-        owner.editorGeneration !== owner.request
-      ) return;
-      const request = owner.request;
-      owner.request = ++requestGeneration.current;
+        owner.target === "visual" &&
+        owner.editorGeneration !== 0 &&
+        owner.editorGeneration === owner.request
+      ) {
+        const request = owner.request;
+        const editorGeneration = owner.editorGeneration;
+        const serializerGeneration = ++owner.serializerGeneration;
+        const failedSource = sourceAdapter.current.value;
+        owner.failedTarget = "visual";
+        owner.pendingAutosave = null;
+        setMode("source");
+        setFailure({
+          retry: () => {
+            if (
+              !isCurrentOwner(owner) ||
+              owner.generation !== ownerGeneration.current ||
+              owner.request !== request ||
+              owner.target !== "visual" ||
+              owner.editorGeneration !== editorGeneration ||
+              owner.serializerGeneration !== serializerGeneration ||
+              sourceAdapter.current.value !== failedSource
+            ) return;
+            void retry().then(
+              () => {
+                if (
+                  isCurrentOwner(owner) &&
+                  owner.generation === ownerGeneration.current &&
+                  owner.request === request &&
+                  owner.target === "visual" &&
+                  owner.editorGeneration === editorGeneration &&
+                  owner.serializerGeneration === serializerGeneration &&
+                  sourceAdapter.current.value === failedSource
+                ) {
+                  owner.failedTarget = null;
+                  setFailure(null);
+                  setMode("visual");
+                }
+              },
+              () => fail(retry),
+            );
+          },
+        });
+        return;
+      }
+
+      if ((owner.target !== "source" && owner.target !== "preview") || owner.editorGeneration === 0) return;
+      const target = owner.target;
+      const failedRequest = ++requestGeneration.current;
+      const failedSource = sourceAdapter.current.value;
+      owner.request = failedRequest;
+      owner.target = "source";
       owner.editorGeneration = 0;
+      owner.failedTarget = target;
       owner.pendingAutosave = null;
       setMode("source");
       setFailure({
         retry: () => {
-          if (!isCurrentOwner(owner) || owner.generation !== ownerGeneration.current || owner.request === request) return;
-          const retryRequest = ++requestGeneration.current;
-          owner.request = retryRequest;
-          owner.target = "visual";
-          owner.editorGeneration = retryRequest;
-          setFailure(null);
-          void retry().then(
-            () => {
-              if (
-                isCurrentOwner(owner) &&
-                owner.generation === ownerGeneration.current &&
-                owner.request === retryRequest &&
-                owner.target === "visual" &&
-                owner.editorGeneration === retryRequest
-              ) {
-                setMode("visual");
-              }
-            },
-            () => fail(retry),
-          );
+          if (
+            isCurrentOwner(owner) &&
+            owner.generation === ownerGeneration.current &&
+            owner.request === failedRequest &&
+            owner.target === "source" &&
+            sourceAdapter.current.value === failedSource
+          ) {
+            owner.failedTarget = null;
+            void runMode(target);
+          }
         },
       });
     };
@@ -253,6 +307,10 @@ export function MarkdownWorkbench({
           owner.editorGeneration === 0 ||
           owner.editorGeneration !== owner.request
         ) return;
+        ++owner.serializerGeneration;
+        owner.failedTarget = null;
+        setFailure(null);
+        setMode("visual");
         owner.localAcknowledgement = content;
         owner.pendingAutosave = { content, eventAt, request: owner.request };
         sourceAdapter.current.value = content;
@@ -274,6 +332,8 @@ export function MarkdownWorkbench({
     owner.target = "source";
     owner.request = ++requestGeneration.current;
     owner.editorGeneration = 0;
+    owner.serializerGeneration = 0;
+    owner.failedTarget = null;
     owner.localAcknowledgement = null;
     owner.pendingAutosave = null;
     owner.controller = controller;

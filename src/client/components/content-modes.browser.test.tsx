@@ -12,6 +12,8 @@ import { PlaintextEditor } from "./PlaintextEditor";
 import { LocalActions } from "./LocalActions";
 import { useAutosave } from "../hooks/use-autosave";
 import { AutosaveController, type AutosaveControllerApi, type AutosaveSaveRequest } from "../autosave";
+import { Crepe } from "@milkdown/crepe";
+import { editorViewCtx } from "@milkdown/kit/core";
 
 const markdownModes = vi.hoisted(() => {
   type Options = {
@@ -34,6 +36,7 @@ const markdownModes = vi.hoisted(() => {
   }> = [];
   let nextVisual: Deferred | null = null;
   let nextDestroy: Deferred | null = null;
+  const state = { useActual: false };
 
   const createDeferred = (): Deferred => {
     let resolve!: () => void;
@@ -79,6 +82,7 @@ const markdownModes = vi.hoisted(() => {
 
   return {
     instances,
+    state,
     create,
     deferVisual(): Deferred {
       nextVisual = createDeferred();
@@ -91,6 +95,7 @@ const markdownModes = vi.hoisted(() => {
     reset(): void {
       instances.splice(0);
       create.mockClear();
+      state.useActual = false;
       nextVisual = null;
       nextDestroy = null;
     },
@@ -99,10 +104,28 @@ const markdownModes = vi.hoisted(() => {
 
 vi.mock("../autosave", async (importOriginal) => {
   const original = await importOriginal<typeof import("../autosave")>();
-  return { ...original, createAutosaveMarkdownModes: markdownModes.create };
+  return {
+    ...original,
+    createAutosaveMarkdownModes: (...args: Parameters<typeof original.createAutosaveMarkdownModes>) =>
+      markdownModes.state.useActual
+        ? original.createAutosaveMarkdownModes(...args)
+        : markdownModes.create(...args),
+  };
 });
 
+type CrepeMethod = "create" | "destroy" | "getMarkdown";
+type CrepeMethodFunction = () => unknown;
+type CrepeControls = {
+  active: Crepe | null;
+  failGetMarkdown: boolean;
+  getMarkdownCalls: number;
+  destroyCalls: number;
+  rejectDestroy: boolean;
+  restore(): void;
+};
+
 const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
+let crepeControls: CrepeControls | null = null;
 
 function mount(node: ReactNode): HTMLDivElement {
   const host = document.createElement("div");
@@ -135,6 +158,95 @@ function input(target: HTMLTextAreaElement, value: string): void {
     target.value = value;
     target.dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
+
+function interceptCrepeMethod(
+  method: CrepeMethod,
+  wrap: (editor: Crepe, original: CrepeMethodFunction) => CrepeMethodFunction,
+): () => void {
+  const prototype = Crepe.prototype as unknown as object;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, method);
+  Object.defineProperty(prototype, method, {
+    configurable: true,
+    set(this: Crepe, original: CrepeMethodFunction) {
+      Object.defineProperty(this, method, {
+        configurable: true,
+        writable: true,
+        value: wrap(this, original),
+      });
+    },
+  });
+  return () => {
+    if (descriptor === undefined) delete (prototype as Record<string, unknown>)[method];
+    else Object.defineProperty(prototype, method, descriptor);
+  };
+}
+
+function controlCrepe(): CrepeControls {
+  const controls: CrepeControls = {
+    active: null,
+    failGetMarkdown: false,
+    getMarkdownCalls: 0,
+    destroyCalls: 0,
+    rejectDestroy: false,
+    restore: () => undefined,
+  };
+  const restore = [
+    interceptCrepeMethod("create", (editor, original) => async () => {
+      controls.active = editor;
+      return await original();
+    }),
+    interceptCrepeMethod("getMarkdown", (_editor, original) => () => {
+      controls.getMarkdownCalls += 1;
+      if (controls.failGetMarkdown) throw new Error("serialize failed");
+      return original();
+    }),
+    interceptCrepeMethod("destroy", (_editor, original) => async () => {
+      controls.destroyCalls += 1;
+      const result = await original();
+      if (controls.rejectDestroy) throw new Error("destroy failed");
+      return result;
+    }),
+  ];
+  controls.restore = () => {
+    for (const undo of restore.reverse()) undo();
+  };
+  return controls;
+}
+
+function replaceVisualDocument(value: string): void {
+  const editor = crepeControls?.active;
+  if (editor === null || editor === undefined) throw new Error("missing Crepe editor");
+  editor.editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    const paragraph = view.state.schema.nodes.paragraph;
+    if (paragraph === undefined) throw new Error("missing paragraph node");
+    const content = value === "" ? undefined : view.state.schema.text(value);
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, paragraph.create(null, content)));
+  });
+}
+
+async function nextTask(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function waitForCrepe(): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (crepeControls?.active !== null && crepeControls?.active !== undefined) return;
+    await nextTask();
+  }
+  throw new Error("missing Crepe editor");
+}
+
+function currentMarkdownTab(host: HTMLDivElement): string | null {
+  return Array.from(host.querySelectorAll('[role="tab"]')).find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent ?? null;
+}
+
+async function waitForMarkdownTab(host: HTMLDivElement, target: string): Promise<void> {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    if (currentMarkdownTab(host) === target) return;
+    await nextTask();
+  }
 }
 
 function trustedHtml(value: string): TrustedMarkdownHtml {
@@ -177,6 +289,8 @@ afterEach(() => {
   for (const entry of mounted.splice(0)) {    flushSync(() => entry.root.unmount());
     entry.host.remove();
   }
+  crepeControls?.restore();
+  crepeControls = null;
   document.body.replaceChildren();
   markdownModes.reset();
   vi.restoreAllMocks();
@@ -549,7 +663,7 @@ describe("Markdown lifecycle", () => {
     expect(current.retryVisual).toHaveBeenCalledOnce();
   });
 
-  it("rejects stale visual serialization after the current visual request fails", async () => {
+  it("accepts a newer visual serialization transaction after the current request fails", async () => {
     const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
     const events: string[] = [];
     mount(<MarkdownWorkbench
@@ -566,10 +680,10 @@ describe("Markdown lifecycle", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const current = markdownModes.instances[0]!;
     flushSync(() => current.emitError());
-    current.emitChange("stale serializer", 102);
+    current.emitChange("newer serializer", 102);
 
-    expect(events).toEqual([]);
-    expect(autosave.input).not.toHaveBeenCalled();
+    expect(events).toEqual(["newer serializer"]);
+    expect(autosave.input).toHaveBeenCalledWith("newer serializer", 102);
   });
 
   it("retires an authoritative source owner and rejects its later transactions", async () => {
@@ -654,6 +768,98 @@ describe("Markdown lifecycle", () => {
     expect(host.querySelector('[role="tab"][aria-controls*="visual"]')).not.toBeNull();
     await page.getByRole("tab", { name: "Preview" }).click();
     expect(host.querySelector("h1")?.textContent).toBe("exact");
+  });
+});
+
+describe("MarkdownWorkbench real Crepe ownership", () => {
+  it("accepts a newer live-editor transaction after serializer failure and ignores its stale Retry", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: string[] = [];
+    let staleRetry: HTMLButtonElement | null = null;
+    let invokeStaleRetry = false;
+    const host = mount(<RealMarkdownHarness
+      autosave={autosave}
+      onSourceEvent={(event) => {
+        events.push(event.content);
+        if (invokeStaleRetry) staleRetry?.click();
+      }}
+    />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await waitForCrepe();
+    expect(crepeControls.active).not.toBeNull();
+
+    crepeControls.failGetMarkdown = true;
+    replaceVisualDocument("failed");
+    await nextTask();
+    await nextTask();
+    staleRetry = host.querySelector<HTMLButtonElement>('[role="alert"] button');
+    expect(staleRetry).not.toBeNull();
+    expect(currentMarkdownTab(host)).toBe("Source");
+
+    crepeControls.failGetMarkdown = false;
+    invokeStaleRetry = true;
+    replaceVisualDocument("newer");
+    await waitForMarkdownTab(host, "Visual");
+
+    expect(events).toEqual(["newer\n"]);
+    expect(autosave.input).toHaveBeenCalledOnce();
+    expect(autosave.input).toHaveBeenCalledWith("newer\n", expect.any(Number));
+    expect(crepeControls.getMarkdownCalls).toBe(2);
+    expect(currentMarkdownTab(host)).toBe("Visual");
+  });
+
+  it.each(["Source", "Preview"] as const)("keeps the current %s teardown request recoverable", async (target) => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={() => undefined} />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await waitForCrepe();
+    replaceVisualDocument("visual");
+    await nextTask();
+    expect(autosave.input).toHaveBeenCalledOnce();
+
+    crepeControls.failGetMarkdown = true;
+    await page.getByRole("tab", { name: target }).click();
+    await nextTask();
+    await nextTask();
+
+    expect(currentMarkdownTab(host)).toBe("Source");
+    expect(crepeControls.getMarkdownCalls).toBe(2);
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("visual\n");
+    expect(crepeControls.destroyCalls).toBe(1);
+
+    crepeControls.failGetMarkdown = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+    await waitForMarkdownTab(host, target);
+
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(currentMarkdownTab(host)).toBe(target);
+    expect(crepeControls.destroyCalls).toBe(1);
+  });
+
+  it("destroys the current editor once when teardown cleanup rejects", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={() => undefined} />);
+
+    await page.getByRole("tab", { name: "Visual" }).click();
+    await waitForCrepe();
+    replaceVisualDocument("visual");
+    await nextTask();
+
+    crepeControls.rejectDestroy = true;
+    await page.getByRole("tab", { name: "Source" }).click();
+    await waitForMarkdownTab(host, "Source");
+
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(crepeControls.destroyCalls).toBe(1);
   });
 });
 
@@ -766,6 +972,28 @@ function VisualAutosaveHarness({ requests }: { requests: AutosaveSaveRequest[] }
     wrap="off"
     autosave={controller}
     onSourceEvent={(event) => setSource(event.content)}
+    loadCrepeStyle={async () => undefined}
+  />;
+}
+
+function RealMarkdownHarness({
+  autosave,
+  onSourceEvent,
+}: {
+  autosave: { input(content: string, eventAt: number): void; compositionStart(): void; compositionEnd(): void };
+  onSourceEvent(event: { content: string }): void;
+}) {
+  const [source, setSource] = React.useState("first");
+  return <MarkdownWorkbench
+    source={source}
+    initialSource="first"
+    initialMarkdown={null}
+    wrap="off"
+    autosave={autosave}
+    onSourceEvent={(event) => {
+      onSourceEvent(event);
+      setSource(event.content);
+    }}
     loadCrepeStyle={async () => undefined}
   />;
 }
