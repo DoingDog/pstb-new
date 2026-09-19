@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createPasteApi, type ApiFailure, type ApiResult, type PasteApi } from "../api";
 import { AutosaveController, type AutosaveDispatch, type AutosaveSaveRequest, type AutosaveSaveResult, type AutosaveSnapshot } from "../autosave";
-import { commitPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
+import { commitPastePassword, withPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
 import type {
   AcceptedPasteState,
   ActionKey,
@@ -343,10 +343,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         result: { action: passwordAction, state: passwordState, message: null },
         currentUrl: location.href,
         representations: [
-          { label: "Raw", href: paste.summary.links.raw },
-          { label: "HTML", href: paste.summary.links.html },
-          { label: "Markdown", href: paste.summary.links.markdown },
-          { label: "File", href: paste.summary.links.file },
+          { label: "Raw", href: withPastePassword(new URL(paste.summary.links.raw, location.href), paste.credential.committed).toString() },
+          { label: "HTML", href: withPastePassword(new URL(paste.summary.links.html, location.href), paste.credential.committed).toString() },
+          { label: "Markdown", href: withPastePassword(new URL(paste.summary.links.markdown, location.href), paste.credential.committed).toString() },
+          { label: "File", href: withPastePassword(new URL(paste.summary.links.file, location.href), paste.credential.committed).toString() },
         ],
       },
       deleteFlow: {
@@ -525,7 +525,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       completeTerminal(runtime, "delete-uncertain", snapshot.draft);
       return;
     }
-    const source = snapshot.terminalResponseSource ?? snapshot.draft;
+    const source = runtime.candidate?.kind === "terminal" ? runtime.candidate.source : snapshot.terminalResponseSource ?? snapshot.draft;
     void stageTerminal(runtime, "consumed", source);
   }
 
@@ -1032,7 +1032,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         dispatchContentReconcile(runtime, runtime.paste.startContentReconcile(now()));
       } else if (snapshot.mutation.state === "metadata-reconciliation") {
         dispatchMetadataReconcile(runtime, runtime.paste.startMetadataReconcile(now()));
-      } else if (runtime.autosave.snapshot().state === "password-required") {
+      } else if (runtime.autosave.snapshot().state === "password-required" && runtime.lastIntent?.kind === "content") {
         runtime.autosave.retry();
       } else if (runtime.lastIntent !== null) {
         beginMutation(runtime, cloneIntentWithCredential(runtime.lastIntent, credential));

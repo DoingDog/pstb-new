@@ -479,6 +479,7 @@ describe("Task 15 async lifecycle behavior", () => {
     await clickButton(rendered, "Reload");
     await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Reload");
     await vi.waitFor(() => expect(calls.filter((call) => call.init?.method === "GET")).toHaveLength(1));
+    await selectTab(rendered, "View");
     await vi.waitFor(() => expect(rendered.querySelector("[data-plain-view]")?.textContent).toBe("remote"));
   });
 
@@ -551,7 +552,17 @@ describe("Task 15 async lifecycle behavior", () => {
 
     await selectTab(rendered, "Edit");
     await vi.waitFor(() => expect(rendered.querySelector("textarea")).not.toBeNull());
-    await setInput(rendered, "textarea", "draft");
+    const textarea = rendered.querySelector<HTMLTextAreaElement>("textarea");
+    expect(textarea).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    expect(setter).toBeDefined();
+    await act(async () => {
+      setter!.call(textarea, "draft");
+      const event = new Event("input", { bubbles: true });
+      Object.defineProperty(event, "timeStamp", { value: performance.now() });
+      textarea!.dispatchEvent(event);
+      await Promise.resolve();
+    });
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => { rejectSave!(new TypeError("offline")); await Promise.resolve(); });
@@ -561,7 +572,7 @@ describe("Task 15 async lifecycle behavior", () => {
     await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
     await clickButton(rendered, "Source");
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("consumed");
-    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("Content reconciliation completed");
+    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("Content reconcile completed");
   });
 
   it("uses the received view-once source once, then stops business requests", async () => {
@@ -611,7 +622,7 @@ describe("Task 15 async lifecycle behavior", () => {
     const uncertain = vi.fn(async () => { throw new TypeError("offline"); });
     vi.stubGlobal("fetch", uncertain);
     const deleting = await mountOrdinary("draft");
-    await clickButton(deleting, "Settings");
+    await selectTab(deleting, "Settings");
     await clickButton(deleting, "Delete");
     await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
     await vi.waitFor(() => expect(deleting.querySelector('[aria-label="Delete uncertain"]')).not.toBeNull());
@@ -622,7 +633,7 @@ describe("Task 15 async lifecycle behavior", () => {
     const deleted = vi.fn(async () => new Response(null, { status: 204, headers: { "cache-control": "no-store" } }));
     vi.stubGlobal("fetch", deleted);
     const handoff = await mountOrdinary("draft", "secret");
-    await clickButton(handoff, "Settings");
+    await selectTab(handoff, "Settings");
     await clickButton(handoff, "Delete");
     await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
     await vi.waitFor(() => expect(handoff.querySelector("#create-content")).not.toBeNull());
@@ -648,6 +659,7 @@ describe("Task 15 async lifecycle behavior", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const rendered = await mountOrdinary();
+    vi.setSystemTime(new Date("2026-09-20T00:00:00.000Z"));
     expect(rendered.querySelector('[data-operation-record="autosave"] time')).toBeNull();
     expect(rendered.querySelector('[data-operation-record="autosync"] time')).toBeNull();
 
