@@ -179,7 +179,7 @@ export async function buildClient() {
   const deployFiles = await readBuiltFiles();
   if (
     deployFiles.some(
-      (path) => path !== "_headers" && !/^assets\/.+-[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(path),
+      (path) => path !== "_headers" && !/^assets\/.+-[A-Za-z0-9_-]+\.(?:css|js)$/.test(path),
     )
   ) {
     throw new Error("Deploy directory contains a non-hashed file");
