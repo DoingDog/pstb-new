@@ -18,6 +18,8 @@ export interface OrdinaryPastePageProps {
   derivedGeneration?: number | undefined;
   derivedPreview?: MarkdownPreview | null;
   derivedVisual?: PreparedMarkdownVisual | null;
+  derivedFallback?: { surface: DerivedSurface; source: string; generation: number } | null;
+  onRetrySurface?(surface: DerivedSurface): void;
   acceptedSource: string;
   version: string;
   autosaveAcceptedSource: string;
@@ -57,6 +59,8 @@ function OrdinaryPastePageBody({
   derivedGeneration,
   derivedPreview = null,
   derivedVisual = null,
+  derivedFallback = null,
+  onRetrySurface,
   initialMarkdown,
   links,
   password,
@@ -84,6 +88,8 @@ function OrdinaryPastePageBody({
     derivedGeneration,
     derivedPreview,
     derivedVisual,
+    derivedFallback,
+    ...(onRetrySurface === undefined ? {} : { onRetrySurface }),
     initialSource,
     initialMarkdown,
     wrap: wrap ? "soft" as const : "off" as const,

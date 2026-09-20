@@ -27,6 +27,8 @@ export interface MarkdownWorkbenchProps {
   loadCrepeStyle?(): Promise<unknown>;
   preparedVisual?: PreparedMarkdownVisual | null;
   preparedPreview?: MarkdownPreview | null;
+  derivedFallback?: { surface: DerivedSurface; source: string; generation: number } | null;
+  onRetrySurface?(surface: DerivedSurface): void;
   onSurfaceMounted?(surface: DerivedSurface, mounted: boolean): void;
 }
 
@@ -87,6 +89,8 @@ export function MarkdownWorkbench({
   loadCrepeStyle: loadStyle = loadCrepeStyle,
   preparedVisual = null,
   preparedPreview = null,
+  derivedFallback = null,
+  onRetrySurface,
   onSurfaceMounted,
 }: MarkdownWorkbenchProps) {
   const copy = labels(locale);
@@ -548,6 +552,7 @@ export function MarkdownWorkbench({
           {preview === null ? <pre className="overflow-x-auto whitespace-pre-wrap">{source}</pre> : <SafeMarkdown html={preview.html as TrustedMarkdownHtml} />}
         </TabsContent>
       </Tabs>
+      {derivedFallback !== null && ((mode === "visual" && derivedFallback.surface === "visual") || (mode === "preview" && derivedFallback.surface === "preview")) && <div data-derived-fallback={derivedFallback.surface} data-derived-generation={String(derivedFallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.(derivedFallback.surface)}>{copy.retry}</Button></div>}
       {failure !== null && (
         <div role="alert" className="flex items-center gap-2">
           <span>{errorMessage(locale, "INTERNAL_ERROR")}</span>

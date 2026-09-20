@@ -151,9 +151,10 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const recoveryBlocked = state.reconciliationRequestPending === true;
-  const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce";
-  const discardBlocked = pending || state.mutationPending === true || recoveryBlocked || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation);
+  const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce"
+    || ((state.reconciliationOwner === null || state.reconciliationOwner === undefined) && state.result.state === "reconciliation-required");
+  const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
+  const discardBlocked = pending || (!ownsReconciliation && state.mutationOccupied === true) || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation) || recoveryBlocked;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const reportDraftState = (eventAt?: number) => onDraftState?.(title.dirty() || format.dirty() || expiration.dirty() || viewOnce.dirty(), eventAt);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";

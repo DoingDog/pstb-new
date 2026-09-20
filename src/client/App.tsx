@@ -11,7 +11,7 @@ import { createThemeController, type ThemeController, type ThemePreference, type
 import { OperationStatus } from "./components/OperationStatus";
 import type { LocalActionState } from "./components/LocalActions";
 import { WorkbenchShell } from "./components/WorkbenchShell";
-import type { TerminalHandoff, TerminalPage } from "./hooks/use-paste-page";
+import type { SurfaceFallbackState, TerminalHandoff, TerminalPage } from "./hooks/use-paste-page";
 
 const CreatePage = React.lazy(() => import("./pages/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const PasswordPage = React.lazy(() => import("./pages/PasswordPage").then(({ PasswordPage }) => ({ default: PasswordPage })));
@@ -215,7 +215,7 @@ function operationStatusPageIdentity(initialPage: InitialPage, terminal: Termina
   }
 }
 
-function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onSummaryChange, onTerminal, onLocalAction, onUseConsumedResponse, onKeepCurrent, onTerminalPreviewMounted, onRootHandoff }: {
+function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onSummaryChange, onTerminal, onLocalAction, onUseConsumedResponse, onKeepCurrent, onTerminalPreviewMounted, onTerminalRetry, onRootHandoff }: {
   initialPage: InitialPage;
   locale: Locale;
   create: ReturnType<typeof createPasteApi>["create"] | null;
@@ -228,10 +228,11 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
   onUseConsumedResponse(): void;
   onKeepCurrent(): void;
   onTerminalPreviewMounted(mounted: boolean): void;
+  onTerminalRetry(surface: SurfaceFallbackState["surface"]): void;
   onRootHandoff(): void;
 }) {
   if (rootHandoff) return create === null ? null : <CreatePage locale={locale} create={create} />;
-  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} derivedPreview={isMarkdownPreview(terminal.local.resources?.preview) ? terminal.local.resources.preview : null} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} onSurfaceMounted={onTerminalPreviewMounted} onActionState={onLocalAction} />;
+  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} derivedPreview={isMarkdownPreview(terminal.local.resources?.preview) ? terminal.local.resources.preview : null} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} onSurfaceMounted={onTerminalPreviewMounted} onRetrySurface={onTerminalRetry} onActionState={onLocalAction} />;
   if (!initialPage.ok) return <ErrorPage locale={locale} status={500} errorCode={initialPage.errorCode} />;
 
   const { bootstrap } = initialPage;
@@ -353,7 +354,7 @@ export function App({ initialPage }: AppProps) {
     local.surface = createStagedSurfaceApply({
       capture: {
         localGeneration: 0,
-        currentExactSource: page.source,
+        currentExactSource: page.fallback?.source ?? page.source,
         currentDisplayGeneration: 0,
         hostGeneration: 0,
         parentApplyGeneration: 0,
@@ -420,6 +421,17 @@ export function App({ initialPage }: AppProps) {
     current.local.surface.remount();
   }, []);
 
+  const retryTerminalSurface = React.useCallback((surface: SurfaceFallbackState["surface"]) => {
+    const current = terminalRef.current;
+    if (current === null || current.fallback?.surface !== surface) return;
+    const local = current.local;
+    const retry = surface === "preview" ? local.surface.retryPreview : surface === "visual" ? local.surface.retryVisual : local.surface.retryDiff;
+    void retry(current.fallback.source).then((applied) => {
+      if (!applied) return;
+      setTerminal((page) => page?.local === local && page.fallback?.surface === surface ? { ...page, fallback: null } : page);
+    });
+  }, []);
+
   const useConsumedResponse = React.useCallback(() => {
     const current = terminalRef.current;
     if (current === null || current.consumedSource === null || current.local.pending) return;
@@ -470,21 +482,27 @@ export function App({ initialPage }: AppProps) {
         return;
       }
       local.pending = false;
+      const complete = receipt?.outcome === "complete";
       const outcome = receipt === null
         ? "use-consumed-response-display-failed"
-        : local.surface.settleUseConsumedResponse(receipt.terminalLocalToken, receipt.applied ? "displayed" : "display-failed")
+        : local.surface.settleUseConsumedResponse(receipt.terminalLocalToken, complete ? "displayed" : "display-failed")
           ?? "use-consumed-response-display-failed";
-      if (receipt?.applied) {
+      if (complete) {
         local.source = source;
         setTerminal((page) => page?.local === local && local.epoch === epoch && page.consumedSource === source
-          ? { ...page, source, consumedSource: null, initialMarkdown: null }
+          ? { ...page, source, consumedSource: null, initialMarkdown: null, fallback: null }
+          : page);
+      } else if (receipt?.outcome === "fallback" && receipt.fallback !== null) {
+        const fallback = { surface: receipt.fallback, source, generation: local.surface.snapshot().capture.currentDisplayGeneration };
+        setTerminal((page) => page?.local === local && local.epoch === epoch && page.consumedSource === source
+          ? { ...page, fallback }
           : page);
       }
       setRecords((records) => records.lastAction.state === "pending" && records.lastAction.key === "use-consumed-response" && records.lastAction.attempt === attempt
         ? {
           ...records,
           lastAction: {
-            state: receipt?.applied ? "succeeded" : "failed",
+            state: complete ? "succeeded" : "failed",
             key: "use-consumed-response",
             attempt,
             startedAt: instant,
@@ -566,6 +584,7 @@ export function App({ initialPage }: AppProps) {
           onUseConsumedResponse={useConsumedResponse}
           onKeepCurrent={keepCurrent}
           onTerminalPreviewMounted={terminalPreviewMounted}
+          onTerminalRetry={retryTerminalSurface}
           onRootHandoff={() => setRootHandoff(true)}
         />
       </React.Suspense>

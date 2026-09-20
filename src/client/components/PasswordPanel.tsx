@@ -52,8 +52,10 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const recoveryBlocked = state.reconciliationRequestPending === true;
-  const discardBlocked = pending || state.mutationPending === true || recoveryBlocked || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && state.reconciliationOwner !== "password");
+  const ownsReconciliation = state.reconciliationOwner === "password"
+    || ((state.reconciliationOwner === null || state.reconciliationOwner === undefined) && state.result.state === "reconciliation-required");
+  const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
+  const discardBlocked = pending || (!ownsReconciliation && state.mutationOccupied === true) || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation) || recoveryBlocked;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;

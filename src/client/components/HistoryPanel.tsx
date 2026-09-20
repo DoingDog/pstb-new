@@ -3,6 +3,7 @@ import { dictionaries, errorMessage, labels, type Locale } from "../../i18n";
 import type { HistoryControllerSnapshot } from "../history";
 import { formatHistoryDiffLine } from "../history";
 import type { DiffLine } from "../diff";
+import type { DerivedSurface } from "../surface-apply";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,6 +26,8 @@ export interface HistoryPanelProps {
   selectRevision(revision: number): void;
   computeDiff(): void;
   setDiffMounted?(mounted: boolean): void;
+  derivedFallback?: { surface: DerivedSurface; source: string; generation: number } | null;
+  retryDiff?(): void;
   back(): void;
   locale?: Locale;
 }
@@ -43,7 +46,7 @@ function DiffLifecycle({ mounted, setDiffMounted }: { mounted: boolean; setDiffM
   return null;
 }
 
-function Detail({ state, computeDiff, setDiffMounted, back, mobile, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; back(): void; mobile: boolean; locale: Locale }) {
+function Detail({ state, computeDiff, setDiffMounted, fallback, retryDiff, back, mobile, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; fallback: HistoryPanelProps["derivedFallback"]; retryDiff: HistoryPanelProps["retryDiff"]; back(): void; mobile: boolean; locale: Locale }) {
   const copy = labels(locale);
   const failure = historyFailure(state, locale);
   const backButton = mobile && <Button type="button" variant="outline" onClick={back}>{copy.back}</Button>;
@@ -51,10 +54,10 @@ function Detail({ state, computeDiff, setDiffMounted, back, mobile, locale }: { 
   if (state.snapshotState === "failed") return <section data-history-detail="true" aria-label={copy.selectedRevision}>{backButton}<p role="alert">{failure ?? errorMessage(locale, "UNKNOWN_ERROR")}</p></section>;
   if (state.selected === null) return mobile ? null : <section data-history-detail="true" aria-label={copy.selectedRevision}><p>{copy.selectedRevision}</p></section>;
 
-  return <DetailTabs state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} backButton={backButton} locale={locale} />;
+  return <DetailTabs state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} fallback={fallback} retryDiff={retryDiff} backButton={backButton} locale={locale} />;
 }
 
-function DetailTabs({ state, computeDiff, setDiffMounted, backButton, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; backButton: React.ReactNode; locale: Locale }) {
+function DetailTabs({ state, computeDiff, setDiffMounted, fallback, retryDiff, backButton, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; fallback: HistoryPanelProps["derivedFallback"]; retryDiff: HistoryPanelProps["retryDiff"]; backButton: React.ReactNode; locale: Locale }) {
   const copy = labels(locale);
   const [tab, setTab] = React.useState("diff");
   return (
@@ -71,6 +74,7 @@ function DetailTabs({ state, computeDiff, setDiffMounted, backButton, locale }: 
           {state.diff.state === "manual" && <div className="flex items-center gap-1"><Button type="button" onClick={computeDiff}>{copy.computeDiff}</Button><HelpTrigger label={copy.help} content={dictionaries[locale].help.largeDiff} descriptionId="history-large-diff-help" /></div>}
           {state.diff.state === "computing" && <p role="status">{copy.computeDiff}</p>}
           {state.diff.state === "failed" && <p role="alert">{state.diff.error ?? errorMessage(locale, "UNKNOWN_ERROR")}</p>}
+          {fallback?.surface === "diff" && <div data-derived-fallback="diff" data-derived-generation={String(fallback.generation)}><Button type="button" variant="outline" onClick={retryDiff}>{copy.retry}</Button></div>}
           {state.diff.state === "ready" && <pre aria-label={copy.selectedRevision} className="overflow-auto whitespace-pre-wrap">{state.diff.lines.map((line, index) => <React.Fragment key={index}>{formatHistoryDiffLine(line)}</React.Fragment>)}</pre>}
         </TabsContent>
         <TabsContent value="snapshot"><pre className="overflow-auto whitespace-pre-wrap">{state.selected!.content}</pre></TabsContent>
@@ -79,7 +83,7 @@ function DetailTabs({ state, computeDiff, setDiffMounted, backButton, locale }: 
   );
 }
 
-export function HistoryPanel({ active, state, openHistory, selectRevision, computeDiff, setDiffMounted = noDiffMountChange, back, locale = "en" }: HistoryPanelProps) {
+export function HistoryPanel({ active, state, openHistory, selectRevision, computeDiff, setDiffMounted = noDiffMountChange, derivedFallback = null, retryDiff, back, locale = "en" }: HistoryPanelProps) {
   const wasActive = React.useRef(false);
   const wasMobileActive = React.useRef(false);
   const mobile = useIsMobile();
@@ -118,7 +122,7 @@ export function HistoryPanel({ active, state, openHistory, selectRevision, compu
     <section aria-label={copy.history} className="min-w-0">
       <div className="grid min-w-0 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
         {showList && <nav data-history-list="true" aria-label={copy.history} className="flex min-w-0 flex-col gap-2">{listContent}</nav>}
-        {showDetail && <div className={mobile ? undefined : "hidden md:block"}><Detail state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} back={returnToList} mobile={mobile} locale={locale} /></div>}
+        {showDetail && <div className={mobile ? undefined : "hidden md:block"}><Detail state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} fallback={derivedFallback} retryDiff={retryDiff} back={returnToList} mobile={mobile} locale={locale} /></div>}
       </div>
     </section>
   );

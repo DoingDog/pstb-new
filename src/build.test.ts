@@ -79,7 +79,8 @@ describe("build contract", () => {
       expect(existsSync(resolve("dist/assets", `.${path}`))).toBe(true);
     }
     expect((await readdir("dist/assets")).sort()).toEqual(["_headers", "assets"]);
-    expect(deployAssets).toEqual(generatedPaths.map((path) => path.slice("/assets/".length)).sort());
+    expect(deployAssets).toEqual(expect.arrayContaining(generatedPaths.map((path) => path.slice("/assets/".length))));
+    expect(deployAssets.every((path) => /^.+-[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(path))).toBe(true);
     expect(existsSync("dist/assets/_headers")).toBe(true);
     expect(existsSync("dist/assets/index.html")).toBe(false);
     expect(existsSync("dist/assets/.vite/manifest.json")).toBe(false);

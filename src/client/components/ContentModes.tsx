@@ -8,6 +8,7 @@ import type { DerivedSurface } from "../surface-apply";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
 import { PlaintextEditor, type EditorWrap } from "./PlaintextEditor";
 import { SafeMarkdown } from "./SafeMarkdown";
+import { Button } from "./ui/button";
 
 export type ContentMode = "view" | "edit" | "markdown";
 
@@ -27,6 +28,8 @@ export interface ContentModesProps {
   derivedGeneration?: number | undefined;
   derivedPreview?: MarkdownPreview | null;
   derivedVisual?: PreparedMarkdownVisual | null;
+  derivedFallback?: { surface: DerivedSurface; source: string; generation: number } | null;
+  onRetrySurface?(surface: DerivedSurface): void;
   initialSource?: string;
   initialMarkdown: TrustedMarkdownHtml | null;
   wrap: EditorWrap;
@@ -46,6 +49,8 @@ export function ContentModes({
   derivedGeneration,
   derivedPreview = null,
   derivedVisual = null,
+  derivedFallback = null,
+  onRetrySurface,
   initialSource = source,
   initialMarkdown,
   wrap,
@@ -72,6 +77,8 @@ export function ContentModes({
         locale={locale}
         preparedVisual={derivedVisual}
         preparedPreview={derivedPreview}
+        derivedFallback={derivedFallback}
+        {...(onRetrySurface === undefined ? {} : { onRetrySurface })}
         {...(onSurfaceMounted === undefined ? {} : { onSurfaceMounted })}
         importBrowserMarkdown={importBrowserMarkdown}
         {...(loadCrepeStyle === undefined ? {} : { loadCrepeStyle })}
@@ -84,7 +91,10 @@ export function ContentModes({
       : initialMarkdown !== null && displaySource === initialSource
         ? <SafeMarkdown html={initialMarkdown} />
         : <pre data-plain-view="true" {...(derivedGeneration === undefined ? {} : { "data-derived-generation": String(derivedGeneration) })} className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{displaySource}</pre>;
-    return <><SurfaceLifecycle surface="preview" onSurfaceMounted={onSurfaceMounted} />{content}</>;
+    const fallback = derivedFallback?.surface === "preview"
+      ? <div data-derived-fallback="preview" data-derived-generation={String(derivedFallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{displaySource}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.("preview")}>{copy.retry}</Button></div>
+      : content;
+    return <><SurfaceLifecycle surface="preview" onSurfaceMounted={onSurfaceMounted} />{fallback}</>;
   }
   return <pre data-plain-view="true" {...(derivedGeneration === undefined ? {} : { "data-derived-generation": String(derivedGeneration) })} className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{displaySource}</pre>;
 }

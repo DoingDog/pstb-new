@@ -119,6 +119,12 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
       derivedGeneration={snapshot.derivedGeneration}
       derivedPreview={snapshot.derivedPreview}
       derivedVisual={snapshot.derivedVisual}
+      derivedFallback={snapshot.derivedFallback}
+      onRetrySurface={(surface) => {
+        if (surface === "preview") actions.retryPreview();
+        else if (surface === "visual") actions.retryVisual();
+        else actions.retryDiff();
+      }}
       acceptedSource={snapshot.acceptedSource}
       version={snapshot.version ?? initialPage.bootstrap.paste.version}
       autosaveAcceptedSource={snapshot.autosaveAcceptedSource}
@@ -140,6 +146,8 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
           selectRevision={actions.selectRevision}
           computeDiff={actions.computeDiff}
           setDiffMounted={setDiffMounted}
+          derivedFallback={snapshot.derivedFallback}
+          retryDiff={actions.retryDiff}
           back={actions.back}
           locale={locale}
         />

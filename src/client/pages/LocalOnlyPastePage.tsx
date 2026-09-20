@@ -2,6 +2,7 @@ import * as React from "react";
 import { errorMessage, labels, type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { MarkdownPreview } from "../markdown";
+import type { DerivedSurface } from "../surface-apply";
 import { LocalActions, type ClipboardPort, type DownloadPort, type LocalActionState, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
 import { Button } from "@/components/ui/button";
@@ -13,8 +14,10 @@ export interface LocalOnlyPastePageProps {
   consumedSource?: string | null;
   initialMarkdown: TrustedMarkdownHtml | null;
   derivedPreview?: MarkdownPreview | null;
+  fallback?: { surface: DerivedSurface; source: string; generation: number } | null;
   onUseConsumedResponse?(): void;
   onSurfaceMounted?(mounted: boolean): void;
+  onRetrySurface?(surface: DerivedSurface): void;
   onKeepCurrent?(): void;
   clipboard?: ClipboardPort;
   download?: DownloadPort;
@@ -32,7 +35,7 @@ function phaseLabel(locale: Locale, phase: LocalOnlyPastePageProps["phase"]): st
   }
 }
 
-export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, derivedPreview = null, onUseConsumedResponse, onKeepCurrent, onSurfaceMounted, clipboard, download, navigation, onActionState }: LocalOnlyPastePageProps) {
+export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, derivedPreview = null, fallback = null, onUseConsumedResponse, onKeepCurrent, onSurfaceMounted, onRetrySurface, clipboard, download, navigation, onActionState }: LocalOnlyPastePageProps) {
   const copy = labels(locale);
   const canChooseConsumedSource = phase === "consumed" && consumedSource !== null && consumedSource !== source;
   const [wrap, setWrap] = React.useState(false);
@@ -110,6 +113,7 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
         ? <p role="alert">{phaseLabel(locale, phase)}</p>
         : <p>{phaseLabel(locale, phase)}</p>}
       {canChooseConsumedSource && <div className="flex flex-wrap gap-2"><Button type="button" onClick={onUseConsumedResponse}>{copy.useRemote}</Button><Button type="button" variant="outline" onClick={onKeepCurrent}>{copy.keepCurrent}</Button></div>}
+      {fallback !== null && <div data-derived-fallback={fallback.surface} data-derived-generation={String(fallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.(fallback.surface)}>{copy.retry}</Button></div>}
       {previewFailure !== null && <p role="alert">{previewFailure}</p>}
       <LocalActions
         actionScope={`local:${phase}:${source}`}

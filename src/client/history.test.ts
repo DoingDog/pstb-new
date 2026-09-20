@@ -159,6 +159,20 @@ describe("history diff", () => {
     expect(onLines).toHaveBeenCalledWith([{ kind: "add", text: "local draft\n" }]);
   });
 
+  it("clears obsolete lines and switches to manual before an oversized current side can publish", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+    worker.onmessage?.({ data: { type: "result", id: 1, lines: [{ kind: "same", text: "old\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenCalledOnce();
+
+    expect(history.replaceCurrent("x".repeat(1_048_577))).toBe("manual");
+    worker.onmessage?.({ data: { type: "result", id: 1, lines: [{ kind: "same", text: "stale\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenCalledOnce();
+  });
+
   it("stages a selected diff current side through its worker before adoption", async () => {
     const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
     const onLines = vi.fn();

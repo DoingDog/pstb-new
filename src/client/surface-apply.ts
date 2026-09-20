@@ -29,6 +29,7 @@ export interface StagedSurfaceSnapshot {
   source: string;
   status: "idle" | "staging" | "committed" | "fallback";
   fallback: SurfaceFallback;
+  complete: boolean;
 }
 export interface StagedSurfaceApplyOptions {
   ports: StagedSurfacePorts;
@@ -88,7 +89,8 @@ export interface TerminalLocalApplyEntry {
 export type TerminalLocalToken = symbol;
 export interface TerminalLocalApplyReceipt {
   terminalLocalToken: TerminalLocalToken;
-  applied: boolean;
+  outcome: "complete" | "fallback" | "failed";
+  fallback: SurfaceFallback;
 }
 
 export function autosyncApplyEntryAllowed(entry: AutosyncApplyEntry): boolean {
@@ -181,7 +183,13 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   let nextParentApplyToken = current.parentApplyToken;
   const now = options.now ?? Date.now;
 
-  const snapshot = (): Readonly<StagedSurfaceSnapshot> => ({ capture: copyCapture(current), source: currentSource, status, fallback });
+  const snapshot = (): Readonly<StagedSurfaceSnapshot> => ({
+    capture: copyCapture(current),
+    source: currentSource,
+    status,
+    fallback,
+    complete: status === "committed",
+  });
   const stale = (attempt: Attempt): boolean => !sameCapture(attempt.base, current);
   const syncRetryTokens = (token: number): void => {
     for (const surface of ["preview", "visual", "diff"] as const) retryTokens[surface] = Math.max(retryTokens[surface], token);
@@ -362,7 +370,14 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   const runTerminalLocal = async (source: string, commitCurrent?: () => boolean): Promise<TerminalLocalApplyReceipt> => {
     const terminalLocalToken = Symbol("terminal-local");
     terminalLocalAttempt = { token: terminalLocalToken, settled: false };
-    return { terminalLocalToken, applied: await runAll(source, undefined, true, commitCurrent) };
+    const attempt = allocate(source, undefined, true, commitCurrent);
+    await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
+    const committed = await publish(attempt);
+    return {
+      terminalLocalToken,
+      outcome: !committed ? "failed" : attempt.failure === null ? "complete" : "fallback",
+      fallback: committed ? attempt.failure : null,
+    };
   };
 
   const runRetry = async (source: string, surface: Surface): Promise<boolean> => {

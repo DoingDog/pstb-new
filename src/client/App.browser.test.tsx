@@ -189,10 +189,12 @@ describe("application motion", () => {
 
   it("removes all allowed motion when reduced motion is requested", async () => {
     await mount(<MotionFixture />);
-    await cdp().send("Emulation.setEmulatedMedia", {
-      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    await act(async () => {
+      await cdp().send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expectNoMotion(element('[data-slot="sidebar-trigger"]'));
     expectNoMotion(element('[data-slot="sheet-content"]'));
@@ -654,6 +656,26 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "reload-server" });
   });
 
+  it("does not reopen the active deadline when programmatic draft settlement has no DOM timestamp", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.draftState("settings", true, 0);
+      await vi.advanceTimersByTimeAsync(299_999);
+      page!.actions.draftState("settings", false);
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(page!.snapshot.records.autosync.state).toBe("inactive");
+  });
+
   it("settles Retry sync when its legal due is armed", async () => {
     vi.useFakeTimers();
     let page: UsePastePageResult | null = null;
@@ -747,9 +769,9 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
 
-    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("consumed");
+    expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
     expect(terminal).toMatchObject({
-      page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true },
+      page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: { surface: "preview", source: "consumed" } },
       records: { lastAction: { state: "failed", key: "reload-server", outcomeKey: "reload-terminal-response-display-failed" } },
     });
   });
@@ -825,6 +847,7 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.paste).toMatchObject({ phase: "ordinary", serverCapabilities: true });
     expect(page!.snapshot.source).toBe("local draft");
     expect(page!.snapshot.candidate).toBeNull();
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "reload-server" });
   });
 
   it("recovers Network after a current view-once Reload response", async () => {
@@ -847,6 +870,28 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
     expect(page!.snapshot.records.network.state).toBe("online");
+  });
+
+  it("lets a pending Reload own its settlement across offline", async () => {
+    let page: UsePastePageResult | null = null;
+    let resolveReload: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveReload = resolve; })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.reload();
+      window.dispatchEvent(new Event("offline"));
+      resolveReload!(await resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "reload-server" });
+    expect(page!.snapshot.source).toBe("remote");
   });
 
   it("recovers Network after a current view-once sync response", async () => {
@@ -902,8 +947,38 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
 
-    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("consumed");
-    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true } });
+    expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
+    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: { surface: "preview", source: "consumed" } } });
+  });
+
+  it("publishes terminal capability removal before a mounted strict view-once stage resolves", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let terminal: unknown = null;
+    const preview = new Promise<unknown>(() => undefined);
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], { onTerminal: (handoff) => { terminal = handoff; } });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.paste).toMatchObject({ phase: "consumed", serverCapabilities: false });
+    expect(terminal).toMatchObject({ page: { source: "initial", consumedSource: "consumed", fallback: { surface: "preview", source: "consumed" } } });
+    expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
   });
 
   it("cleans a first mount before the remounted lifecycle reaches its sync due time", async () => {
@@ -1582,6 +1657,28 @@ describe("Task 15 async lifecycle behavior", () => {
     });
     await vi.waitFor(() => expect(rendered.textContent).toContain("rendered consumed"));
     expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("The consumed response is displayed.");
+  });
+
+  it("retains the terminal choice when a mounted Use remote surface falls back", async () => {
+    vi.useFakeTimers();
+    stagedMarkdown.prepareMarkdownPreview.mockRejectedValueOnce(new Error("preview unavailable"));
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "other-generation.1",
+      contentRevision: 1,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary("current");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await vi.dynamicImportSettled(); });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Use remote");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("could not be displayed"));
+    await clickButton(rendered, "Source");
+
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");
+    expect(button(rendered, "Use remote")).toBeDefined();
+    expect(rendered.querySelector("[data-derived-fallback=preview]")).not.toBeNull();
   });
 
   it("settles an invalidated consumed-response action as failed exactly once", async () => {

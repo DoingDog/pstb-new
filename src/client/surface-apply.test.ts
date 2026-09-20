@@ -571,7 +571,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     const first = fixture.apply.applyTerminalLocal("two", entry);
     await resolveStages(fixture, 0);
     const firstReceipt = await first;
-    expect(firstReceipt).toMatchObject({ applied: true });
+    expect(firstReceipt).toMatchObject({ outcome: "complete", fallback: null });
     if (firstReceipt === null) throw new Error("expected terminal-local receipt");
     expect(typeof firstReceipt.terminalLocalToken).toBe("symbol");
     expect(fixture.apply.settleUseConsumedResponse(firstReceipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
@@ -580,10 +580,22 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     const second = fixture.apply.applyTerminalLocal("three", entry);
     await resolveStages(fixture, 1);
     const secondReceipt = await second;
-    expect(secondReceipt).toMatchObject({ applied: true });
+    expect(secondReceipt).toMatchObject({ outcome: "complete", fallback: null });
     if (secondReceipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(secondReceipt.terminalLocalToken, "displayed")).toBe("use-consumed-response-displayed");
     expect(fixture.apply.settleUseConsumedResponse(secondReceipt.terminalLocalToken, "displayed")).toBeNull();
+  });
+
+  it("reports a target fallback instead of a successful terminal-local display", async () => {
+    const fixture = surfaceFixture();
+    const attempt = fixture.apply.applyTerminalLocal("two", { terminalEpochCurrent: true, displayGenerationCurrent: true, selectedSourceCurrent: true });
+    fixture.previews[0]!.reject(new Error("preview failed"));
+    fixture.visuals[0]!.resolve("visual");
+    fixture.diffs[0]!.resolve("diff");
+    await settle();
+
+    await expect(attempt).resolves.toMatchObject({ outcome: "fallback", fallback: "preview" });
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "two", status: "fallback", fallback: "preview", complete: false });
   });
 
   it("keeps a terminal-local receipt when its commit fails", async () => {
@@ -596,7 +608,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     await resolveStages(fixture);
 
     const receipt = await attempt;
-    expect(receipt).toMatchObject({ applied: false });
+    expect(receipt).toMatchObject({ outcome: "failed", fallback: null });
     if (receipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
@@ -610,12 +622,12 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     const second = fixture.apply.applyTerminalLocal("three", entry);
     await resolveStages(fixture, 1);
     const secondReceipt = await second;
-    expect(secondReceipt).toMatchObject({ applied: true });
+    expect(secondReceipt).toMatchObject({ outcome: "complete", fallback: null });
     if (secondReceipt === null) throw new Error("expected second terminal-local receipt");
 
     await resolveStages(fixture, 0);
     const firstReceipt = await first;
-    expect(firstReceipt).toMatchObject({ applied: false });
+    expect(firstReceipt).toMatchObject({ outcome: "failed", fallback: null });
     if (firstReceipt === null) throw new Error("expected first terminal-local receipt");
 
     expect(fixture.apply.settleUseConsumedResponse(firstReceipt.terminalLocalToken, "display-failed")).toBeNull();
@@ -641,7 +653,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     current = false;
     await resolveStages(fixture);
 
-    await expect(attempt).resolves.toMatchObject({ applied: false });
+    await expect(attempt).resolves.toMatchObject({ outcome: "failed", fallback: null });
     expect(fixture.ports.commit).not.toHaveBeenCalled();
   });
 
@@ -653,7 +665,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     await resolveStages(fixture);
 
     const receipt = await attempt;
-    expect(receipt).toMatchObject({ applied: false });
+    expect(receipt).toMatchObject({ outcome: "failed", fallback: null });
     if (receipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
@@ -670,7 +682,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     await resolveStages(fixture, 0);
 
     const receipt = await terminal;
-    expect(receipt).toMatchObject({ applied: false });
+    expect(receipt).toMatchObject({ outcome: "failed", fallback: null });
     if (receipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
@@ -684,7 +696,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     await resolveStages(fixture);
 
     const receipt = await attempt;
-    expect(receipt).toMatchObject({ applied: false });
+    expect(receipt).toMatchObject({ outcome: "failed", fallback: null });
     if (receipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();
@@ -698,7 +710,7 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     await resolveStages(fixture);
 
     const receipt = await attempt;
-    expect(receipt).toMatchObject({ applied: false });
+    expect(receipt).toMatchObject({ outcome: "failed", fallback: null });
     if (receipt === null) throw new Error("expected terminal-local receipt");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBe("use-consumed-response-display-failed");
     expect(fixture.apply.settleUseConsumedResponse(receipt.terminalLocalToken, "display-failed")).toBeNull();

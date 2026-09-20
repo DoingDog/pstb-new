@@ -454,6 +454,35 @@ describe("reconciliation ownership", () => {
     expect(discard).toHaveBeenCalledOnce();
   });
 
+  it("keeps an owner Discard enabled when an unrelated Last action is pending", async () => {
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({
+          mutationOccupied: true,
+          mutationPending: true,
+          reconciliationOwner: "title",
+          reconciliationRequestPending: false,
+          result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
+    expect(discardButton.disabled).toBe(false);
+    click(discardButton);
+    expect(discard).toHaveBeenCalledOnce();
+  });
+
   it("blocks only the owner's Reconcile and Discard while its GET is pending", async () => {
     const reconcile = vi.fn();
     const discard = vi.fn();
