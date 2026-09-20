@@ -7,6 +7,7 @@ import {
   type AutosaveMarkdownModesOptions,
 } from "../autosave";
 import type { SourceEvent } from "../contracts";
+import type { DerivedSurface } from "../surface-apply";
 import type { MarkdownMode, MarkdownModes, MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -25,6 +26,8 @@ export interface MarkdownWorkbenchProps {
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
   loadCrepeStyle?(): Promise<unknown>;
   preparedVisual?: PreparedMarkdownVisual | null;
+  preparedPreview?: MarkdownPreview | null;
+  onSurfaceMounted?(surface: DerivedSurface, mounted: boolean): void;
 }
 
 type WorkbenchFailure = { retry(): void };
@@ -83,6 +86,8 @@ export function MarkdownWorkbench({
   importBrowserMarkdown,
   loadCrepeStyle: loadStyle = loadCrepeStyle,
   preparedVisual = null,
+  preparedPreview = null,
+  onSurfaceMounted,
 }: MarkdownWorkbenchProps) {
   const copy = labels(locale);
   const [visualRoot, setVisualRoot] = React.useState<HTMLDivElement | null>(null);
@@ -102,7 +107,9 @@ export function MarkdownWorkbench({
     loadPreview: importBrowserMarkdown,
   });
   const [mode, setMode] = React.useState<MarkdownMode>("source");
-  const [preview, setPreview] = React.useState<MarkdownPreview | null>(null);
+  const [preview, setPreview] = React.useState<MarkdownPreview | null>(
+    preparedPreview?.source === source ? preparedPreview : null,
+  );
   const [failure, setFailure] = React.useState<WorkbenchFailure | null>(null);
 
   const isCurrentOwner = React.useCallback((owner: ModeOwner): boolean =>
@@ -135,7 +142,11 @@ export function MarkdownWorkbench({
     }
     owner.pendingAutosave = null;
     setFailure(null);
-    if (next === "preview") setPreview(null);
+    if (next === "preview") {
+      setPreview(null);
+      setMode("preview");
+    }
+    if (next === "visual") setMode("visual");
 
     const current = (): boolean =>
       isCurrentOwner(owner) &&
@@ -459,6 +470,17 @@ export function MarkdownWorkbench({
       if (owner !== null) retireOwner(owner);
     };
   }, [retireOwner]);
+
+  React.useEffect(() => {
+    if (preparedPreview?.source === source) setPreview(preparedPreview);
+  }, [preparedPreview, source]);
+
+  React.useEffect(() => {
+    const surface = mode === "preview" ? "preview" : mode === "visual" ? "visual" : null;
+    if (surface === null) return;
+    onSurfaceMounted?.(surface, true);
+    return () => onSurfaceMounted?.(surface, false);
+  }, [mode, onSurfaceMounted]);
 
   React.useEffect(() => {
     if (visualRoot === null || !mounted.current) return;

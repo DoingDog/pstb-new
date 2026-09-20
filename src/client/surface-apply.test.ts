@@ -62,6 +62,7 @@ function surfaceFixture(initial = capture(), now = () => Date.now()) {
       diffs.push(next);
       return next.promise;
     }),
+    mounted: () => ["preview", "visual", "diff"],
     commit: vi.fn(),
     restoreOld: vi.fn(async () => true),
     showOldGenerationFailure: vi.fn(),
@@ -91,6 +92,21 @@ describe("staged surface application", () => {
 
     await expect(attempt).resolves.toBe(true);
     expect(fixture.ports.commit).toHaveBeenCalledWith({ preview: "preview-0", visual: "visual-0", diff: "diff-0" }, 2);
+  });
+
+  it("stages only the derived surfaces that have a mounted host", async () => {
+    const fixture = surfaceFixture();
+    fixture.ports.mounted = () => ["visual"];
+    const attempt = fixture.apply.apply("two");
+
+    expect(fixture.ports.stagePreview).not.toHaveBeenCalled();
+    expect(fixture.ports.stageVisual).toHaveBeenCalledOnce();
+    expect(fixture.ports.stageDiff).not.toHaveBeenCalled();
+    fixture.visuals[0]!.resolve("visual");
+    await settle();
+
+    await expect(attempt).resolves.toBe(true);
+    expect(fixture.ports.commit).toHaveBeenCalledWith(expect.objectContaining({ visual: "visual" }), 2);
   });
 
   it("rechecks the confirmed Reload guard before committing a staged target", async () => {

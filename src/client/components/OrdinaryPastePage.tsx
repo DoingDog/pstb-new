@@ -4,6 +4,7 @@ import { withPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
 import type { AutosaveControllerApi, AutosaveState } from "../autosave";
 import type { SourceEvent } from "../contracts";
 import type { MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
+import type { DerivedSurface } from "../surface-apply";
 import type { PasteLinks } from "../../types";
 import { ContentModes, type ContentMode } from "./ContentModes";
 import { LocalActions, type LocalActionState } from "./LocalActions";
@@ -28,6 +29,7 @@ export interface OrdinaryPastePageProps {
   locale: Locale;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
+  onSurfaceMounted?(surface: DerivedSurface, mounted: boolean): void;
   historyPanel: React.ReactNode;
   settingsPanel: React.ReactNode;
   passwordPanel: React.ReactNode;
@@ -61,6 +63,7 @@ function OrdinaryPastePageBody({
   locale,
   autosave,
   onSourceEvent,
+  onSurfaceMounted,
   historyPanel,
   settingsPanel,
   passwordPanel,
@@ -87,6 +90,7 @@ function OrdinaryPastePageBody({
     autosave,
     onSourceEvent,
     locale,
+    ...(onSurfaceMounted === undefined ? {} : { onSurfaceMounted }),
     importBrowserMarkdown,
     ...(loadCrepeStyle === undefined ? {} : { loadCrepeStyle }),
   };

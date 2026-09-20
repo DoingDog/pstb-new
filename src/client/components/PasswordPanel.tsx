@@ -10,6 +10,7 @@ export interface PasswordPanelState {
   protected: boolean;
   versionUsable: boolean;
   mutationPending?: boolean;
+  mutationOccupied?: boolean;
   result: { action: "set" | "clear" | null; state: PasswordResultState; message: string | null };
   currentUrl: string;
   representations: readonly { label: string; href: string }[];
@@ -17,7 +18,7 @@ export interface PasswordPanelState {
 
 export interface PasswordPanelProps {
   state: PasswordPanelState;
-  onActivity(eventAt: number): void;
+  onActivity(eventAt: number, kind?: "recovery-credential"): void;
   setPassword(newPassword: string, authorizationPassword: string | null): void;
   clearPassword(authorizationPassword: string | null): void;
   retry(authorizationPassword: string | null): void;
@@ -46,8 +47,9 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const result = discardedResult.current === state.result ? { action: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
   const pending = state.result.state === "pending";
-  const mutationBlocked = state.mutationPending === true || pending || !state.versionUsable;
-  const discardBlocked = state.mutationPending === true || pending;
+  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
+  const recoveryBlocked = state.mutationPending === true || pending;
+  const discardBlocked = recoveryBlocked;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
@@ -92,7 +94,7 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
     retry(retryAuthorization);
   };
   const reconcilePassword = () => {
-    if (mutationBlocked) return;
+    if (recoveryBlocked) return;
     reconcile();
   };
   const reset = () => {
@@ -116,10 +118,10 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
         {state.protected && <Button type="button" variant="outline" disabled={mutationBlocked} onClick={clear}>{copy.clearPassword}</Button>}
       </div>
       {result.state !== "idle" && <p role={role} data-password-result={result.state}>{resultMessage(result, locale)}</p>}
-      {result.state === "credential-required" && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); activity(event); }} /></label><Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
+      {result.state === "credential-required" && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label><Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
       {result.state === "retryable" && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
       {result.state === "conflict" && state.versionUsable && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" disabled={mutationBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
+      {result.state === "reconciliation-required" && <Button type="button" disabled={recoveryBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
       {(!state.versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
       <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>
       <nav aria-label={copy.representations} className="flex flex-wrap gap-2"><a aria-label={copy.paste} href={state.currentUrl}>{copy.paste}</a>{state.representations.map((representation) => <a key={representation.href} href={representation.href}>{representation.label}</a>)}</nav>

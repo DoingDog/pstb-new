@@ -382,6 +382,23 @@ describe("AutosaveController", () => {
     expect(save.calls).toHaveLength(1);
   });
 
+  it("requires an explicit retry after a proven-not-applied 503", async () => {
+    const { clock, controller, save, states } = autosaveFixture();
+
+    controller.input("exact draft", clock.now());
+    clock.advance(1_000);
+    save.pending[0]!.resolve({ status: 503, mutationMayHaveApplied: false });
+    await settle();
+
+    expect(lastState(states)).toMatchObject({
+      state: "error",
+      failureStatus: 503,
+      requiresExplicitRetry: true,
+    });
+    controller.retry();
+    expect(save.calls.at(-1)).toEqual({ action: "save-retry", content: "exact draft", version: "g.1" });
+  });
+
   it.each([
     [403, undefined, "password-required", true],
     [404, undefined, "not-found", false],
@@ -389,7 +406,7 @@ describe("AutosaveController", () => {
     [413, undefined, "error", true],
     [422, undefined, "error", true],
     [413, true, "error", false],
-    [500, undefined, "error", false],
+    [500, undefined, "error", true],
   ] as const)("retains unresolved HTTP %i when input returns to the accepted source", async (status, mutationMayHaveApplied, state, requiresExplicitRetry) => {
     const { clock, controller, save, states } = autosaveFixture();
 

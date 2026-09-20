@@ -658,6 +658,21 @@ describe("PasteController round-one regressions", () => {
     expect(controller.startContentReconcile(2)).toMatchObject({ kind: "blocked", reason: "not-reconciling" });
   });
 
+  it("restores the accepted content when discarding a reconciliation with a later draft", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.sourceEvent({ type: "input", content: "later", eventAt: 1 });
+    controller.failMutation(save.token, { status: 503 }, 2);
+
+    expect(controller.discardReconciliation()).toBe(true);
+    expect(snapshot(controller)).toMatchObject({
+      mutation: { state: "idle" },
+      acceptedSource: "one",
+      draft: "one",
+      autosave: { state: "clean" },
+    });
+  });
+
   it("uses canonical remote snapshots and extracts generations at the final dot", () => {
     const { controller } = pasteControllerFixture({
       accepted: {

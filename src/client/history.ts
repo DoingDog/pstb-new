@@ -30,6 +30,7 @@ export interface HistoryDiffOptions {
 
 export interface HistoryDiffController {
   selectRevision(revision: DiffId, previous: string, current: string): "automatic" | "manual";
+  setMounted(mounted: boolean): void;
   computeDiff(): boolean;
   clearSelection(): void;
   destroy(): void;
@@ -69,6 +70,7 @@ function isDiffResponse(value: unknown): value is DiffResponse {
 export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffController {
   let worker: DiffWorker | undefined;
   let selected: SelectedDiff | undefined;
+  let mounted = false;
   let latestId = 0;
 
   const startDiff = (): boolean => {
@@ -98,11 +100,22 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     selectRevision(revision, previous, current) {
       selected = { revision, previous, current };
       if (automaticDiffAllowed(previous, current)) {
-        startDiff();
+        if (mounted) startDiff();
         return "automatic";
       }
       latestId += 1;
       return "manual";
+    },
+    setMounted(nextMounted) {
+      if (mounted === nextMounted) return;
+      mounted = nextMounted;
+      if (!mounted) {
+        latestId += 1;
+        worker?.terminate();
+        worker = undefined;
+      } else if (selected !== undefined && automaticDiffAllowed(selected.previous, selected.current)) {
+        startDiff();
+      }
     },
     computeDiff: startDiff,
     clearSelection() {
@@ -222,7 +235,6 @@ export function createHistoryController(): HistoryController {
       state = {
         ...state,
         listState: "loading",
-        list: null,
         failure: state.failure?.target === "list" ? null : state.failure,
       };
       previous?.abort.abort();
@@ -255,7 +267,6 @@ export function createHistoryController(): HistoryController {
       state = {
         ...state,
         snapshotState: "loading",
-        selected: null,
         failure: state.failure?.target === "snapshot" ? null : state.failure,
       };
       previous?.abort.abort();
@@ -280,7 +291,11 @@ export function createHistoryController(): HistoryController {
     },
     invalidate(_reason) {
       if (destroyed) return;
-      retireRequests((current) => current);
+      retireRequests((current) => ({
+        ...current,
+        listState: settledListState(current),
+        snapshotState: settledSnapshotState(current),
+      }));
     },
     retainAfterApply(previous, next) {
       if (destroyed) return "none";

@@ -10,10 +10,13 @@ export interface DerivedSurfaceCapture {
   derivedRetryToken: number;
 }
 
+export type DerivedSurface = "preview" | "visual" | "diff";
+
 export interface StagedSurfacePorts {
   stagePreview(source: string, generation: number): Promise<unknown>;
   stageVisual(source: string, generation: number): Promise<unknown>;
   stageDiff(source: string, generation: number): Promise<unknown>;
+  mounted(): readonly DerivedSurface[];
   commit(staged: { preview: unknown; visual: unknown; diff: unknown }, generation: number): void;
   restoreOld(generation: number, source: string, parentToken: number): Promise<boolean>;
   showOldGenerationFailure(generation: number, source: string, parentToken: number): void;
@@ -125,7 +128,7 @@ export interface StagedSurfaceApply {
 }
 
 type Staged = { preview: unknown; visual: unknown; diff: unknown };
-type Surface = Exclude<SurfaceFallback, null>;
+type Surface = DerivedSurface;
 type Attempt = {
   base: DerivedSurfaceCapture;
   capture: DerivedSurfaceCapture;
@@ -353,7 +356,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
 
   const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean): Promise<boolean> => {
     const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent);
-    await Promise.all([stageOne(attempt, "preview"), stageOne(attempt, "visual"), stageOne(attempt, "diff")]);
+    await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
     return publish(attempt);
   };
   const runTerminalLocal = async (source: string, commitCurrent?: () => boolean): Promise<TerminalLocalApplyReceipt> => {

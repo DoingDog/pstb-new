@@ -111,6 +111,15 @@ describe("history lazy load", () => {
     expect(openHistory).toHaveBeenCalledTimes(1);
   });
 
+  it("refetches a stale history descriptor while History remains active", async () => {
+    const openHistory = vi.fn();
+    const fixture = await mount(<HistoryPanel active state={historyState()} openHistory={openHistory} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} />);
+    expect(openHistory).toHaveBeenCalledOnce();
+
+    await fixture.render(<HistoryPanel active state={historyState({ listState: "stale" })} openHistory={openHistory} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} />);
+    expect(openHistory).toHaveBeenCalledTimes(2);
+  });
+
   it("requests only the selected revision and renders the selected-to-current diff as text", async () => {
     const selectRevision = vi.fn();
     const computeDiff = vi.fn();
@@ -127,6 +136,22 @@ describe("history lazy load", () => {
     expect(fixture.element.querySelector("img")).toBeNull();
     expect(fixture.element.textContent).toContain("-selected source");
     expect(fixture.element.textContent).toContain("+<img src=x>current source");
+  });
+
+  it("registers only the active history diff tab as mounted", async () => {
+    await page.viewport(1280, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const setDiffMounted = vi.fn();
+    const fixture = await mount(history(
+      <HistoryPanel active state={historyState()} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} setDiffMounted={setDiffMounted} back={vi.fn()} />,
+    ));
+
+    expect(setDiffMounted).toHaveBeenCalledWith(true);
+    setDiffMounted.mockClear();
+    await React.act(async () => {
+      await userEvent.click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent?.includes("Full snapshot"))!);
+    });
+    expect(setDiffMounted).toHaveBeenCalledWith(false);
   });
 
   it("uses a manual diff action with HelpTrigger copy for oversized sources", async () => {
@@ -396,6 +421,65 @@ describe("settings result table", () => {
   });
 });
 
+describe("reconciliation ownership", () => {
+  it("keeps owner recovery enabled while blocking unrelated settings writes", async () => {
+    const reconcile = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({
+          mutationOccupied: true,
+          mutationPending: false,
+          result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={reconcile}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save title")?.disabled).toBe(true);
+    const recovery = fixture.element.querySelector("[data-settings-result]")!;
+    click(Array.from(recovery.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(discard).toHaveBeenCalledOnce();
+  });
+
+  it("keeps password recovery enabled while global occupancy blocks password writes", async () => {
+    const reconcile = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <PasswordPanel
+        state={passwordState({
+          mutationOccupied: true,
+          mutationPending: false,
+          result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        setPassword={vi.fn()}
+        clearPassword={vi.fn()}
+        retry={vi.fn()}
+        reconcile={reconcile}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Set password")?.disabled).toBe(true);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(discard).toHaveBeenCalledOnce();
+  });
+});
+
 describe("password result table", () => {
   it("sets, changes, and clears passwords through callbacks without fetching", async () => {
     const setPassword = vi.fn();
@@ -558,15 +642,17 @@ describe("Delete result", () => {
   it("presents 204 as a root handoff and preserves ordinary controls for 403 and 409", async () => {
     const retry = vi.fn();
     const reload = vi.fn();
-    const fixture = await mount(<DeleteFlow state={deleteState({ phase: "deleted-root-handoff", result: { state: "succeeded", message: "Paste deleted." } })} deletePaste={vi.fn()} retry={retry} reload={reload} />);
+    const activity = vi.fn();
+    const fixture = await mount(<DeleteFlow state={deleteState({ phase: "deleted-root-handoff", result: { state: "succeeded", message: "Paste deleted." } })} deletePaste={vi.fn()} retry={retry} reload={reload} onActivity={activity} />);
     expect(fixture.element.querySelector("[data-root-handoff]")).not.toBeNull();
     expect(fixture.element.querySelector("button")).toBeNull();
 
-    await fixture.render(<DeleteFlow state={deleteState({ result: { state: "credential-required", message: "Password is missing or incorrect." } })} deletePaste={vi.fn()} retry={retry} reload={reload} />);
+    await fixture.render(<DeleteFlow state={deleteState({ result: { state: "credential-required", message: "Password is missing or incorrect." } })} deletePaste={vi.fn()} retry={retry} reload={reload} onActivity={activity} />);
     expect(fixture.element.textContent).toContain("Password is missing or incorrect.");
     expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Delete")).toBe(true);
     const credential = fixture.element.querySelector<HTMLInputElement>('input[name="deleteCredential"]')!;
     input(credential, "replacement");
+    expect(activity).toHaveBeenCalledWith(expect.any(Number), "recovery-credential");
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!);
     expect(retry).toHaveBeenCalledWith("replacement");
 
@@ -863,9 +949,9 @@ describe("management hardening regressions", () => {
       />,
     );
     const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!;
-    expect(reconcileButton.disabled).toBe(true);
+    expect(reconcileButton.disabled).toBe(false);
     click(reconcileButton);
-    expect(reconcile).not.toHaveBeenCalled();
+    expect(reconcile).toHaveBeenCalledOnce();
   });
 
   it("retains authoritative pending password authority after Discard and forced actions", async () => {

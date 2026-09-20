@@ -106,7 +106,7 @@ describe("history diff", () => {
     expect(formatHistoryDiffLine({ kind: "add", text: "<img src=x>\n" })).toBe("+<img src=x>\n");
   });
 
-  it("creates the diff worker only for a selected revision and ignores stale text responses", () => {
+  it("creates the diff worker only after a selected revision has a mounted host and ignores stale text responses", () => {
     const workers: Array<{
       postMessage: ReturnType<typeof vi.fn>;
       terminate: ReturnType<typeof vi.fn>;
@@ -124,6 +124,8 @@ describe("history diff", () => {
     });
 
     expect(history.selectRevision("1", "a\nb\n", "a\nc\n")).toBe("automatic");
+    expect(workers).toHaveLength(0);
+    history.setMounted(true);
     expect(workers).toHaveLength(1);
     expect(history.selectRevision("2", "old\n", "<img src=x>\n")).toBe("automatic");
 
@@ -297,6 +299,22 @@ describe("history lifecycle arbitration", () => {
     expect(controller.snapshot().epoch).toBe(1);
   });
 
+  it("restores settled history when an in-flight refresh is invalidated", () => {
+    const { capture, controller } = settleHistory();
+    const previous = controller.snapshot();
+    const list = controller.open(capture);
+    const snapshot = controller.select(2, capture);
+
+    controller.invalidate("mutation");
+
+    expect(list.signal.aborted).toBe(true);
+    expect(snapshot.signal.aborted).toBe(true);
+    expect(controller.snapshot()).toEqual({
+      ...previous,
+      epoch: previous.epoch + 1,
+    });
+  });
+
   it("aborts requests and rejects callbacks after destroy", () => {
     const controller = createHistoryController();
     const capture = baseline();
@@ -357,7 +375,14 @@ describe("history lifecycle arbitration", () => {
     expect(snapshot.signal.aborted).toBe(true);
     expect(controller.acceptList(list.token, capture, historyList())).toBe(false);
     expect(controller.failSnapshot(snapshot.token, capture, { status: 500, code: "INTERNAL_ERROR" })).toBe(false);
-    expect(controller.snapshot()).toEqual({ ...before, epoch: before.epoch + 1 });
+    expect(controller.snapshot()).toEqual({
+      epoch: before.epoch + 1,
+      listState: "idle",
+      snapshotState: "idle",
+      list: null,
+      selected: null,
+      failure: null,
+    });
   });
 
   it.each([
@@ -449,7 +474,7 @@ describe("history lifecycle arbitration", () => {
     expect(invalidationAccepted).toBe(false);
     expect(invalidationController.snapshot()).toEqual({
       epoch: 1,
-      listState: "loading",
+      listState: "idle",
       snapshotState: "idle",
       list: null,
       selected: null,

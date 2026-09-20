@@ -19,6 +19,7 @@ export interface DeleteFlowProps {
   deletePaste(authorizationPassword: string | null): void;
   retry(authorizationPassword: string | null): void;
   reload(): void;
+  onActivity?(eventAt: number, kind?: "recovery-credential"): void;
   locale?: Locale;
 }
 
@@ -33,7 +34,7 @@ function resultMessage(state: DeleteFlowState, locale: Locale): string {
   return dictionaries[locale].status.lastAction.failed;
 }
 
-export function DeleteFlow({ state, deletePaste, retry, reload, locale = "en" }: DeleteFlowProps) {
+export function DeleteFlow({ state, deletePaste, retry, reload, onActivity, locale = "en" }: DeleteFlowProps) {
   const [open, setOpen] = React.useState(false);
   const [credential, setCredential] = React.useState("");
   const cancel = React.useRef<HTMLButtonElement>(null);
@@ -81,7 +82,7 @@ export function DeleteFlow({ state, deletePaste, retry, reload, locale = "en" }:
         </DialogContent>
       </Dialog>
       {state.result.state !== "idle" && <p role={resultRole}>{resultMessage(state, locale)}</p>}
-      {state.result.state === "credential-required" && <div className="flex items-end gap-2"><label>{copy.currentPassword}<Input name="deleteCredential" type="password" value={credential} onInput={(event) => setCredential(event.currentTarget.value)} /></label><Button type="button" disabled={blocked} onClick={() => retryDelete(credential === "" ? null : credential)}>{copy.retry}</Button></div>}
+      {state.result.state === "credential-required" && <div className="flex items-end gap-2"><label>{copy.currentPassword}<Input name="deleteCredential" type="password" value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity?.(event.timeStamp, "recovery-credential"); }} /></label><Button type="button" disabled={blocked} onClick={() => retryDelete(credential === "" ? null : credential)}>{copy.retry}</Button></div>}
       {state.result.state === "conflict" && (state.versionUsable ? <><Button type="button" disabled={blocked} onClick={() => retryDelete(null)}>{copy.retry}</Button><Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button></> : <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>)}
     </section>
   );

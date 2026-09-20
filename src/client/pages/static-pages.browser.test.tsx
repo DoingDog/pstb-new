@@ -522,7 +522,11 @@ describe("local-only capability", () => {
         );
         expect(fixture.host.textContent).not.toMatch(/Edit|History|Settings|Delete(?! uncertain)/);
         expect(fixture.host.querySelector('[href*="/raw/"], [href*="/html/"], [href*="/md/"], [href*="/file/"]')).toBeNull();
-        expect(fixture.host.querySelector('[data-action="full-refresh"]')).not.toBeNull();
+        if (phase === "not-found" || phase === "delete-uncertain") {
+          expect(fixture.host.querySelector('[data-action="full-refresh"]')).not.toBeNull();
+        } else {
+          expect(fixture.host.querySelector('[data-action="full-refresh"]')).toBeNull();
+        }
         expect(fixture.host.querySelector('[data-action="create-new"]')).not.toBeNull();
         if (phase === "armed-view-once") {
           expect(fixture.host.textContent).toContain("Armed view-once");

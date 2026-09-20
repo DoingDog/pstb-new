@@ -119,7 +119,7 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
       />
       {initialMarkdown !== null && <Button type="button" variant="outline" data-action="recompute-preview" className="min-h-11 self-start" onClick={() => void recomputePreview()}>{copy.preview}</Button>}
       <div className="flex flex-wrap gap-3">
-        <a data-action="full-refresh" href={location.href} className="text-primary underline-offset-4 hover:underline">{copy.fullRefresh}</a>
+        {(phase === "not-found" || phase === "delete-uncertain") && <a data-action="full-refresh" href={location.href} className="text-primary underline-offset-4 hover:underline">{copy.fullRefresh}</a>}
         <a data-action="create-new" href="/" className="text-primary underline-offset-4 hover:underline">{copy.createNew}</a>
       </div>
     </section>

@@ -377,7 +377,7 @@ export class AutosaveController implements AutosaveControllerApi {
     this.emit();
     void dispatched.completion.then(
       (result) => this.completeSave(attempt, content, result),
-      () => this.failSave(attempt, null),
+      () => this.failSave(attempt, null, true),
     );
   }
 
@@ -430,7 +430,7 @@ export class AutosaveController implements AutosaveControllerApi {
       this.requiresExplicitRetry = false;
       this.state = "conflict";
     } else {
-      this.requiresExplicitRetry = !mutationMayHaveApplied && (status === 413 || status === 422);
+      this.requiresExplicitRetry = !mutationMayHaveApplied;
       this.state = "error";
     }
     this.emit();

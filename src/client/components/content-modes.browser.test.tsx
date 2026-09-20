@@ -960,8 +960,10 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     await clickRole("tab", "Visual");
     await waitForCrepe();
     const failedEditor = crepeControls.active;
-    await nextTask();
-    await nextTask();
+    await React.act(async () => {
+      await nextTask();
+      await nextTask();
+    });
 
     expect(currentMarkdownTab(host)).toBe("Source");
     expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false);
@@ -969,6 +971,11 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
 
     crepeControls.rejectCreate = false;
     await clickRole("button", "Retry");
+    for (let attempt = 0; attempt < 5 && crepeControls.active === failedEditor; attempt += 1) {
+      await React.act(async () => {
+        await nextTask();
+      });
+    }
     await waitForMarkdownTab(host, "Visual");
 
     expect(host.querySelector('[role="alert"]')).toBeNull();

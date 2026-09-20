@@ -758,7 +758,7 @@ describe("PasteSync ordering and recovery", () => {
       followup: boolean;
       keepsTimer: boolean;
     }> = [
-      { status: 403, event: "forbidden", state: "forbidden", followup: false, keepsTimer: false },
+      { status: 403, event: "forbidden", state: "forbidden", followup: false, keepsTimer: true },
       { status: 404, event: "not-found", state: "not-found", followup: false, keepsTimer: false },
       { status: 409, event: "conflict", state: "conflict", followup: false, keepsTimer: true },
       { status: 503, event: "error", state: "error", followup: true, keepsTimer: true },

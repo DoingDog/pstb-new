@@ -4,6 +4,7 @@ import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { AutosaveControllerApi } from "../autosave";
 import type { SourceEvent } from "../contracts";
 import type { MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
+import type { DerivedSurface } from "../surface-apply";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
 import { PlaintextEditor, type EditorWrap } from "./PlaintextEditor";
 import { SafeMarkdown } from "./SafeMarkdown";
@@ -23,6 +24,7 @@ export interface ContentModesProps {
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
+  onSurfaceMounted?(surface: DerivedSurface, mounted: boolean): void;
   locale?: Locale;
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
   loadCrepeStyle?(): Promise<unknown>;
@@ -41,6 +43,7 @@ export function ContentModes({
   wrap,
   autosave,
   onSourceEvent,
+  onSurfaceMounted,
   locale = "en",
   importBrowserMarkdown,
   loadCrepeStyle,
@@ -60,6 +63,8 @@ export function ContentModes({
         onSourceEvent={onSourceEvent}
         locale={locale}
         preparedVisual={derivedVisual}
+        preparedPreview={derivedPreview}
+        {...(onSurfaceMounted === undefined ? {} : { onSurfaceMounted })}
         importBrowserMarkdown={importBrowserMarkdown}
         {...(loadCrepeStyle === undefined ? {} : { loadCrepeStyle })}
       />

@@ -22,12 +22,13 @@ export interface SettingsPanelState {
   };
   versionUsable: boolean;
   mutationPending?: boolean;
+  mutationOccupied?: boolean;
   result: SettingsResult;
 }
 
 export interface SettingsPanelProps {
   state: SettingsPanelState;
-  onActivity(eventAt: number): void;
+  onActivity(eventAt: number, kind?: "recovery-credential"): void;
   saveTitle(value: string): void;
   saveFormat(value: "text" | "markdown"): void;
   saveExpiration(value: ExpirationInput): void;
@@ -114,7 +115,7 @@ function resultMessage(result: SettingsPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-function ResultActions({ result, versionUsable, mutationBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; locale: Locale }) {
+function ResultActions({ result, versionUsable, mutationBlocked, recoveryBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; recoveryBlocked: boolean; locale: Locale }) {
   const [credential, setCredential] = React.useState("");
   const copy = labels(locale);
   if (result.state === "idle") return !versionUsable ? <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button> : null;
@@ -125,10 +126,10 @@ function ResultActions({ result, versionUsable, mutationBlocked, retry, reconcil
   return (
     <div data-settings-result={result.state} className="flex flex-wrap items-center gap-2">
       <p role={role} className="basis-full">{resultMessage(result, locale)}</p>
-      {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp); }} /></label>}
+      {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label>}
       {recovery && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; retry(credential === "" ? null : credential); }}>{copy.retry}</Button>}
       {(!versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
+      {result.state === "reconciliation-required" && <Button type="button" disabled={recoveryBlocked} onClick={() => { if (recoveryBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
     </div>
   );
 }
@@ -143,8 +144,9 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
   const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
   const pending = state.result.state === "pending";
-  const mutationBlocked = state.mutationPending === true || pending || !state.versionUsable;
-  const discardBlocked = state.mutationPending === true || pending;
+  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
+  const recoveryBlocked = state.mutationPending === true || pending;
+  const discardBlocked = recoveryBlocked;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const activity = (event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>) => onActivity(event.timeStamp);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
@@ -191,7 +193,7 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
       </div>
       <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>
-      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
+      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} recoveryBlocked={recoveryBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
 }

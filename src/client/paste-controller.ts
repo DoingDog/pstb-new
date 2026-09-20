@@ -156,7 +156,7 @@ export interface PasteController {
   enterTerminal(phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void;
   settleTerminal(outcome: TerminalOutcomeKey, at?: number): boolean;
   recordLocalAction(action: {
-    key: "copy" | "download";
+    key: ActionKey;
     state: "pending" | "succeeded" | "failed";
     attempt: number;
     startedAt: string;
@@ -282,7 +282,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     state = { ...state, originalMutationFailure: { key: actionKey(intent), status: failure.status, failedAt: instant(at) } };
   };
   const recordLocalAction = (action: {
-    key: "copy" | "download";
+    key: ActionKey;
     state: "pending" | "succeeded" | "failed";
     attempt: number;
     startedAt: string;
@@ -373,7 +373,12 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   };
 
   const sourceEvent = (event: SourceEvent): void => {
-    state = { ...state, draft: event.content, localGeneration: state.localGeneration + 1 };
+    state = {
+      ...state,
+      draft: event.content,
+      localGeneration: state.localGeneration + 1,
+      displayGeneration: state.displayGeneration + 1,
+    };
     if (slot.state !== "idle") {
       state = { ...state, coalescedSource: event.content };
       if (slot.state === "content-reconciliation") slot = { ...slot, laterDraft: event.content };
@@ -785,12 +790,14 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     clearRequestOwnership();
     state = {
       ...state,
+      draft: state.acceptedSource,
+      displayGeneration: state.displayGeneration + 1,
       coalescedSource: null,
       conflictCandidate: null,
       originalMutationFailure: null,
       reconciliationRequired: false,
       autosave: {
-        state: state.draft === state.acceptedSource ? "clean" : "waiting",
+        state: "clean",
         confirmedAt: state.autosave.confirmedAt,
         failedAt: null,
       },

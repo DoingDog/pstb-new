@@ -24,6 +24,7 @@ export interface HistoryPanelProps {
   openHistory(): void;
   selectRevision(revision: number): void;
   computeDiff(): void;
+  setDiffMounted?(mounted: boolean): void;
   back(): void;
   locale?: Locale;
 }
@@ -32,7 +33,17 @@ function historyFailure(state: HistoryPanelState, locale: Locale): string | null
   return state.failure === null ? null : errorMessage(locale, state.failure.value.code);
 }
 
-function Detail({ state, computeDiff, back, mobile, locale }: { state: HistoryPanelState; computeDiff(): void; back(): void; mobile: boolean; locale: Locale }) {
+const noDiffMountChange = (_mounted: boolean): void => undefined;
+
+function DiffLifecycle({ mounted, setDiffMounted }: { mounted: boolean; setDiffMounted(mounted: boolean): void }) {
+  React.useEffect(() => {
+    setDiffMounted(mounted);
+    return () => setDiffMounted(false);
+  }, [mounted, setDiffMounted]);
+  return null;
+}
+
+function Detail({ state, computeDiff, setDiffMounted, back, mobile, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; back(): void; mobile: boolean; locale: Locale }) {
   const copy = labels(locale);
   const failure = historyFailure(state, locale);
   const backButton = mobile && <Button type="button" variant="outline" onClick={back}>{copy.back}</Button>;
@@ -40,11 +51,18 @@ function Detail({ state, computeDiff, back, mobile, locale }: { state: HistoryPa
   if (state.snapshotState === "failed") return <section data-history-detail="true" aria-label={copy.selectedRevision}>{backButton}<p role="alert">{failure ?? errorMessage(locale, "UNKNOWN_ERROR")}</p></section>;
   if (state.selected === null) return mobile ? null : <section data-history-detail="true" aria-label={copy.selectedRevision}><p>{copy.selectedRevision}</p></section>;
 
+  return <DetailTabs state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} backButton={backButton} locale={locale} />;
+}
+
+function DetailTabs({ state, computeDiff, setDiffMounted, backButton, locale }: { state: HistoryPanelState; computeDiff(): void; setDiffMounted(mounted: boolean): void; backButton: React.ReactNode; locale: Locale }) {
+  const copy = labels(locale);
+  const [tab, setTab] = React.useState("diff");
   return (
     <section data-history-detail="true" aria-label={copy.selectedRevision} className="min-w-0">
+      <DiffLifecycle mounted={tab === "diff"} setDiffMounted={setDiffMounted} />
       {backButton}
-      <h2 className="mt-2 text-base font-medium">{copy.revision} {state.selected.revision}</h2>
-      <Tabs defaultValue="diff">
+      <h2 className="mt-2 text-base font-medium">{copy.revision} {state.selected!.revision}</h2>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="diff">{copy.unifiedDiff}</TabsTrigger>
           <TabsTrigger value="snapshot">{copy.fullSnapshot}</TabsTrigger>
@@ -55,21 +73,21 @@ function Detail({ state, computeDiff, back, mobile, locale }: { state: HistoryPa
           {state.diff.state === "failed" && <p role="alert">{state.diff.error ?? errorMessage(locale, "UNKNOWN_ERROR")}</p>}
           {state.diff.state === "ready" && <pre aria-label={copy.selectedRevision} className="overflow-auto whitespace-pre-wrap">{state.diff.lines.map((line, index) => <React.Fragment key={index}>{formatHistoryDiffLine(line)}</React.Fragment>)}</pre>}
         </TabsContent>
-        <TabsContent value="snapshot"><pre className="overflow-auto whitespace-pre-wrap">{state.selected.content}</pre></TabsContent>
+        <TabsContent value="snapshot"><pre className="overflow-auto whitespace-pre-wrap">{state.selected!.content}</pre></TabsContent>
       </Tabs>
     </section>
   );
 }
 
-export function HistoryPanel({ active, state, openHistory, selectRevision, computeDiff, back, locale = "en" }: HistoryPanelProps) {
+export function HistoryPanel({ active, state, openHistory, selectRevision, computeDiff, setDiffMounted = noDiffMountChange, back, locale = "en" }: HistoryPanelProps) {
   const wasActive = React.useRef(false);
   const wasMobileActive = React.useRef(false);
   const mobile = useIsMobile();
   const [mobileDetail, setMobileDetail] = React.useState(false);
   React.useEffect(() => {
-    if (active && !wasActive.current) openHistory();
+    if (active && (!wasActive.current || state.listState === "stale")) openHistory();
     wasActive.current = active;
-  }, [active, openHistory]);
+  }, [active, openHistory, state.listState]);
   React.useLayoutEffect(() => {
     if (!active || !wasMobileActive.current) setMobileDetail(false);
     wasMobileActive.current = active;
@@ -100,7 +118,7 @@ export function HistoryPanel({ active, state, openHistory, selectRevision, compu
     <section aria-label={copy.history} className="min-w-0">
       <div className="grid min-w-0 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
         {showList && <nav data-history-list="true" aria-label={copy.history} className="flex min-w-0 flex-col gap-2">{listContent}</nav>}
-        {showDetail && <div className={mobile ? undefined : "hidden md:block"}><Detail state={state} computeDiff={computeDiff} back={returnToList} mobile={mobile} locale={locale} /></div>}
+        {showDetail && <div className={mobile ? undefined : "hidden md:block"}><Detail state={state} computeDiff={computeDiff} setDiffMounted={setDiffMounted} back={returnToList} mobile={mobile} locale={locale} /></div>}
       </div>
     </section>
   );

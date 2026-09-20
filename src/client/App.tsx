@@ -1,5 +1,6 @@
 // Derived from shadcn-ui/ui new-york-v4/sidebar-11 at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { errorMessage, formatDate, labels, resolveBrowserLocale, type Locale } from "../i18n";
 import { createPasteApi } from "./api";
 import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
@@ -267,6 +268,45 @@ export function App({ initialPage }: AppProps) {
   const ordinary = terminal === null && !rootHandoff && isOrdinaryPage(initialPage);
   const needsCreateApi = rootHandoff || (terminal === null && initialPage.ok && initialPage.bootstrap.page === "create");
   const create = React.useMemo(() => needsCreateApi ? createPasteApi({ fetch: globalThis.fetch, crypto: globalThis.crypto }).create : null, [needsCreateApi]);
+  const createAttempt = React.useRef(0);
+  const createWithAction = React.useCallback(async (...args: Parameters<ReturnType<typeof createPasteApi>["create"]>) => {
+    if (create === null) throw new Error("Create API is unavailable");
+    const attempt = ++createAttempt.current;
+    const startedAt = new Date().toISOString();
+    setRecords((records) => ({ ...records, lastAction: { state: "pending", key: "create", attempt, startedAt } }));
+    try {
+      const result = await create(...args);
+      setRecords((records) => records.lastAction.state === "pending" && records.lastAction.key === "create" && records.lastAction.attempt === attempt
+        ? {
+          ...records,
+          lastAction: {
+            state: result.ok ? "succeeded" : "failed",
+            key: "create",
+            attempt,
+            startedAt,
+            settledAt: new Date().toISOString(),
+            outcomeKey: null,
+          },
+        }
+        : records);
+      return result;
+    } catch (error) {
+      setRecords((records) => records.lastAction.state === "pending" && records.lastAction.key === "create" && records.lastAction.attempt === attempt
+        ? {
+          ...records,
+          lastAction: {
+            state: "failed",
+            key: "create",
+            attempt,
+            startedAt,
+            settledAt: new Date().toISOString(),
+            outcomeKey: null,
+          },
+        }
+        : records);
+      throw error;
+    }
+  }, [create]);
   const headingId = "workbench-heading";
   const heading = rootHandoff ? labels(locale).create : terminal === null ? pageHeading(initialPage, locale) : terminalHeading(terminal, locale);
   const copy = labels(locale);
@@ -320,6 +360,7 @@ export function App({ initialPage }: AppProps) {
           return visual;
         },
         stageDiff: async (source, generation) => ({ kind: "target-bound-fallback", source, generation }),
+        mounted: () => [],
         commit: (staged, generation) => {
           const previous = local.resources;
           local.resources = { ...staged, generation };
@@ -373,7 +414,22 @@ export function App({ initialPage }: AppProps) {
       selectedSourceCurrent: isCurrent(),
       commitCurrent: isCurrent,
     }).then((receipt) => {
-      if (!ownsSelection()) return;
+      if (!ownsSelection()) {
+        setRecords((records) => records.lastAction.state === "pending" && records.lastAction.key === "use-consumed-response" && records.lastAction.attempt === attempt
+          ? {
+            ...records,
+            lastAction: {
+              state: "failed",
+              key: "use-consumed-response",
+              attempt,
+              startedAt: instant,
+              settledAt: new Date().toISOString(),
+              outcomeKey: "use-consumed-response-display-failed",
+            },
+          }
+          : records);
+        return;
+      }
       local.pending = false;
       const outcome = receipt === null
         ? "use-consumed-response-display-failed"
@@ -410,7 +466,7 @@ export function App({ initialPage }: AppProps) {
   }, []);
   const enterTerminal = React.useCallback((page: TerminalPage) => {
     disposeTerminalResources(terminalRef.current?.local.resources ?? null);
-    setTerminal(createTerminalState(page));
+    flushSync(() => setTerminal(createTerminalState(page)));
   }, [createTerminalState]);
 
   return (
@@ -434,7 +490,7 @@ export function App({ initialPage }: AppProps) {
         <Route
           initialPage={initialPage}
           locale={locale}
-          create={create}
+          create={create === null ? null : createWithAction}
           terminal={terminal}
           rootHandoff={rootHandoff}
           onRecordsChange={setRecords}

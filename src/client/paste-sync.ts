@@ -544,7 +544,7 @@ export class PasteSync implements PasteSyncController {
       this.clearRetryIntent();
       this.options.emit({ type: "forbidden", at: receivedAt });
       this.setState("forbidden", receivedAt);
-      this.clearTimer();
+      this.armTimer();
       return;
     }
     if (result.status === 404) {
