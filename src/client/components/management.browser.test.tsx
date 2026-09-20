@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
-import { flushSync } from "react-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { page, userEvent } from "vitest/browser";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import type { ReactNode } from "react";
@@ -11,36 +10,45 @@ import { PasswordPanel } from "./PasswordPanel";
 import { DeleteFlow } from "./DeleteFlow";
 import "../index.css";
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const mounted: Array<{ root: Root; element: HTMLDivElement }> = [];
+let consoleErrors: Array<unknown[]> = [];
+
+beforeEach(() => {
+  consoleErrors = vi.spyOn(console, "error").mock.calls;
+});
 
 async function mount(node: ReactNode) {
   const element = document.createElement("div");
   document.body.appendChild(element);
   const root = createRoot(element);
-  flushSync(() => root.render(node));
+  React.act(() => root.render(node));
   mounted.push({ root, element });
   return {
     element,
     async render(next: ReactNode): Promise<void> {
-      flushSync(() => root.render(next));
+      React.act(() => root.render(next));
       await Promise.resolve();
     },
   };
 }
 
 function click(element: Element): void {
-  flushSync(() => (element as HTMLButtonElement).click());
+  React.act(() => (element as HTMLButtonElement).click());
 }
 
-function waitForFocus(element: Element): Promise<void> {
-  if (document.activeElement === element) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onFocus = () => {
-      if (document.activeElement !== element) return;
-      document.removeEventListener("focusin", onFocus);
-      resolve();
-    };
-    document.addEventListener("focusin", onFocus);
+async function clickDialogAction(element: Element): Promise<void> {
+  await React.act(async () => {
+    (element as HTMLButtonElement).click();
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+}
+
+async function drainDialogTransition(): Promise<void> {
+  await React.act(async () => {
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 160));
   });
 }
 
@@ -80,11 +88,18 @@ function history(node: ReactNode): ReactNode {
 
 afterEach(async () => {
   for (const value of mounted.splice(0)) {
-    flushSync(() => value.root.unmount());
+    await React.act(async () => {
+      value.root.unmount();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
     value.element.remove();
   }
   await page.viewport(1280, 720);
+  const actWarnings = consoleErrors.filter(
+    ([message]) => typeof message === "string" && message.includes("not wrapped in act"),
+  );
   vi.restoreAllMocks();
+  expect(actWarnings).toHaveLength(0);
 });
 
 describe("history lazy load", () => {
@@ -217,14 +232,14 @@ function deleteState(overrides: Record<string, unknown> = {}) {
 }
 
 function input(element: HTMLInputElement, value: string): void {
-  flushSync(() => {
+  React.act(() => {
     element.value = value;
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
 
 function change(element: { value: string; dispatchEvent(event: Event): boolean }, value: string): void {
-  flushSync(() => {
+  React.act(() => {
     element.value = value;
     element.dispatchEvent(new Event("change", { bubbles: true }));
   });
@@ -509,25 +524,25 @@ describe("Delete result", () => {
     const deletePaste = vi.fn();
     const fixture = await mount(<DeleteFlow state={deleteState()} deletePaste={deletePaste} retry={vi.fn()} reload={vi.fn()} />);
     const trigger = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Delete")!;
-    trigger.focus();
-    click(trigger);
-    await Promise.resolve();
+    React.act(() => trigger.focus());
+    await clickDialogAction(trigger);
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(dialog.textContent).toContain("Delete this paste permanently.");
     expect(document.activeElement?.textContent).toBe("Cancel");
     const destructive = dialog.querySelector<HTMLButtonElement>('button[data-variant="destructive"]')!;
     expect(destructive.textContent).toBe("Delete");
 
-    flushSync(() => dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
-    await Promise.resolve();
-    expect(document.querySelector('[role="dialog"]')?.getAttribute("data-state")).toBe("closed");
+    await React.act(async () => {
+      await userEvent.keyboard("{Escape}");
+    });
+    await drainDialogTransition();
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(deletePaste).not.toHaveBeenCalled();
-    await waitForFocus(trigger);
-    expect(document.activeElement).toBe(trigger);
 
-    click(trigger);
-    await Promise.resolve();
-    click(document.querySelector<HTMLElement>('[role="dialog"] button[data-variant="destructive"]')!);
+    await clickDialogAction(trigger);
+    await clickDialogAction(document.querySelector<HTMLElement>('[role="dialog"] button[data-variant="destructive"]')!);
+    await drainDialogTransition();
     expect(deletePaste).toHaveBeenCalledWith(null);
   });
 
@@ -704,7 +719,7 @@ describe("management hardening regressions", () => {
       expect(save.disabled).toBe(true);
       save.disabled = false;
       click(save);
-      flushSync(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      React.act(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     }
     expect(saveTitle).not.toHaveBeenCalled();
     expect(saveFormat).not.toHaveBeenCalled();
@@ -745,7 +760,7 @@ describe("management hardening regressions", () => {
     expect(result()).toBe("pending");
     discardButton.disabled = false;
     click(discardButton);
-    flushSync(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    React.act(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(discard).not.toHaveBeenCalled();
     expect(result()).toBe("pending");
 
@@ -755,7 +770,7 @@ describe("management hardening regressions", () => {
       expect(save.disabled).toBe(true);
       save.disabled = false;
       click(save);
-      flushSync(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      React.act(() => save.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     }
     expect(saveTitle).not.toHaveBeenCalled();
     expect(saveFormat).not.toHaveBeenCalled();
@@ -879,7 +894,7 @@ describe("management hardening regressions", () => {
     expect(result()).toBe("pending");
     discardButton.disabled = false;
     click(discardButton);
-    flushSync(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    React.act(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(discard).not.toHaveBeenCalled();
     expect(result()).toBe("pending");
 
@@ -887,7 +902,7 @@ describe("management hardening regressions", () => {
     expect(set.disabled).toBe(true);
     set.disabled = false;
     click(set);
-    flushSync(() => set.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    React.act(() => set.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(setPassword).not.toHaveBeenCalled();
 
     await fixture.render(
@@ -914,7 +929,7 @@ describe("management hardening regressions", () => {
       expect(action.disabled).toBe(true);
       action.disabled = false;
       click(action);
-      flushSync(() => action.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+      React.act(() => action.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     }
     expect(setPassword).not.toHaveBeenCalled();
     expect(clearPassword).not.toHaveBeenCalled();
@@ -981,13 +996,12 @@ describe("management hardening regressions", () => {
   it("closes or disables a delete confirmation when another mutation begins", async () => {
     const deletePaste = vi.fn();
     const fixture = await mount(<DeleteFlow state={deleteState()} deletePaste={deletePaste} retry={vi.fn()} reload={vi.fn()} />);
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Delete")!);
-    await Promise.resolve();
+    await clickDialogAction(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Delete")!);
     await fixture.render(<DeleteFlow state={deleteState({ mutationPending: true })} deletePaste={deletePaste} retry={vi.fn()} reload={vi.fn()} />);
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const destructive = dialog?.querySelector<HTMLButtonElement>('button[data-variant="destructive"]');
     expect(dialog === null || destructive?.disabled === true).toBe(true);
-    destructive?.click();
+    if (destructive !== null && destructive !== undefined) await clickDialogAction(destructive);
     expect(deletePaste).not.toHaveBeenCalled();
   });
 

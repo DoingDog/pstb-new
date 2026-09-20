@@ -130,6 +130,7 @@ vi.mock("micromark", () => ({ micromark: preview.micromark }));
 vi.mock("micromark-extension-gfm", () => ({ gfm: preview.gfm, gfmHtml: preview.gfmHtml }));
 
 import { createMarkdownModes } from "./markdown";
+import * as markdown from "./markdown";
 
 type FakeVisualRoot = Node & {
   childNodes: Node[];
@@ -193,6 +194,35 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+it("creates and cleans a detached visual resource before adoption", async () => {
+  type Prepared = {
+    root: HTMLElement;
+    source: Pick<HTMLTextAreaElement, "value">;
+    dispose(): Promise<void>;
+  };
+  const prepare = (markdown as { prepareMarkdownVisual?: (source: string, ownerDocument: Pick<Document, "createElement">) => Promise<Prepared> }).prepareMarkdownVisual;
+  expect(prepare).toBeTypeOf("function");
+  if (prepare === undefined) return;
+
+  const root = createVisualRoot() as unknown as HTMLElement;
+  const ownerDocument = { createElement: vi.fn(() => root) } as Pick<Document, "createElement">;
+  const prepared = await prepare("# target", ownerDocument);
+
+  expect(prepared.root).toBe(root);
+  expect(prepared.source.value).toBe("# target");
+  expect(crepe.state.instances).toHaveLength(1);
+  await prepared.dispose();
+  expect(crepe.state.instances[0]!.destroyed).toBe(true);
+});
+
+it("renders an exact detached preview resource", async () => {
+  const prepare = (markdown as { prepareMarkdownPreview?: (source: string) => Promise<{ source: string; html: string }> }).prepareMarkdownPreview;
+  expect(prepare).toBeTypeOf("function");
+  if (prepare === undefined) return;
+
+  await expect(prepare("# target")).resolves.toEqual({ source: "# target", html: "<p># target</p>" });
 });
 
 describe("createMarkdownModes", () => {

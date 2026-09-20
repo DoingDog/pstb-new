@@ -36,6 +36,79 @@ export interface MarkdownModes {
   destroy(): Promise<void>;
 }
 
+export interface PreparedMarkdownVisualBinding {
+  onDocumentChange(markdown: string): void;
+  onModeChange?(mode: MarkdownMode): void;
+  onPreview?(preview: MarkdownPreview): void;
+  onVisualError?(error: { message: string; retry(): Promise<void> }): void;
+}
+
+export interface PreparedMarkdownVisual {
+  root: HTMLElement;
+  source: Pick<HTMLTextAreaElement, "value">;
+  modes: MarkdownModes;
+  bind(binding: PreparedMarkdownVisualBinding): void;
+  dispose(): Promise<void>;
+}
+
+export async function prepareMarkdownPreview(source: string, loadPreview?: () => Promise<MarkdownPreviewModules>): Promise<MarkdownPreview> {
+  const [{ micromark }, { gfm, gfmHtml }] = await (loadPreview?.() ??
+    Promise.all([import("micromark"), import("micromark-extension-gfm")]));
+  return {
+    source,
+    html: micromark(source, {
+      allowDangerousHtml: false,
+      allowDangerousProtocol: false,
+      extensions: [gfm()],
+      htmlExtensions: [gfmHtml()],
+    }),
+  };
+}
+
+export async function prepareMarkdownVisual(sourceValue: string, ownerDocument: Pick<Document, "createElement">): Promise<PreparedMarkdownVisual> {
+  const root = ownerDocument.createElement("div");
+  const source: Pick<HTMLTextAreaElement, "value"> = { value: sourceValue };
+  let binding: PreparedMarkdownVisualBinding = { onDocumentChange: () => undefined };
+  let ready = false;
+  let failure: Error | null = null;
+  const modes = createMarkdownModes({
+    source,
+    visualRoot: root,
+    onDocumentChange: (markdown) => binding.onDocumentChange(markdown),
+    onModeChange: (mode) => {
+      ready = mode === "visual";
+      binding.onModeChange?.(mode);
+    },
+    onPreview: (preview) => binding.onPreview?.(preview),
+    onVisualError: (error) => {
+      failure = new Error(error.message);
+      binding.onVisualError?.(error);
+    },
+  });
+
+  await modes.enterVisual();
+  if (!ready) {
+    await modes.destroy();
+    throw failure ?? new Error("Unable to prepare visual editor");
+  }
+
+  let disposed = false;
+  return {
+    root,
+    source,
+    modes,
+    bind(next) {
+      binding = next;
+    },
+    async dispose() {
+      if (disposed) return;
+      disposed = true;
+      await modes.destroy();
+      root.parentNode?.removeChild(root);
+    },
+  };
+}
+
 export function createMarkdownModes(options: MarkdownModesOptions): MarkdownModes {
   let visualEditor: Crepe | undefined;
   let visualSession: HTMLElement | undefined;
@@ -298,19 +371,9 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
       if (!canPreview || !current(id)) return;
 
       try {
-        const [{ micromark }, { gfm, gfmHtml }] = await (options.loadPreview?.() ??
-          Promise.all([import("micromark"), import("micromark-extension-gfm")]));
+        const preview = await prepareMarkdownPreview(options.source.value, options.loadPreview);
         if (!current(id)) return;
-
-        const source = options.source.value;
-        const html = micromark(source, {
-          allowDangerousHtml: false,
-          allowDangerousProtocol: false,
-          extensions: [gfm()],
-          htmlExtensions: [gfmHtml()],
-        });
-        if (!current(id)) return;
-        options.onPreview?.({ source, html });
+        options.onPreview?.(preview);
         if (current(id)) setMode("preview");
       } catch (error) {
         if (current(id)) throw error;

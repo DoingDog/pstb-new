@@ -9,7 +9,10 @@ export interface LocalOnlyPastePageProps {
   locale: Locale;
   phase: "armed-view-once" | "consumed" | "not-found" | "delete-uncertain";
   source: string;
+  consumedSource?: string | null;
   initialMarkdown: TrustedMarkdownHtml | null;
+  onUseConsumedResponse?(): void;
+  onKeepCurrent?(): void;
   clipboard?: ClipboardPort;
   download?: DownloadPort;
   navigation?: NavigationPort;
@@ -25,8 +28,9 @@ function phaseLabel(locale: Locale, phase: LocalOnlyPastePageProps["phase"]): st
   }
 }
 
-export function LocalOnlyPastePage({ locale, phase, source, initialMarkdown, clipboard, download, navigation }: LocalOnlyPastePageProps) {
+export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, onUseConsumedResponse, onKeepCurrent, clipboard, download, navigation }: LocalOnlyPastePageProps) {
   const copy = labels(locale);
+  const canChooseConsumedSource = phase === "consumed" && consumedSource !== null && consumedSource !== source;
   const [wrap, setWrap] = React.useState(false);
   const [sourceVisible, setSourceVisible] = React.useState(false);
   const [preview, setPreview] = React.useState<TrustedMarkdownHtml | null>(initialMarkdown);
@@ -95,6 +99,7 @@ export function LocalOnlyPastePage({ locale, phase, source, initialMarkdown, cli
       {phase === "delete-uncertain"
         ? <p role="alert">{phaseLabel(locale, phase)}</p>
         : <p>{phaseLabel(locale, phase)}</p>}
+      {canChooseConsumedSource && <div className="flex flex-wrap gap-2"><Button type="button" onClick={onUseConsumedResponse}>{copy.useRemote}</Button><Button type="button" variant="outline" onClick={onKeepCurrent}>{copy.keepCurrent}</Button></div>}
       {previewFailure !== null && <p role="alert">{previewFailure}</p>}
       <LocalActions
         actionScope={`local:${phase}:${source}`}

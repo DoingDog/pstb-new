@@ -3,7 +3,7 @@ import { labels, type Locale } from "../../i18n";
 import { withPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
 import type { AutosaveControllerApi, AutosaveState } from "../autosave";
 import type { SourceEvent } from "../contracts";
-import type { MarkdownModesOptions } from "../markdown";
+import type { MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import type { PasteLinks } from "../../types";
 import { ContentModes, type ContentMode } from "./ContentModes";
 import { LocalActions, type LocalActionState } from "./LocalActions";
@@ -13,6 +13,10 @@ export interface OrdinaryPastePageProps {
   pasteIdentity: string;
   format: "text" | "markdown";
   source: string;
+  derivedSource?: string;
+  derivedGeneration?: number | undefined;
+  derivedPreview?: MarkdownPreview | null;
+  derivedVisual?: PreparedMarkdownVisual | null;
   acceptedSource: string;
   version: string;
   autosaveAcceptedSource: string;
@@ -47,6 +51,10 @@ function OrdinaryPastePageBody({
   pasteIdentity,
   format,
   source,
+  derivedSource = source,
+  derivedGeneration,
+  derivedPreview = null,
+  derivedVisual = null,
   initialMarkdown,
   links,
   password,
@@ -69,6 +77,10 @@ function OrdinaryPastePageBody({
   const contentProps = {
     format,
     source,
+    displaySource: derivedSource,
+    derivedGeneration,
+    derivedPreview,
+    derivedVisual,
     initialSource,
     initialMarkdown,
     wrap: wrap ? "soft" as const : "off" as const,

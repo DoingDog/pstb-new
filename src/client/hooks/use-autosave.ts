@@ -56,6 +56,7 @@ export function useAutosave(options: UseAutosaveOptions): UseAutosaveResult {
       compositionEnd: (content, eventAt) => entry.current?.controller.compositionEnd(content, eventAt),
       retry: () => entry.current?.controller.retry(),
       overwrite: () => entry.current?.controller.overwrite(),
+      acknowledgeAcceptedContent: (acceptedSource, version) => entry.current?.controller.acknowledgeAcceptedContent(acceptedSource, version) ?? false,
       applyAuthoritative: (transition) => entry.current?.controller.applyAuthoritative(transition),
       slotAvailable: () => entry.current?.controller.slotAvailable(),
       dispose: () => entry.current?.controller.dispose(),

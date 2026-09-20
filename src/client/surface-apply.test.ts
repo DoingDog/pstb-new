@@ -93,6 +93,25 @@ describe("staged surface application", () => {
     expect(fixture.ports.commit).toHaveBeenCalledWith({ preview: "preview-0", visual: "visual-0", diff: "diff-0" }, 2);
   });
 
+  it("rechecks the confirmed Reload guard before committing a staged target", async () => {
+    const fixture = surfaceFixture();
+    let current = true;
+    const attempt = fixture.apply.applyReload("two", {
+      requestCurrent: true,
+      acceptedBaselineCurrent: true,
+      draftCurrent: true,
+      localGenerationCurrent: true,
+      mutationOccupied: false,
+      terminal: false,
+      commitCurrent: () => current,
+    });
+    current = false;
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(false);
+    expect(fixture.ports.commit).not.toHaveBeenCalled();
+  });
+
   it("keeps current presentation when an edit invalidates a detached stage", async () => {
     const fixture = surfaceFixture();
     const attempt = fixture.apply.apply("two");
@@ -591,6 +610,23 @@ describe("StagedSurfaceApply round-two coordination regressions", () => {
     const fixture = surfaceFixture();
     await expect(fixture.apply.applyTerminalLocal("two", { terminalEpochCurrent: true, displayGenerationCurrent: false, selectedSourceCurrent: true })).resolves.toBeNull();
     expect(fixture.ports.stagePreview).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the terminal-local selection before committing staged resources", async () => {
+    const fixture = surfaceFixture();
+    let current = true;
+    const entry = {
+      terminalEpochCurrent: true,
+      displayGenerationCurrent: true,
+      selectedSourceCurrent: true,
+      commitCurrent: () => current,
+    };
+    const attempt = fixture.apply.applyTerminalLocal("two", entry);
+    current = false;
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toMatchObject({ applied: false });
+    expect(fixture.ports.commit).not.toHaveBeenCalled();
   });
 
   it("settles an invalidated terminal-local receipt after its stages finish", async () => {

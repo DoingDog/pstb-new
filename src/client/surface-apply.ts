@@ -46,6 +46,7 @@ export interface AutosyncApplyEntry {
   mutationOccupied: boolean;
   unresolvedMutation: boolean;
   localSourceWork: boolean;
+  commitCurrent?(): boolean;
 }
 export interface UseRemoteApplyEntry {
   candidateCurrent: boolean;
@@ -63,6 +64,7 @@ export interface UseRemoteApplyEntry {
   mutationOccupied: boolean;
   unresolvedMutation: boolean;
   conflictCausedByCandidate: boolean;
+  commitCurrent?(): boolean;
 }
 export interface ReloadApplyEntry {
   requestCurrent: boolean;
@@ -71,11 +73,13 @@ export interface ReloadApplyEntry {
   localGenerationCurrent: boolean;
   mutationOccupied: boolean;
   terminal: boolean;
+  commitCurrent?(): boolean;
 }
 export interface TerminalLocalApplyEntry {
   terminalEpochCurrent: boolean;
   displayGenerationCurrent: boolean;
   selectedSourceCurrent: boolean;
+  commitCurrent?(): boolean;
 }
 
 export type TerminalLocalToken = symbol;
@@ -140,6 +144,7 @@ type Attempt = {
   oldStatus: StagedSurfaceSnapshot["status"];
   oldFallback: SurfaceFallback;
   activeUntil?: number;
+  commitCurrent?: () => boolean;
 };
 
 function copyCapture(capture: DerivedSurfaceCapture): DerivedSurfaceCapture {
@@ -218,7 +223,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     retire(previous);
     restorePresentation(previous);
   };
-  const allocate = (source: string, activeUntil?: number, terminalLocal = false): Attempt => {
+  const allocate = (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean): Attempt => {
     abandonActive();
     const base = copyCapture(current);
     const retryToken = Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff);
@@ -249,6 +254,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       oldStatus: status,
       oldFallback: fallback,
       ...(activeUntil === undefined ? {} : { activeUntil }),
+      ...(commitCurrent === undefined ? {} : { commitCurrent }),
     };
     activeAttempt = attempt;
     if (status !== "fallback") {
@@ -314,7 +320,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   };
 
   const publish = async (attempt: Attempt): Promise<boolean> => {
-    if (!attemptIsCurrent(attempt) || (attempt.activeUntil !== undefined && now() >= attempt.activeUntil)) {
+    if (!attemptIsCurrent(attempt) || (attempt.activeUntil !== undefined && now() >= attempt.activeUntil) || attempt.commitCurrent?.() === false) {
       retire(attempt);
       restorePresentation(attempt);
       return false;
@@ -345,15 +351,15 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     }
   };
 
-  const runAll = async (source: string, activeUntil?: number, terminalLocal = false): Promise<boolean> => {
-    const attempt = allocate(source, activeUntil, terminalLocal);
+  const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean): Promise<boolean> => {
+    const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent);
     await Promise.all([stageOne(attempt, "preview"), stageOne(attempt, "visual"), stageOne(attempt, "diff")]);
     return publish(attempt);
   };
-  const runTerminalLocal = async (source: string): Promise<TerminalLocalApplyReceipt> => {
+  const runTerminalLocal = async (source: string, commitCurrent?: () => boolean): Promise<TerminalLocalApplyReceipt> => {
     const terminalLocalToken = Symbol("terminal-local");
     terminalLocalAttempt = { token: terminalLocalToken, settled: false };
-    return { terminalLocalToken, applied: await runAll(source, undefined, true) };
+    return { terminalLocalToken, applied: await runAll(source, undefined, true, commitCurrent) };
   };
 
   const runRetry = async (source: string, surface: Surface): Promise<boolean> => {
@@ -384,22 +390,22 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     return publish(attempt);
   };
 
-  const guarded = (allowed: boolean, source: string, activeUntil?: number): Promise<boolean> => allowed ? runAll(source, activeUntil) : Promise.resolve(false);
+  const guarded = (allowed: boolean, source: string, activeUntil?: number, commitCurrent?: () => boolean): Promise<boolean> => allowed ? runAll(source, activeUntil, false, commitCurrent) : Promise.resolve(false);
 
   return {
     snapshot,
     apply: runAll,
     applyAutosync(source, entry) {
-      return guarded(autosyncApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil);
+      return guarded(autosyncApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent);
     },
     applyUseRemote(source, entry) {
-      return guarded(useRemoteApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil);
+      return guarded(useRemoteApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent);
     },
     applyReload(source, entry) {
-      return guarded(reloadApplyEntryAllowed(entry), source);
+      return guarded(reloadApplyEntryAllowed(entry), source, undefined, entry.commitCurrent);
     },
     applyTerminalLocal(source, entry) {
-      return terminalLocalApplyEntryAllowed(entry) ? runTerminalLocal(source) : Promise.resolve(null);
+      return terminalLocalApplyEntryAllowed(entry) ? runTerminalLocal(source, entry.commitCurrent) : Promise.resolve(null);
     },
     retry(source) {
       return runRetry(source, fallback ?? "preview");

@@ -785,6 +785,17 @@ describe("PasteSync ordering and recovery", () => {
     expect(networkFixture.reads).toHaveLength(2);
   });
 
+  it("marks an online transport result for degraded network presentation", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    fixture.clock.advance(3_000);
+    const read = fixture.reads[0]!;
+    read.settled = true;
+    read.resolve({ status: 0, transport: "network" } as unknown as PasteSyncReadResult);
+    await fixture.flush();
+
+    expect(fixture.events).toContainEqual({ type: "error", at: 3_000, transport: "network" });
+  });
+
   it("does not let Retry or settle reopen an expired window", async () => {
     const fixture = syncFixture({ loadAt: 0 });
 

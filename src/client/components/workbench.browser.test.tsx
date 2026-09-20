@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
-import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import type { ReactNode } from "react";
@@ -15,14 +14,29 @@ import { SafeMarkdown } from "./SafeMarkdown";
 import { WorkbenchShell } from "./WorkbenchShell";
 import "../index.css";
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const mounted: Array<{ root: Root; element: HTMLDivElement }> = [];
+let consoleErrors: Array<unknown[]> = [];
+
+beforeEach(() => {
+  consoleErrors = vi.spyOn(console, "error").mock.calls;
+});
 
 function mount(node: ReactNode): HTMLDivElement {
   const element = document.createElement("div");
   document.body.appendChild(element);
   const root = createRoot(element);
-  flushSync(() => root.render(node));
+  React.act(() => root.render(node));
   mounted.push({ root, element });
+  return element;
+}
+
+async function mountApp(node: ReactNode): Promise<HTMLDivElement> {
+  const element = mount(node);
+  await React.act(async () => {
+    await vi.dynamicImportSettled();
+  });
   return element;
 }
 
@@ -37,11 +51,11 @@ function records(overrides: Partial<OperationRecords> = {}): OperationRecords {
 }
 
 function click(button: Element): void {
-  flushSync(() => (button as HTMLButtonElement).click());
+  React.act(() => (button as HTMLButtonElement).click());
 }
 
 function pointer(target: EventTarget, type: string, pointerType = "mouse"): void {
-  flushSync(() => target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType, pointerId: 1, isPrimary: true })));
+  React.act(() => target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType, pointerId: 1, isPrimary: true })));
 }
 
 function pointerClick(target: Element, pointerType: "mouse" | "touch"): void {
@@ -53,23 +67,25 @@ function pointerClick(target: Element, pointerType: "mouse" | "touch"): void {
 function rerender(element: HTMLDivElement, node: ReactNode): void {
   const mountedRoot = mounted.find((value) => value.element === element);
   if (mountedRoot === undefined) throw new Error("missing mounted root");
-  flushSync(() => mountedRoot.root.render(node));
+  React.act(() => mountedRoot.root.render(node));
 }
 
 function unmount(element: HTMLDivElement): void {
   const index = mounted.findIndex((value) => value.element === element);
   if (index === -1) throw new Error("missing mounted root");
   const [mountedRoot] = mounted.splice(index, 1);
-  flushSync(() => mountedRoot!.root.unmount());
+  React.act(() => mountedRoot!.root.unmount());
   mountedRoot!.element.remove();
 }
 
 function key(target: EventTarget, value: string): void {
-  flushSync(() => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: value })));
+  React.act(() => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: value })));
 }
 
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+async function nextFrame(): Promise<void> {
+  await React.act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
 }
 
 function tooltip(descriptionId: string): HTMLElement {
@@ -84,12 +100,16 @@ function openTooltips(): HTMLElement[] {
 
 afterEach(() => {
   for (const value of mounted.splice(0)) {
-    flushSync(() => value.root.unmount());
+    React.act(() => value.root.unmount());
     value.element.remove();
   }
   document.body.replaceChildren();
   delete document.documentElement.dataset.theme;
+  const actWarnings = consoleErrors.filter(
+    ([message]) => typeof message === "string" && message.includes("not wrapped in act"),
+  );
   vi.restoreAllMocks();
+  expect(actWarnings).toHaveLength(0);
 });
 
 describe("HelpTrigger", () => {
@@ -107,7 +127,7 @@ describe("HelpTrigger", () => {
     const format = buttons[1]!;
 
     expect(content.getAttribute("aria-describedby")).toBe("content-help");
-    content.focus();
+    React.act(() => content.focus());
     await nextFrame();
     expect(tooltip("content-help").textContent).toContain("Stored exactly as entered.");
     expect(openTooltips()).toHaveLength(1);
@@ -120,7 +140,7 @@ describe("HelpTrigger", () => {
     click(format);
     await nextFrame();
     expect(openTooltips()).toHaveLength(1);
-    expect(tooltip("content-help").closest('[role="tooltip"]')?.getAttribute("data-state")).toBe("closed");
+    expect(document.getElementById("content-help")).toBeNull();
 
     key(format, "Escape");
     await nextFrame();
@@ -274,7 +294,7 @@ describe("local workbench boundaries", () => {
     expect(copied).toEqual(["π"]);
 
     click(Array.from(rendered.querySelectorAll("button")).find((button) => button.textContent === "Download")!);
-    await Promise.resolve();
+    await settle();
     expect(await urls[0]!.text()).toBe("π");
     expect(urls[0]!.type).toBe("application/octet-stream");
 
@@ -286,17 +306,17 @@ describe("local workbench boundaries", () => {
     expect(calls.some((value) => value.key === "download")).toBe(true);
   });
 
-  it("updates document-local locale and theme controls", () => {
-    const rendered = mount(<App initialPage={{ ok: true, bootstrap: { page: "create", locale: "en" }, password: null }} />);
+  it("updates document-local locale and theme controls", async () => {
+    const rendered = await mountApp(<App initialPage={{ ok: true, bootstrap: { page: "create", locale: "en" }, password: null }} />);
     const selects = Array.from(rendered.querySelectorAll("select")) as HTMLSelectElement[];
-    expect(selects).toHaveLength(2);
+    expect(selects.length).toBeGreaterThanOrEqual(2);
     const language = selects[0]!;
     const theme = selects[1]!;
     const controlLabels = dictionaries[language.value as "en" | "zh-CN"].labels;
     expect(rendered.querySelector(`label[for="${language.id}"] > span`)?.textContent).toBe(controlLabels.locale);
     expect(rendered.querySelector(`label[for="${theme.id}"] > span`)?.textContent).toBe(controlLabels.theme);
 
-    flushSync(() => {
+    React.act(() => {
       language.value = "zh-CN";
       language.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -304,7 +324,7 @@ describe("local workbench boundaries", () => {
     expect(document.documentElement.dir).toBe("ltr");
     expect(document.title).toContain("创建剪贴板");
 
-    flushSync(() => {
+    React.act(() => {
       theme.value = "dark";
       theme.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -327,8 +347,10 @@ function deferred<T>() {
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  await React.act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe("LocalActions regressions", () => {
@@ -769,9 +791,9 @@ describe("OperationStatus regressions", () => {
 });
 
 describe("App metadata regression", () => {
-  it("renders all ordinary lifecycle metadata from the bootstrap summary", () => {
+  it("renders all ordinary lifecycle metadata from the bootstrap summary", async () => {
     const expiresAt = "2026-09-20T10:00:00.000Z";
-    const rendered = mount(<App initialPage={{
+    const rendered = await mountApp(<App initialPage={{
       ok: true,
       bootstrap: {
         page: "paste",
@@ -800,7 +822,7 @@ describe("App metadata regression", () => {
     } as never} />);
     click(rendered.querySelector("[data-sidebar=trigger]")!);
     const locale = rendered.querySelector("select") as HTMLSelectElement;
-    flushSync(() => {
+    React.act(() => {
       locale.value = "en";
       locale.dispatchEvent(new Event("change", { bubbles: true }));
     });

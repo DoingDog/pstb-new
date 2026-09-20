@@ -7,7 +7,7 @@ import {
   type AutosaveMarkdownModesOptions,
 } from "../autosave";
 import type { SourceEvent } from "../contracts";
-import type { MarkdownMode, MarkdownModes, MarkdownModesOptions, MarkdownPreview } from "../markdown";
+import type { MarkdownMode, MarkdownModes, MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PlaintextEditor, type EditorWrap } from "./PlaintextEditor";
@@ -24,6 +24,7 @@ export interface MarkdownWorkbenchProps {
   now?(): number;
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
   loadCrepeStyle?(): Promise<unknown>;
+  preparedVisual?: PreparedMarkdownVisual | null;
 }
 
 type WorkbenchFailure = { retry(): void };
@@ -42,6 +43,7 @@ type ModeOwner = {
   failedTarget: MarkdownMode | null;
   localAcknowledgement: string | null;
   pendingAutosave: { content: string; eventAt: number; request: number } | null;
+  preparedVisual: PreparedMarkdownVisual | null;
   controller: MarkdownModes;
 };
 type Ports = {
@@ -80,6 +82,7 @@ export function MarkdownWorkbench({
   now = browserNow,
   importBrowserMarkdown,
   loadCrepeStyle: loadStyle = loadCrepeStyle,
+  preparedVisual = null,
 }: MarkdownWorkbenchProps) {
   const copy = labels(locale);
   const [visualRoot, setVisualRoot] = React.useState<HTMLDivElement | null>(null);
@@ -187,6 +190,7 @@ export function MarkdownWorkbench({
         if (!current()) return;
         await owner.controller.enterVisual();
         if (!current()) return;
+        if (owner.preparedVisual !== null) owner.readyEditorGeneration = request;
         if (owner.readyEditorGeneration !== request) {
           publishFailure();
           return;
@@ -225,8 +229,16 @@ export function MarkdownWorkbench({
     }
   }, [isCurrentOwner]);
 
-  const createOwner = React.useCallback((canonicalSource: string): ModeOwner | null => {
+  const createOwner = React.useCallback((canonicalSource: string, stagedVisual: PreparedMarkdownVisual | null = null): ModeOwner | null => {
     if (visualRoot === null || !mounted.current) return null;
+    if (stagedVisual !== null && stagedVisual.source.value !== canonicalSource) {
+      void stagedVisual.dispose();
+      stagedVisual = null;
+    }
+    if (stagedVisual !== null) {
+      visualRoot.replaceChildren(stagedVisual.root);
+      sourceAdapter.current = stagedVisual.source;
+    }
 
     const owner = {} as ModeOwner;
     const current = (): boolean => isCurrentOwner(owner);
@@ -308,74 +320,91 @@ export function MarkdownWorkbench({
         },
       });
     };
-    const controller = (createAutosaveMarkdownModes as ModeFactory)({
-      autosave: {
-        input: (content, eventAt) => {
-          const pending = owner.pendingAutosave;
-          owner.pendingAutosave = null;
-          if (
-            pending === null ||
-            pending.content !== content ||
-            pending.eventAt !== eventAt ||
-            pending.request !== owner.request ||
-            !current()
-          ) {
-            return;
-          }
-          ports.current.autosave.input(content, eventAt);
+    const onModeChange = (next: MarkdownMode): void => {
+      if (
+        next !== "visual" ||
+        !current() ||
+        owner.target !== "visual" ||
+        owner.editorGeneration === 0 ||
+        owner.editorGeneration !== owner.request
+      ) return;
+      owner.readyEditorGeneration = owner.editorGeneration;
+    };
+    const onCrepeChange = (content: string, eventAt: number, directAutosave = false): void => {
+      const teardown = owner.teardown;
+      const ownsSource =
+        owner.editorSource === owner.source || owner.editorSource === owner.localAcknowledgement;
+      const ownsVisual =
+        owner.target === "visual" &&
+        owner.editorGeneration !== 0 &&
+        owner.editorGeneration === owner.request &&
+        owner.readyEditorGeneration === owner.editorGeneration;
+      const ownsTeardown =
+        (owner.target === "source" || owner.target === "preview") &&
+        teardown !== null &&
+        teardown.request === owner.request &&
+        teardown.editorGeneration !== 0 &&
+        teardown.editorGeneration === owner.editorGeneration &&
+        teardown.source === owner.editorSource;
+      if (!current() || !ownsSource || (!ownsVisual && !ownsTeardown)) return;
+      ++owner.serializerGeneration;
+      owner.failedTarget = null;
+      setFailure(null);
+      if (ownsVisual) setMode("visual");
+      owner.editorSource = content;
+      owner.localAcknowledgement = content;
+      owner.pendingAutosave = { content, eventAt, request: owner.request };
+      sourceAdapter.current.value = content;
+      ports.current.onSourceEvent({ type: "crepe-change", content, eventAt });
+      if (directAutosave) {
+        owner.pendingAutosave = null;
+        ports.current.autosave.input(content, eventAt);
+      }
+    };
+    const onPreview = (nextPreview: MarkdownPreview): void => {
+      if (
+        !current() ||
+        owner.target !== "preview" ||
+        nextPreview.source !== sourceAdapter.current.value
+      ) return;
+      setPreview(nextPreview);
+    };
+    const controller = stagedVisual === null
+      ? (createAutosaveMarkdownModes as ModeFactory)({
+        autosave: {
+          input: (content, eventAt) => {
+            const pending = owner.pendingAutosave;
+            owner.pendingAutosave = null;
+            if (
+              pending === null ||
+              pending.content !== content ||
+              pending.eventAt !== eventAt ||
+              pending.request !== owner.request ||
+              !current()
+            ) {
+              return;
+            }
+            ports.current.autosave.input(content, eventAt);
+          },
         },
-      },
-      now: () => ports.current.now(),
-      source: sourceAdapter.current,
-      visualRoot,
-      ...(ports.current.loadPreview === undefined ? {} : { loadPreview: ports.current.loadPreview }),
-      onModeChange: (next) => {
-        if (
-          next !== "visual" ||
-          !current() ||
-          owner.target !== "visual" ||
-          owner.editorGeneration === 0 ||
-          owner.editorGeneration !== owner.request
-        ) return;
-        owner.readyEditorGeneration = owner.editorGeneration;
-      },
-      onCrepeChange: (content, eventAt) => {
-        const teardown = owner.teardown;
-        const ownsSource =
-          owner.editorSource === owner.source || owner.editorSource === owner.localAcknowledgement;
-        const ownsVisual =
-          owner.target === "visual" &&
-          owner.editorGeneration !== 0 &&
-          owner.editorGeneration === owner.request &&
-          owner.readyEditorGeneration === owner.editorGeneration;
-        const ownsTeardown =
-          (owner.target === "source" || owner.target === "preview") &&
-          teardown !== null &&
-          teardown.request === owner.request &&
-          teardown.editorGeneration !== 0 &&
-          teardown.editorGeneration === owner.editorGeneration &&
-          teardown.source === owner.editorSource;
-        if (!current() || !ownsSource || (!ownsVisual && !ownsTeardown)) return;
-        ++owner.serializerGeneration;
-        owner.failedTarget = null;
-        setFailure(null);
-        if (ownsVisual) setMode("visual");
-        owner.editorSource = content;
-        owner.localAcknowledgement = content;
-        owner.pendingAutosave = { content, eventAt, request: owner.request };
-        sourceAdapter.current.value = content;
-        ports.current.onSourceEvent({ type: "crepe-change", content, eventAt });
-      },
-      onPreview: (nextPreview) => {
-        if (
-          !current() ||
-          owner.target !== "preview" ||
-          nextPreview.source !== sourceAdapter.current.value
-        ) return;
-        setPreview(nextPreview);
-      },
-      onVisualError: ({ retry }) => fail(retry),
-    });
+        now: () => ports.current.now(),
+        source: sourceAdapter.current,
+        visualRoot,
+        ...(ports.current.loadPreview === undefined ? {} : { loadPreview: ports.current.loadPreview }),
+        onModeChange,
+        onCrepeChange: (content, eventAt) => onCrepeChange(content, eventAt),
+        onPreview,
+        onVisualError: ({ retry }) => fail(retry),
+      })
+      : (() => {
+        stagedVisual.bind({
+          onDocumentChange: (content) => onCrepeChange(content, ports.current.now(), true),
+          onModeChange,
+          onPreview,
+          onVisualError: ({ retry }) => fail(retry),
+        });
+        return stagedVisual.modes;
+      })();
     owner.generation = ++ownerGeneration.current;
     owner.source = canonicalSource;
     owner.active = true;
@@ -389,6 +418,7 @@ export function MarkdownWorkbench({
     owner.failedTarget = null;
     owner.localAcknowledgement = null;
     owner.pendingAutosave = null;
+    owner.preparedVisual = stagedVisual;
     owner.controller = controller;
     owners.current = owner;
     return owner;
@@ -401,7 +431,8 @@ export function MarkdownWorkbench({
     ++requestGeneration.current;
     void queueVisualTeardown(async () => {
       try {
-        await owner.controller.destroy();
+        if (owner.preparedVisual !== null) await owner.preparedVisual.dispose();
+        else await owner.controller.destroy();
       } catch {
         // The retired owner cannot publish an error after teardown fails.
       }
@@ -431,14 +462,14 @@ export function MarkdownWorkbench({
 
   React.useEffect(() => {
     if (visualRoot === null || !mounted.current) return;
-    const owner = createOwner(sourceAdapter.current.value);
+    const owner = createOwner(sourceAdapter.current.value, preparedVisual);
     const requested = pendingMode.current;
     pendingMode.current = null;
     if (requested !== null) void runMode(requested);
     return () => {
       if (owner !== null) retireOwner(owner);
     };
-  }, [visualRoot, createOwner, retireOwner, runMode]);
+  }, [visualRoot, createOwner, preparedVisual, retireOwner, runMode]);
 
   React.useLayoutEffect(() => {
     const owner = owners.current;

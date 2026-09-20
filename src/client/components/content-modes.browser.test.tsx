@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import type { ReactNode } from "react";
@@ -8,14 +7,18 @@ import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { SourceEvent } from "../contracts";
 import type { PasteLinks } from "../../types";
 import { OrdinaryPastePage } from "./OrdinaryPastePage";
+import { ContentModes } from "./ContentModes";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
 import { PlaintextEditor } from "./PlaintextEditor";
 import { LocalActions } from "./LocalActions";
 import { useAutosave } from "../hooks/use-autosave";
 import { AutosaveController, type AutosaveControllerApi, type AutosaveSaveRequest } from "../autosave";
+import { prepareMarkdownVisual } from "../markdown";
 import "../index.css";
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx } from "@milkdown/kit/core";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const markdownModes = vi.hoisted(() => {
   type Options = {
@@ -129,35 +132,36 @@ type CrepeControls = {
 
 const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
 let crepeControls: CrepeControls | null = null;
+let consoleErrors: Array<unknown[]> = [];
 
 function mount(node: ReactNode): HTMLDivElement {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  flushSync(() => root.render(node));
+  React.act(() => root.render(node));
   mounted.push({ root, host });
   return host;
 }
 
 function rerender(host: HTMLDivElement, node: ReactNode): void {
   const entry = mounted.find((value) => value.host === host);  if (entry === undefined) throw new Error("missing root");
-  flushSync(() => entry.root.render(node));
+  React.act(() => entry.root.render(node));
 }
 
 function unmount(host: HTMLDivElement): void {
   const index = mounted.findIndex((value) => value.host === host);
   if (index < 0) throw new Error("missing root");
   const [entry] = mounted.splice(index, 1);
-  flushSync(() => entry!.root.unmount());
+  React.act(() => entry!.root.unmount());
   entry!.host.remove();
 }
 
 function key(target: EventTarget, value: string): void {
-  flushSync(() => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: value, key: value })));
+  React.act(() => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: value, key: value })));
 }
 
 function input(target: HTMLTextAreaElement, value: string): void {
-  flushSync(() => {
+  React.act(() => {
     target.value = value;
     target.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -222,12 +226,14 @@ function controlCrepe(): CrepeControls {
 function replaceVisualDocument(value: string): void {
   const editor = crepeControls?.active;
   if (editor === null || editor === undefined) throw new Error("missing Crepe editor");
-  editor.editor.action((ctx) => {
-    const view = ctx.get(editorViewCtx);
-    const paragraph = view.state.schema.nodes.paragraph;
-    if (paragraph === undefined) throw new Error("missing paragraph node");
-    const content = value === "" ? undefined : view.state.schema.text(value);
-    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, paragraph.create(null, content)));
+  React.act(() => {
+    editor.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const paragraph = view.state.schema.nodes.paragraph;
+      if (paragraph === undefined) throw new Error("missing paragraph node");
+      const content = value === "" ? undefined : view.state.schema.text(value);
+      view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, paragraph.create(null, content)));
+    });
   });
 }
 
@@ -235,10 +241,30 @@ async function nextTask(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function clickRole(role: "button" | "tab", name: string): Promise<void> {
+  await React.act(async () => {
+    await page.getByRole(role, { name }).click();
+  });
+}
+
+async function press(key: string): Promise<void> {
+  await React.act(async () => {
+    await userEvent.keyboard(key);
+  });
+}
+
+async function advanceTab(): Promise<void> {
+  await React.act(async () => {
+    await userEvent.tab();
+  });
+}
+
 async function waitForCrepe(): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (crepeControls?.active !== null && crepeControls?.active !== undefined) return;
-    await nextTask();
+    await React.act(async () => {
+      await nextTask();
+    });
   }
   throw new Error("missing Crepe editor");
 }
@@ -249,6 +275,10 @@ function currentMarkdownTab(host: HTMLDivElement): string | null {
 
 async function waitForMarkdownTab(host: HTMLDivElement, target: string): Promise<void> {
   for (let attempt = 0; attempt < 25; attempt += 1) {
+    if (currentMarkdownTab(host) === target) return;
+    await React.act(async () => {
+      await vi.dynamicImportSettled();
+    });
     if (currentMarkdownTab(host) === target) return;
     await nextTask();
   }
@@ -290,16 +320,28 @@ function ordinaryPageProps(overrides: Partial<React.ComponentProps<typeof Ordina
   };
 }
 
-afterEach(() => {
-  for (const entry of mounted.splice(0)) {    flushSync(() => entry.root.unmount());
+beforeEach(() => {
+  consoleErrors = vi.spyOn(console, "error").mock.calls;
+});
+
+afterEach(async () => {
+  for (const entry of mounted.splice(0)) {
+    await React.act(async () => {
+      entry.root.unmount();
+      await vi.dynamicImportSettled();
+    });
     entry.host.remove();
   }
   crepeControls?.restore();
   crepeControls = null;
   document.body.replaceChildren();
   markdownModes.reset();
+  const actWarnings = consoleErrors.filter(
+    ([message]) => typeof message === "string" && message.includes("not wrapped in act"),
+  );
   vi.restoreAllMocks();
   vi.useRealTimers();
+  expect(actWarnings).toHaveLength(0);
 });
 
 describe("default content mode", () => {
@@ -322,7 +364,7 @@ describe("default content mode", () => {
 
   it("resets a hard remount to the format-defined view instead of the prior client tab", async () => {
     const first = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
-    await page.getByRole("tab", { name: "Edit" }).click();
+    await clickRole("tab", "Edit");
     const edit = Array.from(first.querySelectorAll('[role="tab"]')).find((tab) => tab.textContent === "Edit") as HTMLElement;
     expect(edit.getAttribute("aria-selected")).toBe("true");
     unmount(first);
@@ -357,23 +399,48 @@ describe("default content mode", () => {
   });
 });
 
+it("keeps canonical draft editors separate from the committed derived view", () => {
+  const props = {
+    format: "text" as const,
+    source: "draft",
+    initialMarkdown: null,
+    wrap: "off" as const,
+    autosave: { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() },
+    onSourceEvent: vi.fn(),
+    displaySource: "accepted",
+    derivedGeneration: 4,
+  };
+  const host = mount(React.createElement(ContentModes, {
+    ...props,
+    mode: "view",
+  } as unknown as React.ComponentProps<typeof ContentModes>));
+
+  expect(host.querySelector("[data-plain-view]")?.textContent).toBe("accepted");
+
+  rerender(host, React.createElement(ContentModes, {
+    ...props,
+    mode: "edit",
+  } as unknown as React.ComponentProps<typeof ContentModes>));
+  expect(host.querySelector("textarea")?.value).toBe("draft");
+});
+
 describe("Tabs keyboard", () => {
   it("uses automatic activation, roving focus, wrapping, Home, End, and normal Tab exit", async () => {
     const host = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
     const tab = (name: string) => Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((value) => value.textContent === name)!;
 
-    await page.getByRole("tab", { name: "View" }).click();
-    await userEvent.keyboard("{ArrowRight}");
+    await clickRole("tab", "View");
+    await press("{ArrowRight}");
     expect(tab("Edit").getAttribute("aria-selected")).toBe("true");
 
-    await userEvent.keyboard("{End}");
+    await press("{End}");
     expect(tab("Settings").getAttribute("aria-selected")).toBe("true");
 
-    await userEvent.keyboard("{ArrowRight}");
+    await press("{ArrowRight}");
     expect(tab("View").getAttribute("aria-selected")).toBe("true");
-    await userEvent.keyboard("{Home}");
+    await press("{Home}");
     expect(tab("View").tabIndex).toBe(0);
-    await userEvent.tab();
+    await advanceTab();
     expect(document.activeElement).not.toBe(tab("View"));
   });
 });
@@ -384,9 +451,9 @@ describe("plaintext autosave", () => {
     const host = mount(<PlaintextEditor value="a" wrap="off" autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
     const textarea = host.querySelector("textarea")!;
 
-    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
     input(textarea, "中");
-    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
     input(textarea, "中");
 
     expect(events.map((event) => event.type)).toEqual(["composition-start", "composition-input", "composition-end"]);
@@ -411,13 +478,13 @@ describe("plaintext autosave", () => {
     });
 
     rawValue = "a\rb\r\nc";
-    flushSync(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
     rawValue = "a\rb\r\nc";
-    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
     rawValue = "中\r\n文\r字";
-    flushSync(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new Event("input", { bubbles: true })));
     rawValue = "中\r\n文\r字";
-    flushSync(() => textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+    React.act(() => textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
 
     expect(events.map(({ type, content }) => [type, content])).toEqual([
       ["input", "a\rb\r\nc"],
@@ -434,20 +501,22 @@ describe("plaintext autosave", () => {
     const requests: AutosaveSaveRequest[] = [];
     let ordinaryController: AutosaveControllerApi | null = null;
     const ordinary = mount(<AutosaveHarness identity="ordinary-debounce" requests={requests} onController={(controller) => { ordinaryController = controller; }} />);
-    ordinaryController!.input("ordinary", performance.now());
-    vi.advanceTimersByTime(999);
+    React.act(() => ordinaryController!.input("ordinary", performance.now()));
+    React.act(() => vi.advanceTimersByTime(999));
     expect(requests).toEqual([]);
-    vi.advanceTimersByTime(1);
+    React.act(() => vi.advanceTimersByTime(1));
     expect(requests).toEqual([{ action: "autosave", content: "ordinary", version: "g.1" }]);
     unmount(ordinary);
 
     let composedController: AutosaveControllerApi | null = null;
     mount(<AutosaveHarness identity="composition-debounce" requests={requests} onController={(controller) => { composedController = controller; }} />);
-    composedController!.compositionStart();
-    composedController!.compositionEnd("composed input", performance.now());
-    vi.advanceTimersByTime(999);
+    React.act(() => {
+      composedController!.compositionStart();
+      composedController!.compositionEnd("composed input", performance.now());
+    });
+    React.act(() => vi.advanceTimersByTime(999));
     expect(requests).toHaveLength(1);
-    vi.advanceTimersByTime(1);
+    React.act(() => vi.advanceTimersByTime(1));
     expect(requests).toEqual([
       { action: "autosave", content: "ordinary", version: "g.1" },
       { action: "autosave", content: "composed input", version: "g.1" },
@@ -459,16 +528,16 @@ describe("plaintext autosave", () => {
     const requests: AutosaveSaveRequest[] = [];
     let firstController: AutosaveControllerApi | null = null;
     const first = mount(<AutosaveHarness identity="demo" requests={requests} onController={(controller) => { firstController = controller; }} />);
-    firstController!.input("second", performance.now());
-    vi.advanceTimersByTime(999);
+    React.act(() => firstController!.input("second", performance.now()));
+    React.act(() => vi.advanceTimersByTime(999));
     expect(requests).toEqual([]);    unmount(first);
-    vi.advanceTimersByTime(1_000);
+    React.act(() => vi.advanceTimersByTime(1_000));
     expect(requests).toEqual([]);
 
     let secondController: AutosaveControllerApi | null = null;
     mount(<AutosaveHarness identity="demo" requests={requests} onController={(controller) => { secondController = controller; }} />);
-    secondController!.input("third", performance.now());
-    vi.advanceTimersByTime(1_000);
+    React.act(() => secondController!.input("third", performance.now()));
+    React.act(() => vi.advanceTimersByTime(1_000));
     expect(requests).toEqual([{ action: "autosave", content: "third", version: "g.1" }]);
   });
 });
@@ -486,22 +555,22 @@ describe("useAutosave authoritative state", () => {
 
   it("preserves a local draft when only authoritative metadata changes", async () => {
     const host = mount(<MetadataAutosaveHarness source="first" version="g.1" />);
-    await page.getByRole("button", { name: "Edit draft" }).click();
+    await clickRole("button", "Edit draft");
     expect(host.querySelector("output")?.textContent).toBe("local draft");
 
     rerender(host, <MetadataAutosaveHarness source="first" version="g.2" />);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
 
     expect(host.querySelector("output")?.textContent).toBe("local draft");
   });
 
   it("replaces a local draft when the authoritative source and version change", async () => {
     const host = mount(<MetadataAutosaveHarness source="first" version="g.1" />);
-    await page.getByRole("button", { name: "Edit draft" }).click();
+    await clickRole("button", "Edit draft");
     expect(host.querySelector("output")?.textContent).toBe("local draft");
 
     rerender(host, <MetadataAutosaveHarness source="server replacement" version="g.2" />);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
 
     expect(host.querySelector("output")?.textContent).toBe("server replacement");
   });
@@ -513,8 +582,8 @@ describe("useAutosave authoritative state", () => {
     mount(<React.StrictMode><AutosaveHarness identity="strict" requests={requests} onController={(next) => { controller = next; }} /></React.StrictMode>);
 
     expect(controller).not.toBeNull();
-    controller!.input("after replay", performance.now());
-    vi.advanceTimersByTime(1_000);
+    React.act(() => controller!.input("after replay", performance.now()));
+    React.act(() => vi.advanceTimersByTime(1_000));
 
     expect(requests).toEqual([{ action: "autosave", content: "after replay", version: "g.1" }]);
   });
@@ -525,8 +594,10 @@ describe("useAutosave authoritative state", () => {
     const host = mount(<React.Suspense fallback={<output>loading</output>}><SuspendingAutosaveHarness identity="first" blocked={null} /></React.Suspense>);
     const entry = mounted.find((value) => value.host === host)!;
 
-    React.startTransition(() => entry.root.render(<React.Suspense fallback={<output>loading</output>}><SuspendingAutosaveHarness identity="second" blocked={blocked} /></React.Suspense>));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    React.act(() => {
+      React.startTransition(() => entry.root.render(<React.Suspense fallback={<output>loading</output>}><SuspendingAutosaveHarness identity="second" blocked={blocked} /></React.Suspense>));
+    });
+    await nextTask();
 
     expect(host.querySelector("output")?.textContent).toBe("first");
     expect(dispose).not.toHaveBeenCalled();
@@ -534,6 +605,27 @@ describe("useAutosave authoritative state", () => {
 });
 
 describe("Markdown lifecycle", () => {
+  it("adopts a committed detached visual host", async () => {
+    markdownModes.state.useActual = true;
+    const prepared = await prepareMarkdownVisual("# target", document);
+    const host = mount(React.createElement(MarkdownWorkbench, {
+      source: "# target",
+      initialMarkdown: null,
+      wrap: "off",
+      autosave: { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() },
+      onSourceEvent: vi.fn(),
+      preparedVisual: prepared,
+    } as unknown as React.ComponentProps<typeof MarkdownWorkbench>));
+
+    try {
+      await nextTask();
+      expect(host.querySelector("[data-markdown-visual-host]")?.contains(prepared.root)).toBe(true);
+    } finally {
+      unmount(host);
+      await prepared.dispose();
+    }
+  });
+
   it("keeps the later Preview request selected when a delayed Visual style load completes", async () => {
     let resolveStyle!: (value: unknown) => void;
     const style = new Promise<unknown>((resolve) => { resolveStyle = resolve; });
@@ -547,11 +639,11 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={() => style}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await page.getByRole("tab", { name: "Preview" }).click();
+    await clickRole("tab", "Visual");
+    await clickRole("tab", "Preview");
     resolveStyle({});
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
+    await nextTask();
 
     expect(Array.from(host.querySelectorAll('[role="tab"]')).find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent).toBe("Preview");
   });
@@ -569,11 +661,11 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={() => style}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     const controller = markdownModes.instances[0]!;
     unmount(host);
     resolveStyle({});
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
 
     expect(controller.enterVisual).not.toHaveBeenCalled();
   });
@@ -590,12 +682,12 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={async () => undefined}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await page.getByRole("tab", { name: "Source" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await page.getByRole("tab", { name: "Preview" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
+    await clickRole("tab", "Source");
+    await nextTask();
+    await clickRole("tab", "Preview");
+    await nextTask();
 
     expect(host.querySelector("p")?.textContent).toBe("preview");
     expect(autosave.input).not.toHaveBeenCalled();
@@ -605,13 +697,13 @@ describe("Markdown lifecycle", () => {
     const requests: AutosaveSaveRequest[] = [];
     mount(<VisualAutosaveHarness requests={requests} />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
     vi.useFakeTimers();
-    flushSync(() => markdownModes.instances[0]!.emitChange("visual transaction", performance.now()));
-    vi.advanceTimersByTime(999);
+    React.act(() => markdownModes.instances[0]!.emitChange("visual transaction", performance.now()));
+    React.act(() => vi.advanceTimersByTime(999));
     expect(requests).toEqual([]);
-    vi.advanceTimersByTime(1);
+    React.act(() => vi.advanceTimersByTime(1));
 
     expect(requests).toEqual([{ action: "autosave", content: "visual transaction", version: "g.1" }]);
   });
@@ -629,20 +721,23 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={() => failStyle ? Promise.reject(new Error("css failed")) : Promise.resolve()}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
 
     failStyle = false;
-    await page.getByRole("button", { name: "Retry" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    initialization.reject(new Error("editor failed"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("button", "Retry");
+    await nextTask();
+    await React.act(async () => {
+      initialization.reject(new Error("editor failed"));
+      await Promise.resolve();
+    });
+    await nextTask();
+    await nextTask();
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
 
-    await page.getByRole("button", { name: "Retry" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("button", "Retry");
+    await nextTask();
     expect(markdownModes.instances[0]!.enterVisual).toHaveBeenCalledTimes(2);
   });
 
@@ -657,14 +752,14 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={async () => undefined}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
     const current = markdownModes.instances[0]!;
-    flushSync(() => current.emitError());
+    React.act(() => current.emitError());
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
 
-    await page.getByRole("button", { name: "Retry" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("button", "Retry");
+    await nextTask();
     expect(current.retryVisual).toHaveBeenCalledOnce();
   });
 
@@ -681,11 +776,13 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={async () => undefined}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
     const current = markdownModes.instances[0]!;
-    flushSync(() => current.emitError());
-    current.emitChange("newer serializer", 102);
+    React.act(() => {
+      current.emitError();
+      current.emitChange("newer serializer", 102);
+    });
 
     expect(events).toEqual(["newer serializer"]);
     expect(autosave.input).toHaveBeenCalledWith("newer serializer", 102);
@@ -704,27 +801,33 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={async () => undefined}
     />;
     const host = mount(props("first"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
+    await clickRole("tab", "Visual");
+    await nextTask();
+    await nextTask();
     expect(markdownModes.instances).toHaveLength(1);
     const original = markdownModes.instances[0]!;
     expect(original.enterVisual).toHaveBeenCalledOnce();
     expect(Array.from(host.querySelectorAll('[role="tab"]')).find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent).toBe("Visual");
 
-    original.emitChange("local", 101);
+    React.act(() => original.emitChange("local", 101));
     rerender(host, props("local"));
-    await Promise.resolve();
+    await React.act(async () => {
+      await Promise.resolve();
+    });
     expect(original.destroy).not.toHaveBeenCalled();
 
     rerender(host, props("server replacement"));
-    await Promise.resolve();
+    await React.act(async () => {
+      await Promise.resolve();
+    });
     expect(original.destroy).toHaveBeenCalledOnce();
     expect(markdownModes.instances).toHaveLength(2);
 
-    original.emitChange("stale serializer", 102);
-    original.emitError();
+    React.act(() => {
+      original.emitChange("stale serializer", 102);
+      original.emitError();
+    });
     expect(events).toEqual(["local"]);
     expect(autosave.input).toHaveBeenCalledOnce();
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -743,15 +846,15 @@ describe("Markdown lifecycle", () => {
       loadCrepeStyle={async () => undefined}
     />;
     const host = mount(props("first"));
-    await page.getByRole("tab", { name: "Visual" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("tab", "Visual");
+    await nextTask();
     const retired = markdownModes.instances[0]!;
 
     rerender(host, props("server"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
     expect(retired.destroy).toHaveBeenCalledOnce();
     teardown.reject(new Error("destroy failed"));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
     retired.emitChange("retired", 103);
 
     expect(events).toEqual([]);
@@ -771,7 +874,7 @@ describe("Markdown lifecycle", () => {
 
     expect(host.querySelector('[role="tab"]')?.textContent).toBe("Source");
     expect(host.querySelector('[role="tab"][aria-controls*="visual"]')).not.toBeNull();
-    await page.getByRole("tab", { name: "Preview" }).click();
+    await clickRole("tab", "Preview");
     expect(host.querySelector("h1")?.textContent).toBe("exact");
   });
 });
@@ -792,7 +895,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
       }}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     await waitForCrepe();
     expect(crepeControls.active).not.toBeNull();
 
@@ -823,7 +926,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     const events: SourceEvent[] = [];
     const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     await waitForCrepe();
     crepeControls.failGetMarkdown = true;
     replaceVisualDocument("recovered");
@@ -833,7 +936,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
 
     crepeControls.failGetMarkdown = false;
-    await page.getByRole("tab", { name: "Preview" }).click();
+    await clickRole("tab", "Preview");
     await waitForMarkdownTab(host, "Preview");
 
     expect(events).toHaveLength(1);
@@ -854,7 +957,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
       onSourceEvent={() => undefined}
     />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     await waitForCrepe();
     const failedEditor = crepeControls.active;
     await nextTask();
@@ -865,7 +968,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
 
     crepeControls.rejectCreate = false;
-    await page.getByRole("button", { name: "Retry" }).click();
+    await clickRole("button", "Retry");
     await waitForMarkdownTab(host, "Visual");
 
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -879,14 +982,14 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
     const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={() => undefined} />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     await waitForCrepe();
     replaceVisualDocument("visual");
     await nextTask();
     expect(autosave.input).toHaveBeenCalledOnce();
 
     crepeControls.failGetMarkdown = true;
-    await page.getByRole("tab", { name: target }).click();
+    await clickRole("tab", target);
     await nextTask();
     await nextTask();
 
@@ -897,7 +1000,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     expect(crepeControls.destroyCalls).toBe(1);
 
     crepeControls.failGetMarkdown = false;
-    await page.getByRole("button", { name: "Retry" }).click();
+    await clickRole("button", "Retry");
     await waitForMarkdownTab(host, target);
 
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -911,13 +1014,13 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
     const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={() => undefined} />);
 
-    await page.getByRole("tab", { name: "Visual" }).click();
+    await clickRole("tab", "Visual");
     await waitForCrepe();
     replaceVisualDocument("visual");
     await nextTask();
 
     crepeControls.rejectDestroy = true;
-    await page.getByRole("tab", { name: "Source" }).click();
+    await clickRole("tab", "Source");
     await waitForMarkdownTab(host, "Source");
 
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -932,20 +1035,20 @@ describe("ordinary direct actions", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const host = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
 
-    await page.getByRole("button", { name: "Copy" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("button", "Copy");
+    await nextTask();
     expect(copy).toHaveBeenCalledWith("exact\r\nsource");
 
-    await page.getByRole("button", { name: "Download" }).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clickRole("button", "Download");
+    await nextTask();
     expect(createObjectURL).toHaveBeenCalledOnce();
     const blob = createObjectURL.mock.calls[0]![0] as Blob;
     expect(blob.type).toBe("application/octet-stream");
     expect(new TextDecoder().decode(await blob.arrayBuffer())).toBe("exact\r\nsource");
     expect(click).toHaveBeenCalledOnce();
 
-    await page.getByRole("tab", { name: "Edit" }).click();
-    await page.getByRole("button", { name: "Wrap" }).click();
+    await clickRole("tab", "Edit");
+    await clickRole("button", "Wrap");
     expect(host.querySelector("textarea")?.wrap).toBe("soft");
   });
 
@@ -954,19 +1057,19 @@ describe("ordinary direct actions", () => {
     const host = mount(<OrdinaryPastePage {...ordinaryPageProps({ source })} />);
     host.style.width = "480px";
 
-    await page.getByRole("tab", { name: "Edit" }).click();
+    await clickRole("tab", "Edit");
     const edit = host.querySelector<HTMLTextAreaElement>("textarea")!;
     expect(edit.wrap).toBe("off");
     expect(getComputedStyle(edit).whiteSpace).toBe("pre");
     expect(edit.scrollWidth).toBeGreaterThan(edit.clientWidth);
 
-    await page.getByRole("button", { name: "Wrap" }).click();
+    await clickRole("button", "Wrap");
     expect(edit.wrap).toBe("soft");
     expect(getComputedStyle(edit).whiteSpace).toBe("pre-wrap");
     expect(edit.scrollWidth).toBeLessThanOrEqual(edit.clientWidth);
     expect(host.scrollWidth).toBeLessThanOrEqual(host.clientWidth);
 
-    await page.getByRole("tab", { name: "Markdown" }).click();
+    await clickRole("tab", "Markdown");
     const markdownSource = host.querySelector<HTMLTextAreaElement>("textarea")!;
     expect(markdownSource.wrap).toBe("soft");
     expect(getComputedStyle(markdownSource).whiteSpace).toBe("pre-wrap");
@@ -987,7 +1090,7 @@ describe("ordinary direct actions", () => {
       navigation={navigation}
     />);
 
-    flushSync(() => host.querySelector<HTMLButtonElement>("button")!.click());
+    React.act(() => host.querySelector<HTMLButtonElement>("button")!.click());
     expect(createObjectURL).toHaveBeenCalledOnce();
     const blob = createObjectURL.mock.calls[0]![0] as Blob;
     expect(blob.type).toBe("text/html");

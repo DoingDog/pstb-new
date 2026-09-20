@@ -74,7 +74,8 @@ export type PasteSyncEvent =
   | { type: "candidate"; snapshot: RemoteSnapshot; capture: PasteSyncCapture; checkedAt: number }
   | { type: "terminal-view-once"; snapshot: RemoteSnapshot; capture: PasteSyncCapture; ordinaryTokenCurrent: boolean; receivedAt: number }
   | { type: "credential-proved"; password: string; at: number }
-  | { type: "not-found" | "forbidden" | "conflict" | "error"; at: number };
+  | { type: "not-found" | "forbidden" | "conflict"; at: number }
+  | { type: "error"; at: number; transport?: "network" };
 
 export interface PasteSyncController {
   start(loadAt: number): void;
@@ -106,7 +107,7 @@ export type PasteSyncReadResult =
   | { status: 403 }
   | { status: 404 }
   | { status: 409 }
-  | { status: number };
+  | { status: number; transport?: "network" };
 
 function hasSnapshot(result: PasteSyncReadResult): result is Extract<PasteSyncReadResult, { snapshot: RemoteSnapshot }> {
   return result.status === 200 && "snapshot" in result;
@@ -567,7 +568,7 @@ export class PasteSync implements PasteSyncController {
       return;
     }
 
-    this.options.emit({ type: "error", at: receivedAt });
+    this.options.emit({ type: "error", at: receivedAt, ...("transport" in result && result.transport === "network" ? { transport: "network" as const } : {}) });
     this.setState("error", receivedAt);
     this.scheduleAfterSettle(receivedAt);
   }
@@ -587,7 +588,7 @@ export class PasteSync implements PasteSyncController {
       this.scheduleAfterSettle(settledAt);
       return;
     }
-    this.options.emit({ type: "error", at: settledAt });
+    this.options.emit({ type: "error", at: settledAt, transport: "network" });
     this.setState("error", settledAt);
     this.scheduleAfterSettle(settledAt);
   }

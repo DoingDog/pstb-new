@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MutationResult, PasteSummary } from "../types";
+import type { RemoteSnapshot } from "./contracts";
 import {
   createPasteController,
   type ContentReconcileResult,
@@ -72,6 +73,18 @@ function snapshot(controller: PasteController): PasteControllerSnapshot {
   return controller.snapshot();
 }
 
+function reloadSnapshot(overrides: Partial<RemoteSnapshot> = {}): RemoteSnapshot {
+  return {
+    etag: '"sha256-remote"',
+    source: "remote",
+    summary: summary({ version: "g.2", contentRevision: 2, updatedAt: "2026-09-15T00:00:01.000Z" }),
+    identity: { kind: "v2", generation: "g", versionCounter: 2 },
+    contentRevision: 2,
+    updatedAtMs: Date.parse("2026-09-15T00:00:01.000Z"),
+    ...overrides,
+  };
+}
+
 describe("PasteController mutation slot", () => {
   it("serializes autosave and settings while retaining one latest source intent", () => {
     const { controller } = pasteControllerFixture();
@@ -85,6 +98,37 @@ describe("PasteController mutation slot", () => {
     expect(controller.acceptContentMutation(save.token, mutationResult(), 12)).toBe(true);
     expect(controller.effects().filter((effect) => effect.type === "autosave-slot-available")).toHaveLength(1);
     expect(controller.effects().filter((effect) => effect.type === "dispatch-content")).toHaveLength(0);
+  });
+
+  it("commits only the credential that an authorized read proved", () => {
+    const { controller } = pasteControllerFixture({ credential: { committed: "old", pending: "new" } });
+
+    expect(controller.commitProvenCredential("wrong")).toBe(false);
+    expect(controller.commitProvenCredential("new")).toBe(true);
+    expect(snapshot(controller).credential).toEqual({ committed: "new", pending: null });
+    expect(controller.effects()).toContainEqual({ type: "credential-commit", credential: "new" });
+  });
+
+  it("records wall-clock status timestamps when mutations use monotonic time", () => {
+    const { controller } = pasteControllerFixture({ wallNow: () => "2026-09-15T12:00:00.000Z" });
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+
+    expect(snapshot(controller).lastAction).toMatchObject({ startedAt: "2026-09-15T12:00:00.000Z" });
+    controller.acceptContentMutation(save.token, mutationResult(), 2);
+    expect(snapshot(controller).lastAction).toMatchObject({ settledAt: "2026-09-15T12:00:00.000Z" });
+  });
+
+  it("settles only the current local action attempt", () => {
+    const { controller } = pasteControllerFixture();
+
+    controller.recordLocalAction({ key: "copy", state: "pending", attempt: 1, startedAt: "2026-09-20T00:00:00.000Z" });
+    controller.recordLocalAction({ key: "download", state: "pending", attempt: 2, startedAt: "2026-09-20T00:00:01.000Z" });
+    controller.recordLocalAction({ key: "copy", state: "succeeded", attempt: 1, startedAt: "2026-09-20T00:00:00.000Z", settledAt: "2026-09-20T00:00:02.000Z" });
+
+    expect(snapshot(controller).lastAction).toEqual({ state: "pending", key: "download", attempt: 2, startedAt: "2026-09-20T00:00:01.000Z" });
+
+    controller.recordLocalAction({ key: "download", state: "succeeded", attempt: 2, startedAt: "2026-09-20T00:00:01.000Z", settledAt: "2026-09-20T00:00:03.000Z" });
+    expect(snapshot(controller).lastAction).toEqual({ state: "succeeded", key: "download", attempt: 2, startedAt: "2026-09-20T00:00:01.000Z", settledAt: "2026-09-20T00:00:03.000Z", outcomeKey: null });
   });
 
   it("retains only one autosave when settings owns the slot", () => {
@@ -108,6 +152,26 @@ describe("PasteController mutation slot", () => {
 
     expect(controller.acceptContentMutation(save.token, mutationResult({ paste: summary({ version: "g.2" }) }), 1)).toBe(false);
     expect(snapshot(controller).mutation.state).toBe("idle");
+  });
+
+  it("publishes a Reload snapshot atomically in the existing controller", () => {
+    const { controller } = pasteControllerFixture();
+    const before = snapshot(controller);
+
+    expect(controller.applyRemoteSnapshot(reloadSnapshot())).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      acceptedSource: "remote",
+      draft: "remote",
+      lastSavedContent: "remote",
+      version: "g.2",
+      contentRevision: 2,
+      responseEtag: '"sha256-remote"',
+      versionUsable: true,
+      acceptedApplyGeneration: before.acceptedApplyGeneration! + 1,
+      localGeneration: before.localGeneration,
+      mutation: { state: "idle" },
+    });
   });
 
   it("drops reverse-settled callbacks after a terminal transition", () => {
@@ -575,6 +639,23 @@ describe("PasteController round-one regressions", () => {
     controller.acceptContentMutation(save.token, mutationResult({ etag: '"sha256-mutation"' }), 1);
 
     expect(snapshot(controller).responseEtag).toBeNull();
+  });
+
+  it("releases reconciliation ownership without dispatching another business request", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 503 }, 1);
+    expect(snapshot(controller).mutation.state).toBe("content-reconciliation");
+
+    expect(controller.discardReconciliation()).toBe(true);
+    expect(snapshot(controller)).toMatchObject({
+      mutation: { state: "idle" },
+      reconciliationRequired: false,
+      acceptedSource: "one",
+      draft: "one",
+    });
+    expect(controller.effects().some((effect) => effect.type === "dispatch-content" || effect.type === "dispatch-metadata-reconcile")).toBe(false);
+    expect(controller.startContentReconcile(2)).toMatchObject({ kind: "blocked", reason: "not-reconciling" });
   });
 
   it("uses canonical remote snapshots and extracts generations at the final dot", () => {

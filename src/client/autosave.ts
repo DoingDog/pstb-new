@@ -65,6 +65,7 @@ export interface AutosaveControllerApi {
   compositionEnd(content: string, eventAt: number): void;
   retry(): void;
   overwrite(): void;
+  acknowledgeAcceptedContent(acceptedSource: string, version: string): boolean;
   applyAuthoritative(transition: AutosaveAuthoritativeTransition): void;
   slotAvailable(): void;
   dispose(): void;
@@ -188,6 +189,13 @@ export class AutosaveController implements AutosaveControllerApi {
     this.cancelTimer();
     this.dueAt = null;
     this.dispatch("overwrite", false, this.state);
+  }
+
+  acknowledgeAcceptedContent(acceptedSource: string, version: string): boolean {
+    if (this.disposed || this.inFlightContent !== acceptedSource || this.activeAttempt === null) return false;
+    this.acceptedSource = acceptedSource;
+    this.version = version;
+    return true;
   }
 
   applyAuthoritative(transition: AutosaveAuthoritativeTransition): void {

@@ -3,7 +3,9 @@ import * as React from "react";
 import { errorMessage, formatDate, labels, resolveBrowserLocale, type Locale } from "../i18n";
 import { createPasteApi } from "./api";
 import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
-import type { AppBootstrap, OperationRecords } from "./contracts";
+import type { AppBootstrap, OperationRecords, PasteSummary } from "./contracts";
+import { prepareMarkdownPreview, prepareMarkdownVisual, type PreparedMarkdownVisual } from "./markdown";
+import { createStagedSurfaceApply, type StagedSurfaceApply } from "./surface-apply";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
 import { OperationStatus } from "./components/OperationStatus";
 import { WorkbenchShell } from "./components/WorkbenchShell";
@@ -22,8 +24,29 @@ interface AppProps {
 type TerminalPage = {
   phase: "armed-view-once" | "consumed" | "not-found" | "delete-uncertain";
   source: string;
+  consumedSource: string | null;
   initialMarkdown: TrustedMarkdownHtml | null;
 };
+
+type TerminalLocalRuntime = {
+  epoch: number;
+  source: string;
+  pending: boolean;
+  actionAttempt: number | null;
+  surface: StagedSurfaceApply;
+  resources: { preview: unknown; visual: unknown; diff: unknown; generation: number } | null;
+};
+type TerminalState = TerminalPage & { local: TerminalLocalRuntime };
+
+function isPreparedMarkdownVisual(value: unknown): value is PreparedMarkdownVisual {
+  return typeof HTMLElement !== "undefined" && typeof value === "object" && value !== null
+    && "root" in value && value.root instanceof HTMLElement
+    && "dispose" in value && typeof value.dispose === "function";
+}
+
+function disposeTerminalResources(resources: TerminalLocalRuntime["resources"]): void {
+  if (isPreparedMarkdownVisual(resources?.visual)) void resources.visual.dispose();
+}
 
 type SourceInitialPage = {
   ok: true;
@@ -147,18 +170,18 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
   );
 }
 
-function sidebarMetadata(initialPage: InitialPage, locale: Locale, terminal: TerminalPage | null) {
+function sidebarMetadata(initialPage: InitialPage, locale: Locale, terminal: TerminalPage | null, summary: PasteSummary | null) {
   if (terminal !== null || !initialPage.ok) return [];
   const copy = labels(locale);
   const { bootstrap } = initialPage;
-  if (bootstrap.page === "paste" && !bootstrap.consumed) {
+  if (bootstrap.page === "paste" && !bootstrap.consumed && summary !== null) {
     return [
-      { label: "ID", value: bootstrap.paste.id },
-      { label: copy.protected, value: bootstrap.paste.protected ? copy.enabled : copy.notProtected },
-      { label: copy.viewOnce, value: bootstrap.paste.viewOnce ? copy.enabled : copy.standard },
-      { label: copy.expires, value: bootstrap.paste.expiresAt === null ? copy.permanent : formatDate(locale, bootstrap.paste.expiresAt) },
-      { label: copy.size, value: `${bootstrap.paste.contentBytes} ${copy.bytes}` },
-      { label: copy.revision, value: String(bootstrap.paste.contentRevision) },
+      { label: "ID", value: summary.id },
+      { label: copy.protected, value: summary.protected ? copy.enabled : copy.notProtected },
+      { label: copy.viewOnce, value: summary.viewOnce ? copy.enabled : copy.standard },
+      { label: copy.expires, value: summary.expiresAt === null ? copy.permanent : formatDate(locale, summary.expiresAt) },
+      { label: copy.size, value: `${summary.contentBytes} ${copy.bytes}` },
+      { label: copy.revision, value: String(summary.contentRevision) },
     ];
   }
   if (bootstrap.page === "markdown") return [{ label: "ID", value: bootstrap.id }];
@@ -187,18 +210,21 @@ function operationStatusPageIdentity(initialPage: InitialPage, terminal: Termina
   }
 }
 
-function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onTerminal, onRootHandoff }: {
+function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onSummaryChange, onTerminal, onUseConsumedResponse, onKeepCurrent, onRootHandoff }: {
   initialPage: InitialPage;
   locale: Locale;
   create: ReturnType<typeof createPasteApi>["create"] | null;
   terminal: TerminalPage | null;
   rootHandoff: boolean;
   onRecordsChange(records: OperationRecords): void;
+  onSummaryChange(summary: PasteSummary | null): void;
   onTerminal(page: TerminalPage): void;
+  onUseConsumedResponse(): void;
+  onKeepCurrent(): void;
   onRootHandoff(): void;
 }) {
   if (rootHandoff) return create === null ? null : <CreatePage locale={locale} create={create} />;
-  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} />;
+  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} />;
   if (!initialPage.ok) return <ErrorPage locale={locale} status={500} errorCode={initialPage.errorCode} />;
 
   const { bootstrap } = initialPage;
@@ -213,7 +239,7 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
       const sourcePage = initialPage as SourceInitialPage;
       return bootstrap.consumed
         ? <LocalOnlyPastePage locale={locale} phase="consumed" source={sourcePage.exactSource} initialMarkdown={sourcePage.initialMarkdown} />
-        : <OrdinaryPage initialPage={sourcePage as OrdinaryInitialPage} locale={locale} onRecordsChange={onRecordsChange} onTerminal={onTerminal} onRootHandoff={onRootHandoff} />;
+        : <OrdinaryPage initialPage={sourcePage as OrdinaryInitialPage} locale={locale} onRecordsChange={onRecordsChange} onSummaryChange={onSummaryChange} onTerminal={onTerminal} onRootHandoff={() => { onSummaryChange(null); onRootHandoff(); }} />;
     }
     case "markdown": {
       const sourcePage = initialPage as SourceInitialPage;
@@ -230,8 +256,13 @@ export function App({ initialPage }: AppProps) {
   const documentLocale = bootstrapLocale(initialPage);
   const [locale, setLocale] = React.useState<Locale>(() => resolveBrowserLocale(navigator.languages, documentLocale));
   const [records, setRecords] = React.useState(initialRecords);
+  const [summary, setSummary] = React.useState<PasteSummary | null>(() => isOrdinaryPage(initialPage) ? initialPage.bootstrap.paste : null);
   const [theme, setTheme] = useDocumentTheme();
-  const [terminal, setTerminal] = React.useState<TerminalPage | null>(null);
+  const [terminal, setTerminal] = React.useState<TerminalState | null>(null);
+  const terminalRef = React.useRef<TerminalState | null>(null);
+  const recordsRef = React.useRef(records);
+  terminalRef.current = terminal;
+  recordsRef.current = records;
   const [rootHandoff, setRootHandoff] = React.useState(false);
   const ordinary = terminal === null && !rootHandoff && isOrdinaryPage(initialPage);
   const needsCreateApi = rootHandoff || (terminal === null && initialPage.ok && initialPage.bootstrap.page === "create");
@@ -264,13 +295,131 @@ export function App({ initialPage }: AppProps) {
     };
   }, [ordinary]);
 
+  const createTerminalState = React.useCallback((page: TerminalPage): TerminalState => {
+    const local = {} as TerminalLocalRuntime;
+    local.epoch = 0;
+    local.source = page.source;
+    local.pending = false;
+    local.actionAttempt = null;
+    local.resources = null;
+    local.surface = createStagedSurfaceApply({
+      capture: {
+        localGeneration: 0,
+        currentExactSource: page.source,
+        currentDisplayGeneration: 0,
+        hostGeneration: 0,
+        parentApplyGeneration: 0,
+        parentApplyToken: 0,
+        derivedRetryToken: 0,
+      },
+      ports: {
+        stagePreview: (source) => prepareMarkdownPreview(source),
+        stageVisual: async (source, generation) => {
+          const visual = await prepareMarkdownVisual(source, document);
+          visual.root.dataset.stagedVisual = String(generation);
+          return visual;
+        },
+        stageDiff: async (source, generation) => ({ kind: "target-bound-fallback", source, generation }),
+        commit: (staged, generation) => {
+          const previous = local.resources;
+          local.resources = { ...staged, generation };
+          if (isPreparedMarkdownVisual(previous?.visual) && previous.visual !== staged.visual && !previous.visual.root.isConnected) {
+            void previous.visual.dispose();
+          }
+        },
+        restoreOld: async () => true,
+        showOldGenerationFailure: () => undefined,
+        disposeAttemptResources: (attempt) => {
+          const staged = (attempt as { staged?: Record<string, unknown> }).staged;
+          if (isPreparedMarkdownVisual(staged?.visual)) void staged.visual.dispose();
+        },
+      },
+    });
+    return { ...page, local };
+  }, []);
+
+  React.useEffect(() => () => disposeTerminalResources(terminalRef.current?.local.resources ?? null), []);
+
+  const useConsumedResponse = React.useCallback(() => {
+    const current = terminalRef.current;
+    if (current === null || current.consumedSource === null || current.local.pending) return;
+    const local = current.local;
+    const source = current.consumedSource;
+    const epoch = local.epoch;
+    const displayGeneration = local.surface.snapshot().capture.currentDisplayGeneration;
+    const ownsSelection = (): boolean => {
+      const latest = terminalRef.current;
+      return latest !== null
+        && latest.local === local
+        && local.epoch === epoch
+        && latest.source === local.source
+        && latest.consumedSource === source;
+    };
+    const isCurrent = (): boolean => ownsSelection()
+      && local.surface.snapshot().capture.currentDisplayGeneration === displayGeneration;
+    if (!isCurrent()) return;
+
+    const instant = new Date().toISOString();
+    const attempt = recordsRef.current.lastAction.state === "idle" ? 1 : recordsRef.current.lastAction.attempt + 1;
+    local.pending = true;
+    local.actionAttempt = attempt;
+    setRecords((records) => ({
+      ...records,
+      lastAction: { state: "pending", key: "use-consumed-response", attempt, startedAt: instant },
+    }));
+    void local.surface.applyTerminalLocal(source, {
+      terminalEpochCurrent: isCurrent(),
+      displayGenerationCurrent: isCurrent(),
+      selectedSourceCurrent: isCurrent(),
+      commitCurrent: isCurrent,
+    }).then((receipt) => {
+      if (!ownsSelection()) return;
+      local.pending = false;
+      const outcome = receipt === null
+        ? "use-consumed-response-display-failed"
+        : local.surface.settleUseConsumedResponse(receipt.terminalLocalToken, receipt.applied ? "displayed" : "display-failed")
+          ?? "use-consumed-response-display-failed";
+      if (receipt?.applied) {
+        local.source = source;
+        setTerminal((page) => page?.local === local && local.epoch === epoch && page.consumedSource === source
+          ? { ...page, source, consumedSource: null, initialMarkdown: null }
+          : page);
+      }
+      setRecords((records) => records.lastAction.state === "pending" && records.lastAction.key === "use-consumed-response" && records.lastAction.attempt === attempt
+        ? {
+          ...records,
+          lastAction: {
+            state: receipt?.applied ? "succeeded" : "failed",
+            key: "use-consumed-response",
+            attempt,
+            startedAt: instant,
+            settledAt: new Date().toISOString(),
+            outcomeKey: outcome,
+          },
+        }
+        : records);
+    });
+  }, []);
+  const keepCurrent = React.useCallback(() => {
+    const current = terminalRef.current;
+    if (current === null) return;
+    current.local.epoch += 1;
+    current.local.pending = false;
+    current.local.surface.invalidate();
+    setTerminal((page) => page?.local === current.local ? { ...page, consumedSource: null } : page);
+  }, []);
+  const enterTerminal = React.useCallback((page: TerminalPage) => {
+    disposeTerminalResources(terminalRef.current?.local.resources ?? null);
+    setTerminal(createTerminalState(page));
+  }, [createTerminalState]);
+
   return (
     <WorkbenchShell
       locale={locale}
       breadcrumb={[copy.paste, heading]}
       headingId={headingId}
       destinationGroups={[{ id: "paste-views", label: copy.pasteViews, destinations: [{ id: "current-document", label: heading, selected: true, headingId }] }]}
-      metadata={sidebarMetadata(initialPage, locale, terminal)}
+      metadata={sidebarMetadata(initialPage, locale, terminal, summary)}
       headerActions={
         <DocumentControls
           locale={locale}
@@ -289,7 +438,10 @@ export function App({ initialPage }: AppProps) {
           terminal={terminal}
           rootHandoff={rootHandoff}
           onRecordsChange={setRecords}
-          onTerminal={setTerminal}
+          onSummaryChange={setSummary}
+          onTerminal={enterTerminal}
+          onUseConsumedResponse={useConsumedResponse}
+          onKeepCurrent={keepCurrent}
           onRootHandoff={() => setRootHandoff(true)}
         />
       </React.Suspense>

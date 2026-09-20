@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { ReactNode } from "react";
@@ -69,6 +69,11 @@ function deferred<Value>(): Deferred<Value> {
 }
 
 const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
+let consoleErrors: Array<unknown[]> = [];
+
+beforeEach(() => {
+  consoleErrors = vi.spyOn(console, "error").mock.calls;
+});
 
 async function mount(node: ReactNode): Promise<Fixture> {
   const host = document.createElement("div");
@@ -139,9 +144,13 @@ afterEach(async () => {
     host.remove();
   }
   history.replaceState(null, "", "/");
-  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   markdownHarness.create.mockReset();
+  const actWarnings = consoleErrors.filter(
+    ([message]) => typeof message === "string" && message.includes("not wrapped in act"),
+  );
+  vi.restoreAllMocks();
+  expect(actWarnings).toHaveLength(0);
 });
 
 describe("create interaction", () => {

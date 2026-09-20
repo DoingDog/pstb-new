@@ -1,13 +1,42 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cdp, page } from "vitest/browser";
-import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { act, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import type { InitialPage } from "./bootstrap";
+
+const stagedMarkdown = vi.hoisted(() => ({
+  prepareMarkdownPreview: vi.fn(async (source: string) => ({ source, html: `<p>${source}</p>` })),
+  prepareMarkdownVisual: vi.fn(async (value: string) => {
+    const root = document.createElement("div");
+    const source = { value };
+    return {
+      root,
+      source,
+      modes: {
+        enterSource: async () => undefined,
+        enterVisual: async () => undefined,
+        enterPreview: async () => undefined,
+        leaveVisual: async () => undefined,
+        destroy: async () => undefined,
+      },
+      bind: () => undefined,
+      dispose: async () => undefined,
+    };
+  }),
+}));
+
+vi.mock("./markdown", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./markdown")>(),
+  ...stagedMarkdown,
+}));
+
 import { App } from "./App";
+import { usePastePage, type UsePastePageResult } from "./hooks/use-paste-page";
 import "./index.css";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const pages: ReadonlyArray<readonly [string, InitialPage]> = [
   ["shape failure", { ok: false, locale: "en", errorCode: "INTERNAL_ERROR" }],
@@ -37,12 +66,22 @@ const pages: ReadonlyArray<readonly [string, InitialPage]> = [
 ];
 
 const mounted: Array<{ root: Root; element: HTMLDivElement }> = [];
+let consoleErrors: Array<unknown[]> = [];
 
-function mount(node: ReactNode): HTMLDivElement {
+beforeEach(() => {
+  consoleErrors = vi.spyOn(console, "error").mock.calls;
+});
+
+async function mount(node: ReactNode): Promise<HTMLDivElement> {
   const element = document.createElement("div");
   document.body.appendChild(element);
   const root = createRoot(element);
-  flushSync(() => root.render(node));
+  act(() => {
+    root.render(node);
+  });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   mounted.push({ root, element });
   return element;
 }
@@ -97,16 +136,21 @@ function MotionFixture() {
 
 afterEach(async () => {
   for (const value of mounted.splice(0)) {
-    flushSync(() => value.root.unmount());
+    act(() => value.root.unmount());
     value.element.remove();
   }
   await cdp().send("Emulation.setEmulatedMedia", { features: [] });
   await page.viewport(1280, 720);
+  const actWarnings = consoleErrors.filter(
+    ([message]) => typeof message === "string" && message.includes("not wrapped in act"),
+  );
+  vi.restoreAllMocks();
+  expect(actWarnings).toHaveLength(0);
 });
 
 describe("App landmarks", () => {
-  it.each(pages)("renders one main landmark and one heading for %s", (_name, initialPage) => {
-    const rendered = mount(<App initialPage={initialPage} />);
+  it.each(pages)("renders one main landmark and one heading for %s", async (_name, initialPage) => {
+    const rendered = await mount(<App initialPage={initialPage} />);
 
     expect(rendered.querySelectorAll("main")).toHaveLength(1);
     expect(rendered.querySelectorAll("h1")).toHaveLength(1);
@@ -116,7 +160,7 @@ describe("App landmarks", () => {
 describe("application motion", () => {
   it("keeps the sidebar trigger at least 44 CSS pixels at a 320 CSS pixel viewport", async () => {
     await page.viewport(320, 720);
-    const rendered = mount(<App initialPage={pages[1]![1]} />);
+    const rendered = await mount(<App initialPage={pages[1]![1]} />);
     const trigger = rendered.querySelector<HTMLElement>('[data-slot="sidebar-trigger"]');
     expect(trigger).not.toBeNull();
 
@@ -125,26 +169,26 @@ describe("application motion", () => {
     expect(Number.parseFloat(style.height)).toBeGreaterThanOrEqual(44);
   });
 
-  it("removes motion from the non-authorized sidebar trigger", () => {
-    mount(<MotionFixture />);
+  it("removes motion from the non-authorized sidebar trigger", async () => {
+    await mount(<MotionFixture />);
 
     expectNoMotion(element('[data-slot="sidebar-trigger"]'));
   });
 
-  it("caps Sheet motion at 120 milliseconds", () => {
-    mount(<MotionFixture />);
+  it("caps Sheet motion at 120 milliseconds", async () => {
+    await mount(<MotionFixture />);
 
     expectAllowedMotion(element('[data-slot="sheet-content"]'));
   });
 
-  it("caps Dialog motion at 120 milliseconds", () => {
-    mount(<MotionFixture />);
+  it("caps Dialog motion at 120 milliseconds", async () => {
+    await mount(<MotionFixture />);
 
     expectAllowedMotion(element('[data-slot="dialog-content"]'));
   });
 
   it("removes all allowed motion when reduced motion is requested", async () => {
-    mount(<MotionFixture />);
+    await mount(<MotionFixture />);
     await cdp().send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-reduced-motion", value: "reduce" }],
     });
@@ -198,7 +242,7 @@ describe("Task 15 lifecycle integration", () => {
       [ordinaryInitialPage(), "[data-ordinary-paste-page]"],
     ];
     for (const [initialPage, selector] of cases) {
-      const rendered = mount(<App initialPage={initialPage} />);
+      const rendered = await mount(<App initialPage={initialPage} />);
       await vi.waitFor(() => {
         if (rendered.querySelector(selector) === null) throw new Error(`Missing ${selector}`);
       });
@@ -211,7 +255,7 @@ describe("Task 15 lifecycle integration", () => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const rendered = mount(<App initialPage={ordinaryInitialPage("exact")} />);
+    const rendered = await mount(<App initialPage={ordinaryInitialPage("exact")} />);
     await act(async () => { await vi.dynamicImportSettled(); });
     expect(rendered.querySelector("[data-ordinary-paste-page]")).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -268,6 +312,10 @@ function errorResponse(status: number, code: string, mutationMayHaveApplied = fa
   return jsonResponse({ error: { code, message: code, details: { mutationMayHaveApplied } } }, status);
 }
 
+function uncertainWriteResponse(status = 503): Response {
+  return jsonResponse({ error: { code: "STORAGE_WRITE_FAILED", message: "STORAGE_WRITE_FAILED", details: {} } }, status);
+}
+
 async function resourceResponse(source: string, options: ResourceOptions = {}): Promise<Response> {
   const bytes = new TextEncoder().encode(JSON.stringify({ ...resourceBody(source, options), content: source }));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -289,7 +337,7 @@ function mutationResponse(source: string, options: ResourceOptions = {}): Respon
 }
 
 async function mountOrdinary(source = "initial", password: string | null = null): Promise<HTMLDivElement> {
-  const rendered = mount(<App initialPage={ordinaryInitialPage(source, password)} />);
+  const rendered = await mount(<App initialPage={ordinaryInitialPage(source, password)} />);
   await act(async () => { await vi.dynamicImportSettled(); });
   await vi.waitFor(() => {
     if (rendered.querySelector("[data-ordinary-paste-page]") === null) throw new Error("ordinary page did not mount");
@@ -354,12 +402,14 @@ function unmount(rendered: HTMLDivElement): void {
   const index = mounted.findIndex((value) => value.element === rendered);
   expect(index).toBeGreaterThanOrEqual(0);
   const [entry] = mounted.splice(index, 1);
-  flushSync(() => entry!.root.unmount());
+  act(() => entry!.root.unmount());
   entry!.element.remove();
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
+  stagedMarkdown.prepareMarkdownPreview.mockClear();
+  stagedMarkdown.prepareMarkdownVisual.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   history.replaceState(null, "", "/");
@@ -407,6 +457,23 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("adopts the staged visual resource with a remote apply generation", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "generation.2",
+      updatedAt: "2026-09-14T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await vi.waitFor(() => expect(rendered.querySelector("[data-sync-candidate]")).not.toBeNull());
+    await clickButton(rendered, "Use remote");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-plain-view]")?.textContent).toBe("remote"));
+    await selectTab(rendered, "Markdown");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-markdown-workbench]")).not.toBeNull());
+    await vi.waitFor(() => expect(rendered.querySelector("[data-markdown-visual-host] [data-staged-visual]")).not.toBeNull());
+  });
+
   it("keeps or retries a sync candidate only through its selected action", async () => {
     vi.useFakeTimers();
     let request = 0;
@@ -427,6 +494,48 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("restarts the three-second sync cadence when source returns to its accepted value", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => resourceResponse("initial"));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary("initial");
+
+    await selectTab(rendered, "Edit");
+    await setInput(rendered, "textarea", "draft");
+    await setInput(rendered, "textarea", "initial");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("restarts the three-second sync cadence when composition commits its accepted source", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => resourceResponse("initial"));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary("initial");
+
+    await selectTab(rendered, "Edit");
+    const textarea = rendered.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    expect(setter).toBeDefined();
+    await act(async () => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter!.call(textarea, "draft");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      setter!.call(textarea, "initial");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("opens a confirmation dialog before Reload and retains a dirty draft while staging remote content", async () => {
@@ -454,9 +563,9 @@ describe("Task 15 async lifecycle behavior", () => {
     await clickButton(dialog!, "Reload");
     await vi.waitFor(() => expect(calls.filter((call) => call.init?.method === "GET")).toHaveLength(1));
     expect(new Headers(calls.at(-1)!.init?.headers).has("If-None-Match")).toBe(false);
-    await selectTab(rendered, "Edit");
-    expect(rendered.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("draft");
-    expect(rendered.querySelector("[data-sync-candidate]")).not.toBeNull();
+    await selectTab(rendered, "View");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-plain-view]")?.textContent).toBe("remote"));
+    expect(rendered.querySelector("[data-sync-candidate]")).toBeNull();
   });
 
   it("allows a confirmed Reload after autosync has become inactive", async () => {
@@ -539,6 +648,17 @@ describe("Task 15 async lifecycle behavior", () => {
     await vi.waitFor(() => expect(new URL(location.href).searchParams.get("password")).toBe(credential));
   });
 
+  it.each([
+    ["settings", async (root: HTMLDivElement) => { await selectTab(root, "Settings"); await clickButton(root, "Save title"); }, "[data-settings-result=reconciliation-required]"],
+    ["password", async (root: HTMLDivElement) => { await selectTab(root, "Settings"); await setInput(root, 'input[name="newPassword"]', "replacement"); await clickButton(root, "Set password"); }, "[data-password-result=reconciliation-required]"],
+  ] as const)("treats a missing mutation flag as uncertain for %s", async (_family, start, selector) => {
+    vi.stubGlobal("fetch", vi.fn(async () => uncertainWriteResponse()));
+    const rendered = await mountOrdinary();
+    await start(rendered);
+    await vi.waitFor(() => expect(rendered.querySelector(selector)).not.toBeNull());
+    expect(rendered.querySelector("button")?.disabled).toBe(false);
+  });
+
   it("settles a reconciled view-once response into its terminal local source", async () => {
     vi.useFakeTimers();
     let rejectSave: ((reason?: unknown) => void) | undefined;
@@ -568,11 +688,70 @@ describe("Task 15 async lifecycle behavior", () => {
     await act(async () => { rejectSave!(new TypeError("offline")); await Promise.resolve(); });
     await selectTab(rendered, "Settings");
     await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
-    await clickButton(rendered, "Reconcile");
+    const recovery = rendered.querySelector<HTMLElement>('[aria-label="Autosave"]');
+    expect(recovery).not.toBeNull();
+    await clickButton(recovery!, "Reconcile");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Use remote");
+    await act(async () => {
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(Array.from(rendered.querySelectorAll("button")).filter((button) => button.textContent?.trim() === "Use remote")).toHaveLength(0));
     await clickButton(rendered, "Source");
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("consumed");
-    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("Content reconcile completed");
+    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("The consumed response is displayed.");
+  });
+
+  it("terminalizes complete view-once responses for exact and retired sync tokens", async () => {
+    vi.useFakeTimers();
+    const exact = vi.fn(async () => resourceResponse("initial", { viewOnce: true }));
+    vi.stubGlobal("fetch", exact);
+    const exactPage = await mountOrdinary("initial");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await vi.waitFor(() => expect(exactPage.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    expect(exactPage.querySelector("[data-server-controls]")).toBeNull();
+    unmount(exactPage);
+
+    let resolveRead: ((response: Response) => void) | undefined;
+    const read = new Promise<Response>((resolve) => { resolveRead = resolve; });
+    const retired = vi.fn(() => read);
+    vi.stubGlobal("fetch", retired);
+    const retiredPage = await mountOrdinary("initial");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await selectTab(retiredPage, "Edit");
+    await setInput(retiredPage, "textarea", "local draft");
+    await act(async () => {
+      resolveRead!(await resourceResponse("consumed", { viewOnce: true, version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(retiredPage.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(retiredPage, "Source");
+    expect(retiredPage.querySelector("[data-local-source]")?.textContent).toBe("local draft");
+    expect(retiredPage.querySelector("[data-server-controls]")).toBeNull();
+  });
+
+  it("retains current and consumed terminal sources until a local source choice", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "other-generation.1",
+      contentRevision: 1,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary("current");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Source");
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");
+    expect(button(rendered, "Use remote")).toBeDefined();
+    expect(button(rendered, "Keep current")).toBeDefined();
+    await clickButton(rendered, "Use remote");
+    await clickButton(rendered, "Source");
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("consumed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses the received view-once source once, then stops business requests", async () => {
@@ -608,6 +787,27 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the latest draft when a pending view-once mutation arms the page", async () => {
+    let resolveMutation: ((response: Response) => void) | undefined;
+    const mutation = new Promise<Response>((resolve) => { resolveMutation = resolve; });
+    const fetchMock = vi.fn(() => mutation);
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary("accepted");
+
+    await selectTab(rendered, "Settings");
+    await setChecked(rendered, 'input[name="viewOnce"]', true);
+    await clickButton(rendered, "Save view once");
+    await selectTab(rendered, "Edit");
+    await setInput(rendered, "textarea", "latest draft");
+    await act(async () => {
+      resolveMutation!(mutationResponse("accepted", { viewOnce: true, version: "generation.2" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Armed view-once"]')).not.toBeNull());
+    await clickButton(rendered, "Source");
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("latest draft");
+  });
+
   it("preserves a not-found draft and terminates uncertain and successful deletes", async () => {
     vi.useFakeTimers();
     const notFound = vi.fn(async () => errorResponse(404, "PASTE_NOT_FOUND"));
@@ -640,6 +840,86 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(location.pathname).toBe("/");
     expect(new URL(location.href).search).toBe("");
     expect(handoff.querySelector("[data-server-controls]")).toBeNull();
+  });
+
+  it("acknowledges an in-flight save without publishing a mixed tuple or dropping a later draft", async () => {
+    vi.useFakeTimers();
+    let resolveSave: ((response: Response) => void) | undefined;
+    const save = new Promise<Response>((resolve) => { resolveSave = resolve; });
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return save;
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const records: Array<{ draft: string; acceptedSource: string; autosaveAcceptedSource: string; lastSavedContent: string; autosaveState: string }> = [];
+    let page: UsePastePageResult | null = null;
+    const initial = ordinaryInitialPage("initial") as Parameters<typeof usePastePage>[0];
+
+    function Probe() {
+      page = usePastePage(initial);
+      const snapshot = page.snapshot;
+      records.push({
+        draft: snapshot.source,
+        acceptedSource: snapshot.acceptedSource,
+        autosaveAcceptedSource: snapshot.autosaveAcceptedSource,
+        lastSavedContent: snapshot.lastSavedContent,
+        autosaveState: snapshot.autosave.state,
+      });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => { await Promise.resolve(); });
+    expect(page).not.toBeNull();
+
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "A", eventAt: 0 });
+      page!.actions.autosaveInput("A", 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "B", eventAt: 1_001 });
+      page!.actions.autosaveInput("B", 1_001);
+      resolveSave!(mutationResponse("A", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-15T00:00:01.000Z" }));
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      if (!records.some((record) => record.draft === "B" && record.acceptedSource === "A")) throw new Error("acknowledged draft was not retained");
+    });
+    expect(records.every((record) => record.acceptedSource === record.autosaveAcceptedSource && record.acceptedSource === record.lastSavedContent)).toBe(true);
+    expect(records.some((record) => record.draft === "A" && record.acceptedSource === "A")).toBe(false);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_001); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes local copy completion through OperationStatus", async () => {
+    let page: UsePastePageResult | null = null;
+    const initial = ordinaryInitialPage("initial") as Parameters<typeof usePastePage>[0];
+    function Probe() {
+      page = usePastePage(initial);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.localAction({ key: "copy", state: "pending", attempt: 1, startedAt: "2026-09-20T00:00:00.000Z" });
+      page!.actions.localAction({ key: "copy", state: "succeeded", attempt: 1, startedAt: "2026-09-20T00:00:00.000Z", settledAt: "2026-09-20T00:00:01.000Z" });
+      await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toEqual({ state: "succeeded", key: "copy", attempt: 1, startedAt: "2026-09-20T00:00:00.000Z", settledAt: "2026-09-20T00:00:01.000Z", outcomeKey: null });
+  });
+
+  it("routes the Copy control into OperationStatus", async () => {
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    const rendered = await mountOrdinary("copy source");
+
+    await clickButton(rendered, "Copy");
+
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain("Copied"));
   });
 
   it("records post-load status instants and preserves the settled action across local controls", async () => {

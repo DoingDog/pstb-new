@@ -53,7 +53,7 @@ export type MutationEffect =
   | { type: "dispatch-relative-expiration-retry"; token: number; intent: Extract<NonContentMutationIntent, { kind: "settings-expiration" }>; version: string; now: number }
   | { type: "autosave-slot-available" }
   | { type: "credential-commit"; credential: string | null }
-  | { type: "apply-authoritative"; kind: "content" | "metadata" | "reconciled-applied" | "reconciled-not-applied" | "pause"; acceptedSource?: string; version?: string; state?: "password-required" | "not-found" | "conflict"; failureStatus?: number | null }
+  | { type: "apply-authoritative"; kind: "content" | "remote" | "metadata" | "reconciled-applied" | "reconciled-not-applied" | "pause"; acceptedSource?: string; version?: string; state?: "password-required" | "not-found" | "conflict"; failureStatus?: number | null }
   | { type: "pause"; state: "password-required" | "not-found" | "conflict"; failureStatus: number | null }
   | { type: "root-handoff" }
   | { type: "dispose-server-capabilities"; phase: PastePhase }
@@ -130,6 +130,7 @@ export interface PasteControllerOptions {
   accepted: AcceptedPasteState;
   credential?: CredentialState | string | null;
   onSourceActivity?(eventAt: number): void;
+  wallNow?(): string;
 }
 
 export interface PasteController {
@@ -137,6 +138,7 @@ export interface PasteController {
   effects(): readonly MutationEffect[];
   takeEffects(): MutationEffect[];
   sourceEvent(event: SourceEvent): void;
+  recordLocalActivity(): void;
   startMutation(intent: MutationIntent, at?: number): MutationStart;
   acceptContentMutation(token: number, result: MutationSuccess, at?: number): boolean;
   acceptMetadataMutation(token: number, result: MutationSuccess, at?: number): boolean;
@@ -145,20 +147,26 @@ export interface PasteController {
   acceptContentReconcile(token: number, result: ContentReconcileResult, at?: number): boolean;
   startMetadataReconcile(at?: number): MetadataReconcileDispatch;
   acceptMetadataReconcile(token: number, result: MetadataReconcileResult, at?: number): boolean;
+  discardReconciliation(): boolean;
   acceptDeleteMutation(token: number, result: DeleteResult, at?: number): boolean;
   setPendingCredential(value: string | null): void;
+  commitProvenCredential(value: string): boolean;
+  applyRemoteSnapshot(remote: RemoteSnapshot): boolean;
   retireForRemoteApply(): void;
   enterTerminal(phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void;
   settleTerminal(outcome: TerminalOutcomeKey, at?: number): boolean;
+  recordLocalAction(action: {
+    key: "copy" | "download";
+    state: "pending" | "succeeded" | "failed";
+    attempt: number;
+    startedAt: string;
+    settledAt?: string;
+  }): void;
 }
 
 const sourceActivityEvents = new Set<SourceEvent["type"]>(["input", "composition-end", "crepe-change"]);
 type InternalState = Omit<ActivePasteControllerSnapshot, "mutation">;
 type MetadataRequest = { requestToken: number; token: number; probe: "intended" | "authorization" | "current"; credential: string | null };
-
-function instant(at: number | undefined): string {
-  return new Date(at ?? Date.now()).toISOString();
-}
 
 function generationOf(version: string): string | "legacy" {
   if (version === "legacy") return "legacy";
@@ -231,6 +239,7 @@ function initialCredential(value: PasteControllerOptions["credential"]): Credent
 }
 
 export function createPasteController(options: PasteControllerOptions): PasteController {
+  const instant = (_at?: number): string => options.wallNow?.() ?? new Date().toISOString();
   const initial = options.accepted;
   let state: InternalState = {
     ...initial,
@@ -271,6 +280,21 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   };
   const recordFailure = (intent: MutationIntent, failure: MutationFailure, at: number | undefined): void => {
     state = { ...state, originalMutationFailure: { key: actionKey(intent), status: failure.status, failedAt: instant(at) } };
+  };
+  const recordLocalAction = (action: {
+    key: "copy" | "download";
+    state: "pending" | "succeeded" | "failed";
+    attempt: number;
+    startedAt: string;
+    settledAt?: string;
+  }): void => {
+    if (action.state === "pending") {
+      state = { ...state, lastAction: { state: "pending", key: action.key, attempt: action.attempt, startedAt: action.startedAt } };
+      return;
+    }
+    const current = state.lastAction;
+    if (current.state !== "pending" || current.key !== action.key || current.attempt !== action.attempt || action.settledAt === undefined) return;
+    state = { ...state, lastAction: { state: action.state, key: action.key, attempt: action.attempt, startedAt: current.startedAt, settledAt: action.settledAt, outcomeKey: null } };
   };
   const invalidate = (reason: "mutation" | "remote-apply" | "terminal" | "delete"): void => {
     effects.push({ type: "invalidate-sync" }, { type: "invalidate-history", reason });
@@ -355,6 +379,11 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       if (slot.state === "content-reconciliation") slot = { ...slot, laterDraft: event.content };
     }
     if (sourceActivityEvents.has(event.type)) options.onSourceActivity?.(event.eventAt);
+  };
+
+  const recordLocalActivity = (): void => {
+    if (state.phase !== "ordinary") return;
+    state = { ...state, localGeneration: state.localGeneration + 1, conflictCandidate: null };
   };
 
   const adoptMutationMetadata = (result: MutationSuccess): void => {
@@ -749,8 +778,64 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     return true;
   };
 
+  const discardReconciliation = (): boolean => {
+    if (state.phase !== "ordinary" || (slot.state !== "content-reconciliation" && slot.state !== "metadata-reconciliation")) return false;
+    nextToken += 1;
+    slot = { state: "idle", nextToken };
+    clearRequestOwnership();
+    state = {
+      ...state,
+      coalescedSource: null,
+      conflictCandidate: null,
+      originalMutationFailure: null,
+      reconciliationRequired: false,
+      autosave: {
+        state: state.draft === state.acceptedSource ? "clean" : "waiting",
+        confirmedAt: state.autosave.confirmedAt,
+        failedAt: null,
+      },
+    };
+    invalidate("mutation");
+    effects.push({ type: "autosave-slot-available" });
+    return true;
+  };
+
   const setPendingCredential = (value: string | null): void => {
     state = { ...state, credential: { ...state.credential, pending: value } };
+  };
+
+  const commitProvenCredential = (value: string): boolean => {
+    if (state.credential.pending !== value) return false;
+    commitCredential(value);
+    return true;
+  };
+
+  const applyRemoteSnapshot = (remote: RemoteSnapshot): boolean => {
+    if (state.phase !== "ordinary" || !state.serverCapabilities) return false;
+    nextToken += 1;
+    slot = { state: "idle", nextToken };
+    clearRequestOwnership();
+    state = {
+      ...state,
+      acceptedSource: remote.source,
+      draft: remote.source,
+      summary: remote.summary,
+      version: remote.summary.version,
+      versionUsable: true,
+      contentRevision: remote.contentRevision,
+      updatedAt: remote.summary.updatedAt,
+      responseEtag: remote.etag,
+      acceptedApplyGeneration: state.acceptedApplyGeneration + 1,
+      displayGeneration: state.displayGeneration + 1,
+      lastSavedContent: remote.source,
+      coalescedSource: null,
+      conflictCandidate: null,
+      originalMutationFailure: null,
+      reconciliationRequired: false,
+      autosave: { state: "clean", confirmedAt: state.autosave.confirmedAt, failedAt: null },
+    };
+    effects.push({ type: "apply-authoritative", kind: "remote", acceptedSource: remote.source, version: remote.summary.version });
+    return true;
   };
 
   const retireForRemoteApply = (): void => {
@@ -815,6 +900,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       return pending;
     },
     sourceEvent,
+    recordLocalActivity,
     startMutation,
     acceptContentMutation,
     acceptMetadataMutation,
@@ -823,10 +909,14 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     acceptContentReconcile,
     startMetadataReconcile,
     acceptMetadataReconcile,
+    discardReconciliation,
     acceptDeleteMutation,
     setPendingCredential,
+    commitProvenCredential,
+    applyRemoteSnapshot,
     retireForRemoteApply,
     enterTerminal,
     settleTerminal,
+    recordLocalAction,
   };
 }

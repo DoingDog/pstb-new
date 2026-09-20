@@ -9,6 +9,7 @@ type PasswordField = "newPassword" | "currentPassword" | "retryCredential";
 export interface PasswordPanelState {
   protected: boolean;
   versionUsable: boolean;
+  mutationPending?: boolean;
   result: { action: "set" | "clear" | null; state: PasswordResultState; message: string | null };
   currentUrl: string;
   representations: readonly { label: string; href: string }[];
@@ -45,7 +46,8 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const result = discardedResult.current === state.result ? { action: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
   const pending = state.result.state === "pending";
-  const mutationBlocked = pending || !state.versionUsable;
+  const mutationBlocked = state.mutationPending === true || pending || !state.versionUsable;
+  const discardBlocked = state.mutationPending === true || pending;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
@@ -94,7 +96,7 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
     reconcile();
   };
   const reset = () => {
-    if (pending) return;
+    if (discardBlocked) return;
     submitted.current = {};
     setNewPassword("");
     setCurrentPassword("");
@@ -119,7 +121,7 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
       {result.state === "conflict" && state.versionUsable && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
       {result.state === "reconciliation-required" && <Button type="button" disabled={mutationBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
       {(!state.versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      <Button type="button" variant="outline" disabled={pending} onClick={reset}>{copy.discard}</Button>
+      <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>
       <nav aria-label={copy.representations} className="flex flex-wrap gap-2"><a aria-label={copy.paste} href={state.currentUrl}>{copy.paste}</a>{state.representations.map((representation) => <a key={representation.href} href={representation.href}>{representation.label}</a>)}</nav>
     </section>
   );
