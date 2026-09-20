@@ -5,11 +5,13 @@ import { errorMessage, formatDate, labels, resolveBrowserLocale, type Locale } f
 import { createPasteApi } from "./api";
 import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
 import type { AppBootstrap, OperationRecords, PasteSummary } from "./contracts";
-import { prepareMarkdownPreview, prepareMarkdownVisual, type PreparedMarkdownVisual } from "./markdown";
-import { createStagedSurfaceApply, type StagedSurfaceApply } from "./surface-apply";
+import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, type PreparedMarkdownVisual } from "./markdown";
+import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply } from "./surface-apply";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
 import { OperationStatus } from "./components/OperationStatus";
+import type { LocalActionState } from "./components/LocalActions";
 import { WorkbenchShell } from "./components/WorkbenchShell";
+import type { TerminalHandoff, TerminalPage } from "./hooks/use-paste-page";
 
 const CreatePage = React.lazy(() => import("./pages/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
 const PasswordPage = React.lazy(() => import("./pages/PasswordPage").then(({ PasswordPage }) => ({ default: PasswordPage })));
@@ -22,20 +24,15 @@ interface AppProps {
   initialPage: InitialPage;
 }
 
-type TerminalPage = {
-  phase: "armed-view-once" | "consumed" | "not-found" | "delete-uncertain";
-  source: string;
-  consumedSource: string | null;
-  initialMarkdown: TrustedMarkdownHtml | null;
-};
-
 type TerminalLocalRuntime = {
   epoch: number;
   source: string;
   pending: boolean;
   actionAttempt: number | null;
   surface: StagedSurfaceApply;
+  mountedSurfaces: Set<DerivedSurface>;
   resources: { preview: unknown; visual: unknown; diff: unknown; generation: number } | null;
+  previousResources: { preview: unknown; visual: unknown; diff: unknown; generation: number } | null;
 };
 type TerminalState = TerminalPage & { local: TerminalLocalRuntime };
 
@@ -45,8 +42,15 @@ function isPreparedMarkdownVisual(value: unknown): value is PreparedMarkdownVisu
     && "dispose" in value && typeof value.dispose === "function";
 }
 
-function disposeTerminalResources(resources: TerminalLocalRuntime["resources"]): void {
+function isMarkdownPreview(value: unknown): value is MarkdownPreview {
+  return typeof value === "object" && value !== null
+    && "source" in value && typeof value.source === "string"
+    && "html" in value && typeof value.html === "string";
+}
+
+function disposeTerminalResources(resources: TerminalLocalRuntime["resources"], previous: TerminalLocalRuntime["previousResources"] = null): void {
   if (isPreparedMarkdownVisual(resources?.visual)) void resources.visual.dispose();
+  if (previous !== resources && isPreparedMarkdownVisual(previous?.visual)) void previous.visual.dispose();
 }
 
 type SourceInitialPage = {
@@ -211,21 +215,23 @@ function operationStatusPageIdentity(initialPage: InitialPage, terminal: Termina
   }
 }
 
-function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onSummaryChange, onTerminal, onUseConsumedResponse, onKeepCurrent, onRootHandoff }: {
+function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsChange, onSummaryChange, onTerminal, onLocalAction, onUseConsumedResponse, onKeepCurrent, onTerminalPreviewMounted, onRootHandoff }: {
   initialPage: InitialPage;
   locale: Locale;
   create: ReturnType<typeof createPasteApi>["create"] | null;
-  terminal: TerminalPage | null;
+  terminal: TerminalState | null;
   rootHandoff: boolean;
   onRecordsChange(records: OperationRecords): void;
   onSummaryChange(summary: PasteSummary | null): void;
-  onTerminal(page: TerminalPage): void;
+  onTerminal(handoff: TerminalHandoff): void;
+  onLocalAction(state: LocalActionState): void;
   onUseConsumedResponse(): void;
   onKeepCurrent(): void;
+  onTerminalPreviewMounted(mounted: boolean): void;
   onRootHandoff(): void;
 }) {
   if (rootHandoff) return create === null ? null : <CreatePage locale={locale} create={create} />;
-  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} />;
+  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} derivedPreview={isMarkdownPreview(terminal.local.resources?.preview) ? terminal.local.resources.preview : null} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} onSurfaceMounted={onTerminalPreviewMounted} onActionState={onLocalAction} />;
   if (!initialPage.ok) return <ErrorPage locale={locale} status={500} errorCode={initialPage.errorCode} />;
 
   const { bootstrap } = initialPage;
@@ -239,7 +245,7 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
     case "paste": {
       const sourcePage = initialPage as SourceInitialPage;
       return bootstrap.consumed
-        ? <LocalOnlyPastePage locale={locale} phase="consumed" source={sourcePage.exactSource} initialMarkdown={sourcePage.initialMarkdown} />
+        ? <LocalOnlyPastePage locale={locale} phase="consumed" source={sourcePage.exactSource} initialMarkdown={sourcePage.initialMarkdown} onActionState={onLocalAction} />
         : <OrdinaryPage initialPage={sourcePage as OrdinaryInitialPage} locale={locale} onRecordsChange={onRecordsChange} onSummaryChange={onSummaryChange} onTerminal={onTerminal} onRootHandoff={() => { onSummaryChange(null); onRootHandoff(); }} />;
     }
     case "markdown": {
@@ -341,7 +347,9 @@ export function App({ initialPage }: AppProps) {
     local.source = page.source;
     local.pending = false;
     local.actionAttempt = null;
+    local.mountedSurfaces = new Set();
     local.resources = null;
+    local.previousResources = null;
     local.surface = createStagedSurfaceApply({
       capture: {
         localGeneration: 0,
@@ -359,17 +367,40 @@ export function App({ initialPage }: AppProps) {
           visual.root.dataset.stagedVisual = String(generation);
           return visual;
         },
-        stageDiff: async (source, generation) => ({ kind: "target-bound-fallback", source, generation }),
-        mounted: () => [],
+        stageDiff: () => Promise.resolve(null),
+        mounted: () => Array.from(local.mountedSurfaces),
         commit: (staged, generation) => {
           const previous = local.resources;
+          local.previousResources = previous;
           local.resources = { ...staged, generation };
           if (isPreparedMarkdownVisual(previous?.visual) && previous.visual !== staged.visual && !previous.visual.root.isConnected) {
             void previous.visual.dispose();
           }
         },
-        restoreOld: async () => true,
-        showOldGenerationFailure: () => undefined,
+        restoreOld: async (generation) => {
+          const previous = local.resources?.generation === generation
+            ? local.resources
+            : local.previousResources?.generation === generation
+              ? local.previousResources
+              : null;
+          if (previous === null) return false;
+          local.resources = previous;
+          return true;
+        },
+        showOldGenerationFailure: (generation, source) => {
+          const previous = local.resources?.generation === generation
+            ? local.resources
+            : local.previousResources?.generation === generation
+              ? local.previousResources
+              : null;
+          if (previous === null) return;
+          local.resources = {
+            preview: { kind: "fallback", surface: "preview", source, generation },
+            visual: { kind: "fallback", surface: "visual", source, generation },
+            diff: { kind: "fallback", surface: "diff", source, generation },
+            generation,
+          };
+        },
         disposeAttemptResources: (attempt) => {
           const staged = (attempt as { staged?: Record<string, unknown> }).staged;
           if (isPreparedMarkdownVisual(staged?.visual)) void staged.visual.dispose();
@@ -379,7 +410,15 @@ export function App({ initialPage }: AppProps) {
     return { ...page, local };
   }, []);
 
-  React.useEffect(() => () => disposeTerminalResources(terminalRef.current?.local.resources ?? null), []);
+  React.useEffect(() => () => disposeTerminalResources(terminalRef.current?.local.resources ?? null, terminalRef.current?.local.previousResources ?? null), []);
+
+  const terminalPreviewMounted = React.useCallback((mounted: boolean) => {
+    const current = terminalRef.current;
+    if (current === null) return;
+    if (mounted) current.local.mountedSurfaces.add("preview");
+    else current.local.mountedSurfaces.delete("preview");
+    current.local.surface.remount();
+  }, []);
 
   const useConsumedResponse = React.useCallback(() => {
     const current = terminalRef.current;
@@ -464,10 +503,37 @@ export function App({ initialPage }: AppProps) {
     current.local.surface.invalidate();
     setTerminal((page) => page?.local === current.local ? { ...page, consumedSource: null } : page);
   }, []);
-  const enterTerminal = React.useCallback((page: TerminalPage) => {
-    disposeTerminalResources(terminalRef.current?.local.resources ?? null);
-    flushSync(() => setTerminal(createTerminalState(page)));
+  const enterTerminal = React.useCallback(({ page, records }: TerminalHandoff) => {
+    disposeTerminalResources(terminalRef.current?.local.resources ?? null, terminalRef.current?.local.previousResources ?? null);
+    flushSync(() => {
+      setRecords(records);
+      setTerminal(createTerminalState(page));
+    });
   }, [createTerminalState]);
+  const recordLocalAction = React.useCallback((action: LocalActionState) => {
+    setRecords((records) => {
+      if (action.state === "pending") {
+        return { ...records, lastAction: { state: "pending", key: action.key, attempt: action.attempt, startedAt: action.startedAt } };
+      }
+      if (
+        records.lastAction.state !== "pending"
+        || records.lastAction.key !== action.key
+        || records.lastAction.attempt !== action.attempt
+        || action.settledAt === undefined
+      ) return records;
+      return {
+        ...records,
+        lastAction: {
+          state: action.state,
+          key: action.key,
+          attempt: action.attempt,
+          startedAt: records.lastAction.startedAt,
+          settledAt: action.settledAt,
+          outcomeKey: null,
+        },
+      };
+    });
+  }, []);
 
   return (
     <WorkbenchShell
@@ -496,8 +562,10 @@ export function App({ initialPage }: AppProps) {
           onRecordsChange={setRecords}
           onSummaryChange={setSummary}
           onTerminal={enterTerminal}
+          onLocalAction={recordLocalAction}
           onUseConsumedResponse={useConsumedResponse}
           onKeepCurrent={keepCurrent}
+          onTerminalPreviewMounted={terminalPreviewMounted}
           onRootHandoff={() => setRootHandoff(true)}
         />
       </React.Suspense>

@@ -11,6 +11,8 @@ export interface PasswordPanelState {
   versionUsable: boolean;
   mutationPending?: boolean;
   mutationOccupied?: boolean;
+  reconciliationOwner?: "content" | "title" | "format" | "expiration" | "viewOnce" | "password" | null;
+  reconciliationRequestPending?: boolean;
   result: { action: "set" | "clear" | null; state: PasswordResultState; message: string | null };
   currentUrl: string;
   representations: readonly { label: string; href: string }[];
@@ -19,6 +21,7 @@ export interface PasswordPanelState {
 export interface PasswordPanelProps {
   state: PasswordPanelState;
   onActivity(eventAt: number, kind?: "recovery-credential"): void;
+  onDraftState?(dirty: boolean, eventAt?: number): void;
   setPassword(newPassword: string, authorizationPassword: string | null): void;
   clearPassword(authorizationPassword: string | null): void;
   retry(authorizationPassword: string | null): void;
@@ -36,10 +39,11 @@ function resultMessage(result: PasswordPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-export function PasswordPanel({ state, onActivity, setPassword, clearPassword, retry, reconcile, reload, discard, locale = "en" }: PasswordPanelProps) {
+export function PasswordPanel({ state, onActivity, onDraftState, setPassword, clearPassword, retry, reconcile, reload, discard, locale = "en" }: PasswordPanelProps) {
   const [newPassword, setNewPassword] = React.useState("");
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [retryCredential, setRetryCredential] = React.useState("");
+  const passwords = React.useRef({ newPassword: "", currentPassword: "" });
   const generations = React.useRef<Record<PasswordField, number>>({ newPassword: 0, currentPassword: 0, retryCredential: 0 });
   const submitted = React.useRef<Partial<Record<PasswordField, number>>>({});
   const discardedResult = React.useRef<PasswordPanelState["result"] | null>(null);
@@ -48,15 +52,22 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const recoveryBlocked = state.mutationPending === true || pending;
-  const discardBlocked = recoveryBlocked;
+  const recoveryBlocked = state.reconciliationRequestPending === true;
+  const discardBlocked = pending || state.mutationPending === true || recoveryBlocked || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && state.reconciliationOwner !== "password");
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
-    if (field === "newPassword") setNewPassword(value);
-    if (field === "currentPassword") setCurrentPassword(value);
+    if (field === "newPassword") {
+      passwords.current.newPassword = value;
+      setNewPassword(value);
+    }
+    if (field === "currentPassword") {
+      passwords.current.currentPassword = value;
+      setCurrentPassword(value);
+    }
     if (field === "retryCredential") setRetryCredential(value);
   };
+  const reportDraftState = (eventAt?: number) => onDraftState?.(passwords.current.newPassword !== "" || passwords.current.currentPassword !== "", eventAt);
   const capture = (...fields: PasswordField[]) => {
     for (const field of fields) submitted.current[field] = generations.current[field];
   };
@@ -65,17 +76,23 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
     if (result.state !== "succeeded") return;
     const clear = (field: PasswordField) => {
       if (submitted.current[field] !== generations.current[field]) return;
-      if (field === "newPassword") setNewPassword("");
-      if (field === "currentPassword") setCurrentPassword("");
+      if (field === "newPassword") {
+        passwords.current.newPassword = "";
+        setNewPassword("");
+      }
+      if (field === "currentPassword") {
+        passwords.current.currentPassword = "";
+        setCurrentPassword("");
+      }
       if (field === "retryCredential") setRetryCredential("");
     };
     clear("newPassword");
     clear("currentPassword");
     clear("retryCredential");
     submitted.current = {};
-  }, [result.action, result.state]);
+    reportDraftState();
+  }, [result.action, result.state, reportDraftState]);
 
-  const activity = (event: React.SyntheticEvent<HTMLInputElement>) => onActivity(event.timeStamp);
   const authorization = state.protected ? (currentPassword === "" ? null : currentPassword) : null;
   const retryAuthorization = retryCredential === "" ? null : retryCredential;
   const submitPassword = () => {
@@ -100,10 +117,12 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
   const reset = () => {
     if (discardBlocked) return;
     submitted.current = {};
+    passwords.current = { newPassword: "", currentPassword: "" };
     setNewPassword("");
     setCurrentPassword("");
     setRetryCredential("");
     discardedResult.current = state.result;
+    reportDraftState();
     render((value) => value + 1);
     discard();
   };
@@ -111,8 +130,8 @@ export function PasswordPanel({ state, onActivity, setPassword, clearPassword, r
 
   return (
     <section aria-label={copy.password} className="grid gap-3">
-      {state.protected && <label>{copy.currentPassword}<Input name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); activity(event); }} /></label>}
-      <label>{copy.newPassword}<Input name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); activity(event); }} /></label>
+      {state.protected && <label>{copy.currentPassword}<Input name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>}
+      <label>{copy.newPassword}<Input name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
       <div className="flex flex-wrap gap-2">
         <Button type="button" disabled={mutationBlocked} onClick={submitPassword}>{state.protected ? copy.changePassword : copy.setPassword}</Button>
         {state.protected && <Button type="button" variant="outline" disabled={mutationBlocked} onClick={clear}>{copy.clearPassword}</Button>}

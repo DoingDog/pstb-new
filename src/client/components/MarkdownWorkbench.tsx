@@ -483,7 +483,7 @@ export function MarkdownWorkbench({
   }, [mode, onSurfaceMounted]);
 
   React.useEffect(() => {
-    if (visualRoot === null || !mounted.current) return;
+    if (visualRoot === null || !mounted.current || owners.current !== null) return;
     const owner = createOwner(sourceAdapter.current.value, preparedVisual);
     const requested = pendingMode.current;
     pendingMode.current = null;
@@ -491,7 +491,7 @@ export function MarkdownWorkbench({
     return () => {
       if (owner !== null) retireOwner(owner);
     };
-  }, [visualRoot, createOwner, preparedVisual, retireOwner, runMode]);
+  }, [visualRoot, createOwner, retireOwner, runMode]);
 
   React.useLayoutEffect(() => {
     const owner = owners.current;
@@ -510,13 +510,25 @@ export function MarkdownWorkbench({
       return;
     }
 
+    const target = mode === "preview" && preparedPreview?.source === source
+      ? "preview"
+      : mode === "visual" && preparedVisual?.source.value === source
+        ? "visual"
+        : "source";
     retireOwner(owner);
     sourceAdapter.current.value = source;
-    setPreview(null);
+    setPreview(target === "preview" ? preparedPreview! : null);
     setFailure(null);
-    setMode("source");
-    createOwner(source);
-  }, [source, createOwner, isCurrentOwner, retireOwner]);
+    const replacement = createOwner(source, target === "visual" ? preparedVisual : null);
+    if (replacement !== null && target === "visual") {
+      replacement.target = "visual";
+      replacement.editorGeneration = replacement.request;
+      replacement.readyEditorGeneration = replacement.request;
+      replacement.editorSource = source;
+    }
+    if (replacement !== null && target === "preview") replacement.target = "preview";
+    setMode(target);
+  }, [source, createOwner, isCurrentOwner, mode, preparedPreview, preparedVisual, retireOwner]);
 
   return (
     <section data-markdown-workbench="true" className="flex min-w-0 flex-col gap-3">

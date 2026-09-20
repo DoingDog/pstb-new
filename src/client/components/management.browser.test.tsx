@@ -271,8 +271,9 @@ function change(element: { value: string; dispatchEvent(event: Event): boolean }
 }
 
 describe("settings result table", () => {
-  it("keeps separate controlled drafts, reports activity only for field input, and saves one field at a time", async () => {
+  it("keeps separate controlled drafts, reports owner draft state for field input, and saves one field at a time", async () => {
     const activity = vi.fn();
+    const draftState = vi.fn();
     const saveTitle = vi.fn();
     const saveFormat = vi.fn();
     const saveExpiration = vi.fn();
@@ -281,6 +282,7 @@ describe("settings result table", () => {
       <SettingsPanel
         state={settingsState()}
         onActivity={activity}
+        onDraftState={draftState}
         saveTitle={saveTitle}
         saveFormat={saveFormat}
         saveExpiration={saveExpiration}
@@ -296,12 +298,12 @@ describe("settings result table", () => {
     expect(id.readOnly).toBe(true);
     const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
     input(title, "Draft title");
-    expect(activity).toHaveBeenCalledTimes(1);
-    expect(activity.mock.calls[0]?.[0]).toEqual(expect.any(Number));
+    expect(activity).not.toHaveBeenCalled();
+    expect(draftState).toHaveBeenCalledWith(true, expect.any(Number));
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save title")!);
     expect(saveTitle).toHaveBeenCalledOnce();
     expect(saveTitle).toHaveBeenCalledWith("Draft title");
-    expect(activity).toHaveBeenCalledTimes(1);
+    expect(activity).not.toHaveBeenCalled();
 
     const format = fixture.element.querySelector('select[name="format"]') as unknown as { value: string; dispatchEvent(event: Event): boolean };
     change(format, "markdown");
@@ -449,6 +451,70 @@ describe("reconciliation ownership", () => {
     click(Array.from(recovery.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
     expect(reconcile).toHaveBeenCalledOnce();
+    expect(discard).toHaveBeenCalledOnce();
+  });
+
+  it("blocks only the owner's Reconcile and Discard while its GET is pending", async () => {
+    const reconcile = vi.fn();
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({
+          mutationOccupied: true,
+          mutationPending: false,
+          reconciliationOwner: "title",
+          reconciliationRequestPending: true,
+          result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={reconcile}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!;
+    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
+    expect(reconcileButton.disabled).toBe(true);
+    expect(discardButton.disabled).toBe(true);
+    click(reconcileButton);
+    click(discardButton);
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it("resets only the reconciliation owner field on Settings Discard", async () => {
+    const discard = vi.fn();
+    const fixture = await mount(
+      <SettingsPanel
+        state={settingsState({
+          reconciliationOwner: "title",
+          result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={vi.fn()}
+        reload={vi.fn()}
+        discard={discard}
+      />,
+    );
+
+    const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
+    const format = fixture.element.querySelector('select[name="format"]') as unknown as { value: string; dispatchEvent(event: Event): boolean };
+    input(title, "Uncertain title");
+    change(format, "markdown");
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(title.value).toBe("Accepted title");
+    expect(format.value).toBe("markdown");
     expect(discard).toHaveBeenCalledOnce();
   });
 

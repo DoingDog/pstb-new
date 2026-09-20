@@ -492,6 +492,114 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "history-snapshot" });
   });
 
+  it("updates the selected History diff current side for local and accepted remote source changes", async () => {
+    let page: UsePastePageResult | null = null;
+    const workers: Array<{ postMessage: ReturnType<typeof vi.fn>; terminate: ReturnType<typeof vi.fn>; onmessage: ((event: MessageEvent<unknown>) => void) | null; onerror: ((event: ErrorEvent) => void) | null }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => (
+      String(input).endsWith("/history/1")
+        ? jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' })
+        : resourceResponse("remote", { version: "generation.1", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" })
+    )));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("diff", true);
+      page!.actions.selectRevision(1);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 1, previous: "past", current: "initial" });
+
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "local draft", eventAt: 1 });
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 3, previous: "past", current: "local draft" });
+
+    await act(async () => {
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 4, previous: "past", current: "remote" }));
+    await act(async () => {
+      workers[0]!.onmessage?.({ data: { type: "result", id: 4, lines: [{ kind: "add", text: "remote" }] } } as MessageEvent<unknown>);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.source).toBe("remote");
+    expect(page!.snapshot.history.diff).toEqual({ state: "ready", lines: [{ kind: "add", text: "remote" }] });
+  });
+
+  it("keeps Autosync paused until Settings and Password drafts both exactly revert", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => resourceResponse("initial"));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+
+    await setInput(rendered, 'input[name="title"]', "Changed");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+
+    await setInput(rendered, 'input[name="newPassword"]', "replacement");
+    await setInput(rendered, 'input[name="title"]', "Example");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+
+    await setInput(rendered, 'input[name="newPassword"]', "");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_999);
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a Password draft dirty after Settings accepts its exact submitted value", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => mutationResponse("initial", { title: "Updated", version: "generation.2" })));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Updated");
+    await setInput(rendered, 'input[name="newPassword"]', "replacement");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="succeeded"]')).not.toBeNull());
+
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await setInput(rendered, 'input[name="newPassword"]', "");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+  });
+
+  it("keeps a Password draft dirty after Settings Discard clears only Settings", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => uncertainWriteResponse()));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Changed");
+    await setInput(rendered, 'input[name="newPassword"]', "replacement");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    await clickButton(rendered, "Discard");
+
+    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Example");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await setInput(rendered, 'input[name="newPassword"]', "");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+  });
+
   it("settles a Reload attempt in OperationStatus", async () => {
     let page: UsePastePageResult | null = null;
     vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
@@ -511,6 +619,139 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "reload-server" });
+  });
+
+  it("settles Reload only after its staged surface commits", async () => {
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledOnce());
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "pending", key: "reload-server" });
+
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "local draft", eventAt: 1 });
+      resolvePreview!({ source: "remote", html: "<p>remote</p>" });
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "reload-server" });
+  });
+
+  it("settles Retry sync when its legal due is armed", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    vi.stubGlobal("fetch", vi.fn(async () => errorResponse(403, "FORBIDDEN")));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.candidate).toEqual({ kind: "forbidden", source: "" });
+
+    await act(async () => {
+      page!.actions.retrySync("credential");
+      await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "retry-sync" });
+  });
+
+  it("fails Retry sync immediately when no legal due can be armed", async () => {
+    let page: UsePastePageResult | null = null;
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      page!.actions.retrySync(null);
+      await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "retry-sync" });
+  });
+
+  it("hands a settled Reload record to the terminal handoff", async () => {
+    let page: UsePastePageResult | null = null;
+    let terminal: unknown = null;
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], { onTerminal: (handoff) => { terminal = handoff; } });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(terminal).toMatchObject({
+      page: { phase: "consumed", source: "consumed", currentSource: "initial", responseSource: "consumed", choiceAvailable: false },
+      records: { lastAction: { state: "succeeded", key: "reload-server", outcomeKey: "reload-terminal-response-displayed" } },
+    });
+  });
+
+  it("keeps current when a mounted Preview cannot stage a newer consumed Reload response", async () => {
+    let page: UsePastePageResult | null = null;
+    let terminal: unknown = null;
+    stagedMarkdown.prepareMarkdownPreview.mockRejectedValueOnce(new Error("preview unavailable"));
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], { onTerminal: (handoff) => { terminal = handoff; } });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("consumed");
+    expect(terminal).toMatchObject({
+      page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true },
+      records: { lastAction: { state: "failed", key: "reload-server", outcomeKey: "reload-terminal-response-display-failed" } },
+    });
   });
 
   it("terminalizes a view-once Reload invalidated by metadata mutation", async () => {
@@ -635,6 +876,34 @@ describe("Task 15 async lifecycle behavior", () => {
     });
     expect(page!.snapshot.paste).toMatchObject({ phase: "consumed", serverCapabilities: false });
     expect(page!.snapshot.records.network.state).toBe("online");
+  });
+
+  it("keeps current when a mounted Preview cannot stage a newer consumed sync response", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let terminal: unknown = null;
+    stagedMarkdown.prepareMarkdownPreview.mockRejectedValueOnce(new Error("preview unavailable"));
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], { onTerminal: (handoff) => { terminal = handoff; } });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("consumed");
+    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true } });
   });
 
   it("cleans a first mount before the remounted lifecycle reaches its sync due time", async () => {
@@ -1060,13 +1329,17 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(current.searchParams.getAll("password")).toEqual([password]);
     expect(current.hash).toBe("#fragment");
     expect(rendered.textContent).not.toContain(password);
-    for (const link of Array.from(rendered.querySelectorAll<HTMLAnchorElement>('a[href^="/raw/"]'))) {
+    const rawRepresentations = Array.from(rendered.querySelectorAll<HTMLAnchorElement>("a")).filter((link) => new URL(link.href).pathname.startsWith("/raw/"));
+    expect(rawRepresentations.length).toBeGreaterThan(0);
+    for (const link of rawRepresentations) {
       expect(new URL(link.href).searchParams.get("password")).toBe(password);
     }
 
     unmount(rendered);
     const remounted = await mountOrdinary("initial", password);
-    for (const link of Array.from(remounted.querySelectorAll<HTMLAnchorElement>('a[href^="/raw/"]'))) {
+    const remountedRawRepresentations = Array.from(remounted.querySelectorAll<HTMLAnchorElement>("a")).filter((link) => new URL(link.href).pathname.startsWith("/raw/"));
+    expect(remountedRawRepresentations.length).toBeGreaterThan(0);
+    for (const link of remountedRawRepresentations) {
       expect(new URL(link.href).searchParams.getAll("password")).toEqual([password]);
     }
   });
@@ -1151,6 +1424,55 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("The consumed response is displayed.");
   });
 
+  it("keeps the current draft when a late content reconcile consumes the paste", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    let resolveRead: ((response: Response) => void) | undefined;
+    const read = new Promise<Response>((resolve) => { resolveRead = resolve; });
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "PATCH" ? uncertainWriteResponse() : read
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+
+    await selectTab(rendered, "Edit");
+    const textarea = rendered.querySelector<HTMLTextAreaElement>("textarea");
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    expect(textarea).not.toBeNull();
+    expect(setter).toBeDefined();
+    await act(async () => {
+      setter!.call(textarea, "local draft");
+      const event = new Event("input", { bubbles: true });
+      Object.defineProperty(event, "timeStamp", { value: performance.now() });
+      textarea!.dispatchEvent(event);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await selectTab(rendered, "Settings");
+    const recovery = rendered.querySelector<HTMLElement>('[aria-label="Autosave"]');
+    expect(recovery).not.toBeNull();
+    await vi.waitFor(() => expect(button(recovery!, "Reconcile")).toBeDefined());
+    await clickButton(recovery!, "Reconcile");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await clickButton(rendered, "Copy");
+    const discard = button(rendered, "Discard");
+    expect(discard.disabled).toBe(true);
+    await act(async () => {
+      discard.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveRead!(await resourceResponse("consumed", { viewOnce: true, version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      await vi.dynamicImportSettled();
+    });
+
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Source");
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("local draft");
+    expect(rendered.querySelector("[data-server-controls]")).toBeNull();
+  });
+
   it("terminalizes complete view-once responses for exact and retired sync tokens", async () => {
     vi.useFakeTimers();
     const exact = vi.fn(async () => resourceResponse("initial", { viewOnce: true }));
@@ -1231,6 +1553,37 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("stages the mounted terminal preview before settling Use remote", async () => {
+    vi.useFakeTimers();
+    let resolvePreview: ((value: { source: string; html: string }) => void) | undefined;
+    const preview = new Promise<{ source: string; html: string }>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "other-generation.1",
+      contentRevision: 1,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary("current");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await act(async () => {
+      button(rendered, "Use remote").click();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("consumed");
+    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("Using consumed response");
+
+    await act(async () => {
+      resolvePreview!({ source: "consumed", html: "<p>rendered consumed</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      await vi.dynamicImportSettled();
+    });
+    await vi.waitFor(() => expect(rendered.textContent).toContain("rendered consumed"));
+    expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("The consumed response is displayed.");
+  });
+
   it("settles an invalidated consumed-response action as failed exactly once", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
@@ -1252,6 +1605,52 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 5; step += 1) await Promise.resolve();
     });
     await vi.waitFor(() => expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("The consumed response could not be displayed."));
+  });
+
+  it("records terminal Copy in the shared OperationStatus", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      await vi.dynamicImportSettled();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull();
+    await clickButton(rendered, "Copy");
+
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain("Copied"));
+  });
+
+  it("records terminal Download in the shared OperationStatus", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:download");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      await vi.dynamicImportSettled();
+    });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Download");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("Download ready"));
   });
 
   it("uses the received view-once source once, then stops business requests", async () => {

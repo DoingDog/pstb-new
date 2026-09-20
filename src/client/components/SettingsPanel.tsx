@@ -23,12 +23,15 @@ export interface SettingsPanelState {
   versionUsable: boolean;
   mutationPending?: boolean;
   mutationOccupied?: boolean;
+  reconciliationOwner?: "content" | SettingsField | "password" | null;
+  reconciliationRequestPending?: boolean;
   result: SettingsResult;
 }
 
 export interface SettingsPanelProps {
   state: SettingsPanelState;
   onActivity(eventAt: number, kind?: "recovery-credential"): void;
+  onDraftState?(dirty: boolean, eventAt?: number): void;
   saveTitle(value: string): void;
   saveFormat(value: "text" | "markdown"): void;
   saveExpiration(value: ExpirationInput): void;
@@ -92,6 +95,9 @@ function useDraft<Value>(accepted: Value) {
       generation.current += 1;
       apply(next);
     },
+    dirty() {
+      return !Object.is(valueRef.current, acceptedRef.current);
+    },
     submit() {
       submitted.current = { value: valueRef.current, generation: generation.current };
       return valueRef.current;
@@ -134,7 +140,7 @@ function ResultActions({ result, versionUsable, mutationBlocked, recoveryBlocked
   );
 }
 
-export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload, discard, locale = "en" }: SettingsPanelProps) {
+export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload, discard, locale = "en" }: SettingsPanelProps) {
   const title = useDraft(state.accepted.title);
   const format = useDraft(state.accepted.format);
   const expiration = useDraft(inputExpiration(state.accepted.expiration));
@@ -145,10 +151,11 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const recoveryBlocked = state.mutationPending === true || pending;
-  const discardBlocked = recoveryBlocked;
+  const recoveryBlocked = state.reconciliationRequestPending === true;
+  const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce";
+  const discardBlocked = pending || state.mutationPending === true || recoveryBlocked || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation);
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
-  const activity = (event: React.SyntheticEvent<HTMLInputElement | HTMLSelectElement>) => onActivity(event.timeStamp);
+  const reportDraftState = (eventAt?: number) => onDraftState?.(title.dirty() || format.dirty() || expiration.dirty() || viewOnce.dirty(), eventAt);
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
 
   React.useEffect(() => {
@@ -157,15 +164,23 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
     if (result.field === "format") format.settle(state.accepted.format);
     if (result.field === "expiration") expiration.settle(inputExpiration(state.accepted.expiration));
     if (result.field === "viewOnce") viewOnce.settle(state.accepted.viewOnce);
-  }, [result, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce]);
+    reportDraftState();
+  }, [result, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce, reportDraftState]);
 
   const reset = () => {
     if (discardBlocked) return;
-    title.discard(state.accepted.title);
-    format.discard(state.accepted.format);
-    expiration.discard(inputExpiration(state.accepted.expiration));
-    viewOnce.discard(state.accepted.viewOnce);
+    if (state.reconciliationOwner === "title") title.discard(state.accepted.title);
+    else if (state.reconciliationOwner === "format") format.discard(state.accepted.format);
+    else if (state.reconciliationOwner === "expiration") expiration.discard(inputExpiration(state.accepted.expiration));
+    else if (state.reconciliationOwner === "viewOnce") viewOnce.discard(state.accepted.viewOnce);
+    else {
+      title.discard(state.accepted.title);
+      format.discard(state.accepted.format);
+      expiration.discard(inputExpiration(state.accepted.expiration));
+      viewOnce.discard(state.accepted.viewOnce);
+    }
     discardedResult.current = state.result;
+    reportDraftState();
     render((value) => value + 1);
     discard();
   };
@@ -174,22 +189,22 @@ export function SettingsPanel({ state, onActivity, saveTitle, saveFormat, saveEx
     <section aria-label={copy.settings} className="grid gap-4">
       <label>{copy.customId}<Input name="id" value={state.accepted.id} readOnly /></label>
       <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); activity(event); }} /></label>
+        <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveTitle(title.submit()); }}>{copy.saveTitle}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); activity(event); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
+        <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); reportDraftState(event.timeStamp); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveFormat(format.submit()); }}>{copy.saveFormat}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); activity(event); }}>
+        <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }}>
           {!standardExpirations.includes(expiration.value) && <option value={expiration.value}>{expiration.value}</option>}
           <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31536000">{copy.oneYear}</option>
         </select></label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveExpiration(parseExpiration(expiration.submit())); }}>{copy.saveExpiration}</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); activity(event); }} />{copy.viewOnce}</label>
+        <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} />{copy.viewOnce}</label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
       </div>
       <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>

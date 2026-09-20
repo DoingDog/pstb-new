@@ -11,6 +11,14 @@ import { SafeMarkdown } from "./SafeMarkdown";
 
 export type ContentMode = "view" | "edit" | "markdown";
 
+function SurfaceLifecycle({ surface, onSurfaceMounted }: { surface: DerivedSurface; onSurfaceMounted?: ((surface: DerivedSurface, mounted: boolean) => void) | undefined }) {
+  React.useEffect(() => {
+    onSurfaceMounted?.(surface, true);
+    return () => onSurfaceMounted?.(surface, false);
+  }, [onSurfaceMounted, surface]);
+  return null;
+}
+
 export interface ContentModesProps {
   mode: ContentMode;
   format: "text" | "markdown";
@@ -70,11 +78,13 @@ export function ContentModes({
       />
     );
   }
-  if (format === "markdown" && derivedPreview?.source === displaySource) {
-    return <SafeMarkdown html={derivedPreview.html as TrustedMarkdownHtml} />;
-  }
-  if (format === "markdown" && initialMarkdown !== null && displaySource === initialSource) {
-    return <SafeMarkdown html={initialMarkdown} />;
+  if (format === "markdown") {
+    const content = derivedPreview?.source === displaySource
+      ? <SafeMarkdown html={derivedPreview.html as TrustedMarkdownHtml} />
+      : initialMarkdown !== null && displaySource === initialSource
+        ? <SafeMarkdown html={initialMarkdown} />
+        : <pre data-plain-view="true" {...(derivedGeneration === undefined ? {} : { "data-derived-generation": String(derivedGeneration) })} className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{displaySource}</pre>;
+    return <><SurfaceLifecycle surface="preview" onSurfaceMounted={onSurfaceMounted} />{content}</>;
   }
   return <pre data-plain-view="true" {...(derivedGeneration === undefined ? {} : { "data-derived-generation": String(derivedGeneration) })} className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{displaySource}</pre>;
 }

@@ -1,7 +1,8 @@
 import * as React from "react";
 import { errorMessage, labels, type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
-import { LocalActions, type ClipboardPort, type DownloadPort, type NavigationPort } from "../components/LocalActions";
+import type { MarkdownPreview } from "../markdown";
+import { LocalActions, type ClipboardPort, type DownloadPort, type LocalActionState, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
 import { Button } from "@/components/ui/button";
 
@@ -11,11 +12,14 @@ export interface LocalOnlyPastePageProps {
   source: string;
   consumedSource?: string | null;
   initialMarkdown: TrustedMarkdownHtml | null;
+  derivedPreview?: MarkdownPreview | null;
   onUseConsumedResponse?(): void;
+  onSurfaceMounted?(mounted: boolean): void;
   onKeepCurrent?(): void;
   clipboard?: ClipboardPort;
   download?: DownloadPort;
   navigation?: NavigationPort;
+  onActionState?(state: LocalActionState): void;
 }
 
 function phaseLabel(locale: Locale, phase: LocalOnlyPastePageProps["phase"]): string {
@@ -28,7 +32,7 @@ function phaseLabel(locale: Locale, phase: LocalOnlyPastePageProps["phase"]): st
   }
 }
 
-export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, onUseConsumedResponse, onKeepCurrent, clipboard, download, navigation }: LocalOnlyPastePageProps) {
+export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, derivedPreview = null, onUseConsumedResponse, onKeepCurrent, onSurfaceMounted, clipboard, download, navigation, onActionState }: LocalOnlyPastePageProps) {
   const copy = labels(locale);
   const canChooseConsumedSource = phase === "consumed" && consumedSource !== null && consumedSource !== source;
   const [wrap, setWrap] = React.useState(false);
@@ -39,6 +43,11 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
   const generation = React.useRef(0);
   const currentSource = React.useRef(source);
   const currentInitialPreview = React.useRef(initialMarkdown);
+
+  React.useEffect(() => {
+    onSurfaceMounted?.(true);
+    return () => onSurfaceMounted?.(false);
+  }, [onSurfaceMounted]);
 
   React.useEffect(() => () => {
     mounted.current = false;
@@ -90,9 +99,10 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
     }
   };
 
-  const previewNode = preview === null
+  const displayedPreview = derivedPreview?.source === source ? derivedPreview.html as TrustedMarkdownHtml : preview;
+  const previewNode = displayedPreview === null
     ? <pre data-local-view="true" className={wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>
-    : <div className={wrap ? "break-words" : "overflow-x-auto"}><SafeMarkdown html={preview} /></div>;
+    : <div className={wrap ? "break-words" : "overflow-x-auto"}><SafeMarkdown html={displayedPreview} /></div>;
 
   return (
     <section className="flex min-w-0 flex-col gap-4" aria-label={phaseLabel(locale, phase)}>
@@ -116,6 +126,7 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
         {...(clipboard === undefined ? {} : { clipboard })}
         {...(download === undefined ? {} : { download })}
         {...(navigation === undefined ? {} : { navigation })}
+        {...(onActionState === undefined ? {} : { onActionState })}
       />
       {initialMarkdown !== null && <Button type="button" variant="outline" data-action="recompute-preview" className="min-h-11 self-start" onClick={() => void recomputePreview()}>{copy.preview}</Button>}
       <div className="flex flex-wrap gap-3">

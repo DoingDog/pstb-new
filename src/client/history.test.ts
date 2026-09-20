@@ -143,6 +143,56 @@ describe("history diff", () => {
     expect(workers[0]!.terminate).toHaveBeenCalledOnce();
   });
 
+  it("replaces the selected diff current side and retires its old worker response", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 1, previous: "old\n", current: "current\n" });
+
+    history.replaceCurrent("local draft\n");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 3, previous: "old\n", current: "local draft\n" });
+    worker.onmessage?.({ data: { type: "result", id: 1, lines: [{ kind: "same", text: "stale\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).not.toHaveBeenCalled();
+    worker.onmessage?.({ data: { type: "result", id: 3, lines: [{ kind: "add", text: "local draft\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenCalledWith([{ kind: "add", text: "local draft\n" }]);
+  });
+
+  it("stages a selected diff current side through its worker before adoption", async () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+
+    const staged = history.stageCurrent("remote\n");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 2, previous: "old\n", current: "remote\n" });
+    worker.onmessage?.({ data: { type: "result", id: 2, lines: [{ kind: "add", text: "remote\n" }] } } as MessageEvent<unknown>);
+    const result = await staged;
+
+    expect(onLines).not.toHaveBeenCalled();
+    expect(history.adoptStaged(result!)).toBe(true);
+  });
+
+  it("defers a selected diff current replacement until its host mounts", () => {
+    const createWorker = vi.fn(() => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }));
+    const history = createHistoryDiff({ createWorker, onLines: vi.fn() });
+    history.selectRevision("1", "old\n", "current\n");
+
+    history.replaceCurrent("local draft\n");
+    expect(createWorker).not.toHaveBeenCalled();
+
+    history.setMounted(true);
+    expect(createWorker).toHaveBeenCalledOnce();
+    expect(createWorker.mock.results[0]?.value.postMessage).toHaveBeenCalledWith({
+      type: "diff",
+      id: 2,
+      previous: "old\n",
+      current: "local draft\n",
+    });
+  });
+
   it("requires explicit diff calculation when either side exceeds the automatic policy", () => {
     const createWorker = vi.fn();
     const history = createHistoryDiff({ createWorker, onLines: vi.fn() });

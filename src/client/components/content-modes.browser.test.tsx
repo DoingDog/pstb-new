@@ -362,6 +362,24 @@ describe("default content mode", () => {
     expect(importBrowserMarkdown).not.toHaveBeenCalled();
   });
 
+  it("registers the visible default Markdown View as a Preview surface", () => {
+    const onSurfaceMounted = vi.fn();
+    const host = mount(<ContentModes
+      mode="view"
+      format="markdown"
+      source="# exact"
+      initialMarkdown={trustedHtml("<h1>exact</h1>")}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      onSurfaceMounted={onSurfaceMounted}
+    />);
+
+    expect(onSurfaceMounted).toHaveBeenCalledWith("preview", true);
+    unmount(host);
+    expect(onSurfaceMounted).toHaveBeenLastCalledWith("preview", false);
+  });
+
   it("resets a hard remount to the format-defined view instead of the prior client tab", async () => {
     const first = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
     await clickRole("tab", "Edit");
@@ -624,6 +642,69 @@ describe("Markdown lifecycle", () => {
       unmount(host);
       await prepared.dispose();
     }
+  });
+
+  it("preserves Preview while adopting a matching staged preview", async () => {
+    const host = mount(<MarkdownWorkbench
+      source="# current"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={async () => undefined}
+    />);
+    await clickRole("tab", "Preview");
+    await nextTask();
+
+    rerender(host, <MarkdownWorkbench
+      source="# remote"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      preparedPreview={{ source: "# remote", html: "<p>remote preview</p>" }}
+      loadCrepeStyle={async () => undefined}
+    />);
+    await nextTask();
+
+    expect(currentMarkdownTab(host)).toBe("Preview");
+    expect(host.querySelector("p")?.textContent).toBe("remote preview");
+  });
+
+  it("preserves Visual while adopting a matching staged visual", async () => {
+    const host = mount(<MarkdownWorkbench
+      source="# current"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      loadCrepeStyle={async () => undefined}
+    />);
+    await clickRole("tab", "Visual");
+    await nextTask();
+    const root = document.createElement("div");
+    root.dataset.stagedVisual = "remote";
+    const prepared = {
+      root,
+      source: { value: "# remote" },
+      modes: { enterSource: async () => undefined, enterVisual: async () => undefined, enterPreview: async () => undefined, leaveVisual: async () => undefined, destroy: async () => undefined },
+      bind: () => undefined,
+      dispose: async () => undefined,
+    };
+
+    rerender(host, <MarkdownWorkbench
+      source="# remote"
+      initialMarkdown={null}
+      wrap="off"
+      autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+      onSourceEvent={vi.fn()}
+      preparedVisual={prepared}
+      loadCrepeStyle={async () => undefined}
+    />);
+    await nextTask();
+
+    expect(currentMarkdownTab(host)).toBe("Visual");
+    expect(host.querySelector("[data-markdown-visual-host]")?.contains(root)).toBe(true);
   });
 
   it("keeps the later Preview request selected when a delayed Visual style load completes", async () => {

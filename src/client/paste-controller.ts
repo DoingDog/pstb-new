@@ -33,6 +33,8 @@ export type MutationSlot =
   | { state: "metadata-reconciliation"; token: number; intent: NonContentMutationIntent; capture: BaselineCapture };
 
 export type MutationFailure = { status: number | null; mutationMayHaveApplied?: boolean };
+export type ReconciliationOwner = "content" | "title" | "format" | "expiration" | "viewOnce" | "password" | null;
+export type ReconciliationState = { owner: ReconciliationOwner; requestPending: boolean };
 export type MutationSuccess = MutationResult;
 export type ReconcileReadFailure =
   | { kind: "forbidden" }
@@ -93,6 +95,7 @@ interface PasteControllerSnapshotBase {
   terminalOrigin: TerminalOriginSettleContext | null;
   originalMutationFailure: OriginalMutationFailure | null;
   reconciliationRequired: boolean;
+  reconciliation: ReconciliationState;
   serverCapabilities: boolean;
 }
 
@@ -165,7 +168,7 @@ export interface PasteController {
 }
 
 const sourceActivityEvents = new Set<SourceEvent["type"]>(["input", "composition-end", "crepe-change"]);
-type InternalState = Omit<ActivePasteControllerSnapshot, "mutation">;
+type InternalState = Omit<ActivePasteControllerSnapshot, "mutation" | "reconciliation">;
 type MetadataRequest = { requestToken: number; token: number; probe: "intended" | "authorization" | "current"; credential: string | null };
 
 function generationOf(version: string): string | "legacy" {
@@ -266,7 +269,21 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   const mutationCredentials = new Map<number, string | null>();
   const reconcileCredentials = new Map<number, string | null>();
 
-  const snapshot = (): Readonly<PasteControllerSnapshot> => rootHandoffSnapshot ?? { ...state, mutation: slot };
+  const reconciliation = (): ReconciliationState => {
+    if (slot.state === "content-reconciliation") return { owner: "content", requestPending: slot.requestToken !== 0 };
+    if (slot.state !== "metadata-reconciliation") return { owner: null, requestPending: false };
+    const owner = slot.intent.kind === "settings-title"
+      ? "title"
+      : slot.intent.kind === "settings-format"
+        ? "format"
+        : slot.intent.kind === "settings-expiration"
+          ? "expiration"
+          : slot.intent.kind === "settings-view-once"
+            ? "viewOnce"
+            : "password";
+    return { owner, requestPending: metadataRequest !== undefined };
+  };
+  const snapshot = (): Readonly<PasteControllerSnapshot> => rootHandoffSnapshot ?? { ...state, mutation: slot, reconciliation: reconciliation() };
 
   const setLastAction = (intent: MutationIntent, at: number | undefined, attempt = nextToken): void => {
     state = { ...state, lastAction: { state: "pending", key: actionKey(intent), attempt, startedAt: instant(at) } };
@@ -274,9 +291,9 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   const setReconcileAction = (key: "content-reconcile" | "settings-reconcile" | "password-reconcile", attempt: number, at: number | undefined): void => {
     state = { ...state, lastAction: { state: "pending", key, attempt, startedAt: instant(at) } };
   };
-  const settleLastAction = (stateName: "succeeded" | "failed", at: number | undefined, outcomeKey: TerminalOutcomeKey | null = null): void => {
-    if (state.lastAction.state !== "pending") return;
-    state = { ...state, lastAction: { state: stateName, key: state.lastAction.key, attempt: state.lastAction.attempt, startedAt: state.lastAction.startedAt, settledAt: instant(at), outcomeKey } };
+  const settleLastAction = (expected: { key: ActionKey; attempt: number }, stateName: "succeeded" | "failed", at: number | undefined, outcomeKey: TerminalOutcomeKey | null = null): void => {
+    if (state.lastAction.state !== "pending" || state.lastAction.key !== expected.key || state.lastAction.attempt !== expected.attempt) return;
+    state = { ...state, lastAction: { state: stateName, key: expected.key, attempt: expected.attempt, startedAt: state.lastAction.startedAt, settledAt: instant(at), outcomeKey } };
   };
   const recordFailure = (intent: MutationIntent, failure: MutationFailure, at: number | undefined): void => {
     state = { ...state, originalMutationFailure: { key: actionKey(intent), status: failure.status, failedAt: instant(at) } };
@@ -341,6 +358,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       terminalOrigin: null,
       originalMutationFailure: null,
       reconciliationRequired: false,
+      reconciliation: { owner: null, requestPending: false },
       serverCapabilities: false,
     };
   };
@@ -405,9 +423,9 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       && generationOf(result.paste.version) === baseline.generation
       && result.paste.contentRevision === baseline.contentRevision;
   };
-  const enterArmedViewOnce = (at?: number): void => {
+  const enterArmedViewOnce = (expected: { key: ActionKey; attempt: number }, at?: number): void => {
     if (state.phase !== "ordinary") return;
-    settleLastAction("succeeded", at);
+    settleLastAction(expected, "succeeded", at);
     nextToken += 1;
     slot = { state: "idle", nextToken };
     clearRequestOwnership();
@@ -434,7 +452,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       reconciliationRequired: false,
     };
     commitCredential(credential);
-    settleLastAction("succeeded", at);
+    settleLastAction({ key: actionKey(intent), attempt: token }, "succeeded", at);
     effects.push({ type: "apply-authoritative", kind: "content", acceptedSource: intent.content, version: result.paste.version });
     release(true);
     return true;
@@ -446,16 +464,17 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       clearRequestOwnership();
       state = { ...state, responseEtag: null, reconciliationRequired: true };
       recordFailure(intent, { status: null }, at);
-      settleLastAction("failed", at);
+      settleLastAction({ key: actionKey(intent), attempt: token }, "failed", at);
       return false;
     }
     adoptMutationMetadata(result);
     if (intent.kind === "password-set") commitCredential(intent.newPassword === "" ? null : intent.newPassword);
     else if (intent.kind === "password-clear") commitCredential(null);
     else commitCredential(mutationCredentials.get(token) ?? null);
-    settleLastAction("succeeded", at);
+    const expected = { key: actionKey(intent), attempt: token };
+    settleLastAction(expected, "succeeded", at);
     effects.push({ type: "apply-authoritative", kind: "metadata", acceptedSource: state.acceptedSource, version: result.paste.version });
-    if (result.paste.viewOnce) enterArmedViewOnce();
+    if (result.paste.viewOnce) enterArmedViewOnce(expected, at);
     else release(true);
     return true;
   };
@@ -467,15 +486,16 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
 
   const settleContentFailure = (current: Extract<MutationSlot, { state: "in-flight" }>, failure: MutationFailure, at?: number): boolean => {
     const intent = current.intent as Extract<MutationIntent, { kind: "content" }>;
+    const expected = { key: actionKey(intent), attempt: current.token };
     recordFailure(intent, failure, at);
     if (failure.status === 404) {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
       return true;
     }
     if (failure.status === 409) {
       state = { ...state, versionUsable: false, autosave: { state: "conflict", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       effects.push({ type: "apply-authoritative", kind: "pause", state: "conflict", failureStatus: 409 });
       release(false);
       return true;
@@ -483,12 +503,12 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (isUncertain(failure)) {
       slot = { state: "content-reconciliation", token: current.token, originActionKey: intent.action, capture: { ...current.capture, inFlightContent: intent.content }, laterDraft: state.draft, requestToken: 0 };
       state = { ...state, responseEtag: null, reconciliationRequired: true, autosave: { state: "error", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       return true;
     }
     const autosaveState = failure.status === 403 ? "password-required" : "error";
     state = { ...state, autosave: { state: autosaveState, confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-    settleLastAction("failed", at);
+    settleLastAction(expected, "failed", at);
     if (failure.status === 403) effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
     release(false);
     return true;
@@ -497,9 +517,10 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   const settleMetadataFailure = (current: Extract<MutationSlot, { state: "in-flight" }>, failure: MutationFailure, at?: number): boolean => {
     if (current.intent.kind === "delete") return acceptDeleteMutation(current.token, failure, at);
     const intent = current.intent as NonContentMutationIntent;
+    const expected = { key: actionKey(intent), attempt: current.token };
     recordFailure(intent, failure, at);
     if (failure.status === 404) {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
       return true;
     }
@@ -514,12 +535,12 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       slot = { state: "metadata-reconciliation", token: current.token, intent, capture: current.capture };
       clearRequestOwnership();
       state = { ...state, responseEtag: null, reconciliationRequired: true };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       return true;
     }
     if (failure.status === 409) {
       state = { ...state, versionUsable: false, autosave: { state: "conflict", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       effects.push({ type: "pause", state: "conflict", failureStatus: 409 });
       release(false);
       return true;
@@ -528,10 +549,10 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       slot = { state: "metadata-reconciliation", token: current.token, intent, capture: current.capture };
       clearRequestOwnership();
       state = { ...state, responseEtag: null, reconciliationRequired: true };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       return true;
     }
-    settleLastAction("failed", at);
+    settleLastAction(expected, "failed", at);
     if (failure.status === 403) {
       state = { ...state, autosave: { state: "password-required", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
       effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
@@ -559,36 +580,53 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     return { kind: "dispatch", type: "reconcile-content", mutationToken: slot.token, requestToken, capture: slot.capture, authorizationPassword: credential, cache: "no-store", ifNoneMatch: null };
   };
 
-  const settleContentReadFailure = (result: ReconcileReadFailure, at: number | undefined): boolean => {
+  const settleContentReadFailure = (result: ReconcileReadFailure, requestToken: number, at: number | undefined): boolean => {
+    const expected = { key: "content-reconcile" as const, attempt: requestToken };
     if (result.kind === "forbidden") {
       state = { ...state, autosave: { state: "password-required", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
       effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
     } else if (result.kind === "not-found") {
       effects.push({ type: "pause", state: "not-found", failureStatus: 404 });
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
       return true;
     }
-    settleLastAction("failed", at);
+    settleLastAction(expected, "failed", at);
     return true;
   };
 
   const acceptContentReconcile = (requestToken: number, result: ContentReconcileResult, at?: number): boolean => {
-    if (slot.state !== "content-reconciliation" || slot.requestToken !== requestToken || !sameAcceptedBaseline(slot.capture, state)) return false;
-    const current = slot;
-    const credential = reconcileCredentials.get(requestToken) ?? null;
     const decoded = result;
-    reconcileCredentials.delete(requestToken);
-    slot = { ...current, requestToken: 0 };
-    if (decoded.kind !== "snapshot") return settleContentReadFailure(decoded, at);
-    const remote = decoded.snapshot;
-    if (remote.summary.viewOnce) {
-      state = { ...state, terminalResponseSource: remote.source };
-      commitCredential(credential);
-      const origin: TerminalOriginSettleContext = { actionKey: "content-reconcile", actionAttempt: requestToken, startedAt: state.lastAction.state === "pending" ? state.lastAction.startedAt : instant(at) };
+    const reconcileSlot = slot.state === "content-reconciliation" ? slot : null;
+    const ownsRequest = reconcileSlot !== null
+      && reconcileSlot.requestToken === requestToken
+      && sameAcceptedBaseline(reconcileSlot.capture, state);
+    if (decoded.kind === "snapshot" && decoded.snapshot.summary.viewOnce) {
+      const credential = ownsRequest ? reconcileCredentials.get(requestToken) ?? null : null;
+      const origin = ownsRequest
+        && state.lastAction.state === "pending"
+        && state.lastAction.key === "content-reconcile"
+        && state.lastAction.attempt === requestToken
+        ? { actionKey: "content-reconcile" as const, actionAttempt: requestToken, startedAt: state.lastAction.startedAt }
+        : undefined;
+      if (ownsRequest && reconcileSlot !== null) {
+        reconcileCredentials.delete(requestToken);
+        slot = { ...reconcileSlot, requestToken: 0 };
+        commitCredential(credential);
+      } else {
+        settleLastAction({ key: "content-reconcile", attempt: requestToken }, "failed", at);
+      }
+      state = { ...state, terminalResponseSource: decoded.snapshot.source };
       enterTerminal("consumed", at, origin);
       return true;
     }
+    if (!ownsRequest || reconcileSlot === null) return false;
+    const current = reconcileSlot;
+    const credential = reconcileCredentials.get(requestToken) ?? null;
+    reconcileCredentials.delete(requestToken);
+    slot = { ...current, requestToken: 0 };
+    if (decoded.kind !== "snapshot") return settleContentReadFailure(decoded, requestToken, at);
+    const remote = decoded.snapshot;
     if (remote.source === current.capture.inFlightContent) {
       state = {
         ...state,
@@ -604,7 +642,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
         autosave: { state: state.draft === remote.source ? "saved" : "waiting", confirmedAt: instant(at), failedAt: null },
       };
       commitCredential(credential);
-      settleLastAction("succeeded", at);
+      settleLastAction({ key: "content-reconcile", attempt: requestToken }, "succeeded", at);
       effects.push({ type: "apply-authoritative", kind: "reconciled-applied", acceptedSource: remote.source, version: remote.summary.version });
       release(true);
       return true;
@@ -617,7 +655,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       adoptSnapshotMetadata(remote);
       state = { ...state, autosave: { state: "error", confirmedAt: state.autosave.confirmedAt, failedAt: state.autosave.failedAt ?? instant(at) } };
       commitCredential(credential);
-      settleLastAction("succeeded", at);
+      settleLastAction({ key: "content-reconcile", attempt: requestToken }, "succeeded", at);
       effects.push({ type: "apply-authoritative", kind: "reconciled-not-applied", acceptedSource: remote.source, version: remote.summary.version });
       release(false);
       return true;
@@ -629,7 +667,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       autosave: { state: "conflict", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) },
     };
     commitCredential(credential);
-    settleLastAction("succeeded", at);
+    settleLastAction({ key: "content-reconcile", attempt: requestToken }, "succeeded", at);
     effects.push({ type: "apply-authoritative", kind: "pause", state: "conflict", failureStatus: null });
     release(false);
     return true;
@@ -661,6 +699,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
   };
 
   const failMetadataRead = (result: ReconcileReadFailure, current: Extract<MutationSlot, { state: "metadata-reconciliation" }>, request: MetadataRequest, at: number | undefined): boolean => {
+    const expected = { key: request.probe === "intended" || request.probe === "authorization" ? "password-reconcile" as const : "settings-reconcile" as const, attempt: request.requestToken };
     if (result.kind === "forbidden") {
       if (request.probe === "intended") {
         startAuthorizationProbe(current, at);
@@ -669,7 +708,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       state = { ...state, autosave: { state: "password-required", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
       effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
     } else if (result.kind === "not-found") {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
       return true;
     } else if (result.kind === "not-modified" && request.probe === "intended") {
@@ -678,13 +717,13 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       else if (intent.kind === "password-clear") commitCredential(null);
       else commitCredential(request.credential);
       state = { ...state, reconciliationRequired: false };
-      settleLastAction("succeeded", at);
+      settleLastAction(expected, "succeeded", at);
       release(false);
       return true;
     } else if (result.kind === "not-modified") {
       commitCredential(request.credential);
     }
-    settleLastAction("failed", at);
+    settleLastAction(expected, "failed", at);
     return true;
   };
 
@@ -705,23 +744,24 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (slot.state !== "metadata-reconciliation" || metadataRequest?.requestToken !== requestToken || metadataRequest.token !== slot.token) return false;
     const current = slot;
     const request = metadataRequest;
+    const expected = { key: request.probe === "intended" || request.probe === "authorization" ? "password-reconcile" as const : "settings-reconcile" as const, attempt: request.requestToken };
     const decoded = result;
     metadataRequest = undefined;
     if (decoded.kind !== "summary") return failMetadataRead(decoded, current, request, at);
     const remote = decoded.summary;
     if (!sameAcceptedBaseline(current.capture, state) || !sameMetadataMarkers(current.capture, remote)) {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       return true;
     }
     if (remote.viewOnce) {
       adoptSettingsMetadata(remote);
-      enterArmedViewOnce(at);
+      enterArmedViewOnce(expected, at);
       return true;
     }
     if (request.probe === "authorization") {
       commitCredential(request.credential);
       state = { ...state, reconciliationRequired: false };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       release(false);
       return true;
     }
@@ -729,7 +769,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (!targetsMetadata(current.intent, remote)) {
       commitCredential(request.credential);
       state = { ...state, reconciliationRequired: false };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       release(false);
       return true;
     }
@@ -737,7 +777,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (current.intent.kind === "password-set") commitCredential(current.intent.newPassword === "" ? null : current.intent.newPassword);
     else if (current.intent.kind === "password-clear") commitCredential(null);
     else commitCredential(request.credential);
-    settleLastAction("succeeded", at);
+    settleLastAction(expected, "succeeded", at);
     effects.push({ type: "apply-authoritative", kind: "metadata", acceptedSource: state.acceptedSource, version: remote.version });
     release(true);
     return true;
@@ -745,9 +785,10 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
 
   const acceptDeleteMutation = (token: number, result: DeleteResult, at?: number): boolean => {
     if (slot.state !== "in-flight" || slot.token !== token || slot.intent.kind !== "delete" || !sameAcceptedBaseline(slot.capture, state)) return false;
+    const expected = { key: "delete" as const, attempt: token };
     const failure: MutationFailure = result;
     if (result.status === 204) {
-      settleLastAction("succeeded", at);
+      settleLastAction(expected, "succeeded", at);
       release(false);
       handoffToRoot();
       effects.push({ type: "root-handoff" });
@@ -756,51 +797,58 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     recordFailure(slot.intent, failure, at);
     if (result.status === 403) {
       state = { ...state, autosave: { state: "password-required", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       effects.push({ type: "pause", state: "password-required", failureStatus: 403 });
       release(false);
       return true;
     }
     if (result.status === 409) {
       state = { ...state, versionUsable: false, autosave: { state: "conflict", confirmedAt: state.autosave.confirmedAt, failedAt: instant(at) } };
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       effects.push({ type: "pause", state: "conflict", failureStatus: 409 });
       release(false);
       return true;
     }
     if (result.status === 404) {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
       return true;
     }
     if (isUncertain(failure) || (result.status !== null && result.status >= 500)) {
-      settleLastAction("failed", at);
+      settleLastAction(expected, "failed", at);
       enterTerminal("delete-uncertain", at);
       return true;
     }
-    settleLastAction("failed", at);
+    settleLastAction(expected, "failed", at);
     release(false);
     return true;
   };
 
   const discardReconciliation = (): boolean => {
     if (state.phase !== "ordinary" || (slot.state !== "content-reconciliation" && slot.state !== "metadata-reconciliation")) return false;
+    const content = slot.state === "content-reconciliation";
+    if (slot.state === "content-reconciliation" && slot.requestToken !== 0) return false;
+    if (slot.state === "metadata-reconciliation" && metadataRequest !== undefined) return false;
     nextToken += 1;
     slot = { state: "idle", nextToken };
     clearRequestOwnership();
     state = {
       ...state,
-      draft: state.acceptedSource,
-      displayGeneration: state.displayGeneration + 1,
+      ...(content
+        ? {
+          draft: state.acceptedSource,
+          displayGeneration: state.displayGeneration + 1,
+          autosave: {
+            state: "clean" as const,
+            confirmedAt: state.autosave.confirmedAt,
+            failedAt: null,
+          },
+        }
+        : {}),
       coalescedSource: null,
       conflictCandidate: null,
       originalMutationFailure: null,
       reconciliationRequired: false,
-      autosave: {
-        state: "clean",
-        confirmedAt: state.autosave.confirmedAt,
-        failedAt: null,
-      },
     };
     invalidate("mutation");
     effects.push({ type: "autosave-slot-available" });
@@ -855,6 +903,9 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
 
   const enterTerminal = (phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void => {
     if (state.phase !== "ordinary") return;
+    if (origin === undefined && slot.state === "content-reconciliation" && slot.requestToken !== 0) {
+      settleLastAction({ key: "content-reconcile", attempt: slot.requestToken }, "failed", at);
+    }
     nextToken += 1;
     slot = { state: "idle", nextToken };
     clearRequestOwnership();
@@ -870,7 +921,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     };
     invalidate("terminal");
     effects.push({ type: "dispose-server-capabilities", phase });
-    if (origin === undefined) settleLastAction("failed", at);
   };
 
   const settleTerminal = (outcome: TerminalOutcomeKey, at?: number): boolean => {
@@ -881,7 +931,13 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
         || outcome === "reload-terminal-response-display-failed"
         || outcome === "reload-terminal-current-unchanged"
         || outcome === "reload-terminal-current-kept-choice";
-    if (!valid || origin === null) return false;
+    if (
+      !valid
+      || origin === null
+      || state.lastAction.state !== "pending"
+      || state.lastAction.key !== origin.actionKey
+      || state.lastAction.attempt !== origin.actionAttempt
+    ) return false;
     state = {
       ...state,
       terminalOrigin: null,

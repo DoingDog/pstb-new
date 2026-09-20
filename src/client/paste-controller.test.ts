@@ -131,6 +131,16 @@ describe("PasteController mutation slot", () => {
     expect(snapshot(controller).lastAction).toEqual({ state: "succeeded", key: "download", attempt: 2, startedAt: "2026-09-20T00:00:01.000Z", settledAt: "2026-09-20T00:00:03.000Z", outcomeKey: null });
   });
 
+  it("does not let an autosave callback settle a later Copy action", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.recordLocalAction({ key: "copy", state: "pending", attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" });
+
+    expect(controller.acceptContentMutation(save.token, mutationResult(), 1)).toBe(true);
+
+    expect(snapshot(controller).lastAction).toEqual({ state: "pending", key: "copy", attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" });
+  });
+
   it("retains only one autosave when settings owns the slot", () => {
     const { controller } = pasteControllerFixture();
     const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "T" });
@@ -328,6 +338,28 @@ describe("PasteController authoritative acceptance and reconciliation", () => {
 
     expect(snapshot(controller)).toMatchObject({ phase: "consumed", mutation: { state: "idle" }, acceptedSource: "one", draft: "one", terminalResponseSource: "two", terminalOrigin: expect.objectContaining({ actionKey: "content-reconcile" }) });
     expect(controller.effects().some((effect) => effect.type === "terminal-settled")).toBe(false);
+  });
+
+  it("terminalizes a retired strict valid view-once content reconcile without fabricating its action", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 500 }, 1);
+    const reconcile = controller.startContentReconcile(2);
+    if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
+    controller.sourceEvent({ type: "input", content: "local draft", eventAt: 3 });
+    controller.retireForRemoteApply();
+
+    expect(controller.acceptContentReconcile(reconcile.requestToken, reconcileSnapshot("consumed", { viewOnce: true }), 4)).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      phase: "consumed",
+      mutation: { state: "idle" },
+      serverCapabilities: false,
+      draft: "local draft",
+      terminalResponseSource: "consumed",
+      terminalOrigin: null,
+      lastAction: { state: "failed", key: "content-reconcile", attempt: reconcile.requestToken },
+    });
   });
 });
 
@@ -658,6 +690,35 @@ describe("PasteController round-one regressions", () => {
     expect(controller.startContentReconcile(2)).toMatchObject({ kind: "blocked", reason: "not-reconciling" });
   });
 
+  it("preserves a source edit when discarding an uncertain title reconciliation", () => {
+    const { controller } = pasteControllerFixture();
+    const title = dispatch(controller, { kind: "settings-title", action: "settings-title", title: "updated" });
+    controller.failMutation(title.token, { status: 503 }, 1);
+    controller.sourceEvent({ type: "input", content: "local source", eventAt: 2 });
+
+    expect(controller.discardReconciliation()).toBe(true);
+
+    expect(snapshot(controller)).toMatchObject({
+      mutation: { state: "idle" },
+      acceptedSource: "one",
+      draft: "local source",
+      reconciliationRequired: false,
+    });
+  });
+
+  it("blocks Discard until an in-flight content reconcile GET settles", () => {
+    const { controller } = pasteControllerFixture();
+    const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
+    controller.failMutation(save.token, { status: 503 }, 1);
+    const reconcile = controller.startContentReconcile(2);
+    if (reconcile.kind !== "dispatch") throw new Error("expected reconcile GET");
+    controller.recordLocalAction({ key: "copy", state: "pending", attempt: 9, startedAt: "2026-09-20T00:00:00.000Z" });
+
+    expect(controller.discardReconciliation()).toBe(false);
+    expect(controller.acceptContentReconcile(reconcile.requestToken, reconcileFailure("network"), 3)).toBe(true);
+    expect(controller.discardReconciliation()).toBe(true);
+  });
+
   it("restores the accepted content when discarding a reconciliation with a later draft", () => {
     const { controller } = pasteControllerFixture();
     const save = dispatch(controller, { kind: "content", action: "autosave", content: "two", omitVersion: false });
@@ -773,9 +834,10 @@ describe("PasteController round-one regressions", () => {
 
   it("retains a terminal origin until a display commit supplies a closed outcome", () => {
     const { controller } = pasteControllerFixture();
+    controller.recordLocalAction({ key: "reload-server", state: "pending", attempt: 7, startedAt: "2026-09-15T00:00:00.000Z" });
     controller.enterTerminal("consumed", 1, { actionKey: "reload-server", actionAttempt: 7, startedAt: "2026-09-15T00:00:00.000Z" });
 
-    expect(snapshot(controller)).toMatchObject({ phase: "consumed", terminalOrigin: expect.objectContaining({ actionKey: "reload-server" }), lastAction: { state: "idle" } });
+    expect(snapshot(controller)).toMatchObject({ phase: "consumed", terminalOrigin: expect.objectContaining({ actionKey: "reload-server" }), lastAction: { state: "pending", key: "reload-server", attempt: 7 } });
     expect(controller.effects().some((effect) => effect.type === "terminal-settled")).toBe(false);
     expect(controller.settleTerminal("use-consumed-response-displayed", 2)).toBe(false);
     expect(controller.settleTerminal("reload-terminal-response-displayed", 3)).toBe(true);

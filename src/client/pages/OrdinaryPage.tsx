@@ -10,7 +10,7 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { usePastePage, type PastePageCandidate, type TerminalPage } from "../hooks/use-paste-page";
+import { usePastePage, type PastePageCandidate, type TerminalHandoff } from "../hooks/use-paste-page";
 
 export interface OrdinaryPageProps {
   initialPage: {
@@ -23,7 +23,7 @@ export interface OrdinaryPageProps {
   locale: Locale;
   onRecordsChange(records: OperationRecords): void;
   onSummaryChange(summary: PasteSummary | null): void;
-  onTerminal(page: TerminalPage): void;
+  onTerminal(handoff: TerminalHandoff): void;
   onRootHandoff(): void;
 }
 
@@ -148,6 +148,7 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
         <SettingsPanel
           state={snapshot.settings}
           onActivity={actions.activity}
+          onDraftState={(dirty, eventAt) => actions.draftState("settings", dirty, eventAt)}
           saveTitle={actions.saveTitle}
           saveFormat={actions.saveFormat}
           saveExpiration={actions.saveExpiration}
@@ -163,6 +164,7 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
         <PasswordPanel
           state={snapshot.password}
           onActivity={actions.activity}
+          onDraftState={(dirty, eventAt) => actions.draftState("password", dirty, eventAt)}
           setPassword={actions.setPassword}
           clearPassword={actions.clearPassword}
           retry={actions.retry}

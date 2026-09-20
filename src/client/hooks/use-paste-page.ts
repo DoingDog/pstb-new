@@ -15,7 +15,7 @@ import type {
   RemoteSnapshot,
   SourceEvent,
 } from "../contracts";
-import { createHistoryController, createHistoryDiff, type HistoryController, type HistoryDiffController } from "../history";
+import { createHistoryController, createHistoryDiff, type HistoryController, type HistoryDiffController, type StagedHistoryDiff } from "../history";
 import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, type PreparedMarkdownVisual } from "../markdown";
 import type { HistoryDiffState, HistoryPanelState } from "../components/HistoryPanel";
 import { createPasteController, type ContentReconcileDispatch, type MetadataReconcileDispatch, type MutationDispatch, type MutationIntent, type PasteController, type PasteControllerSnapshot, type ReconcileReadFailure } from "../paste-controller";
@@ -28,20 +28,29 @@ import type { SettingsPanelState } from "../components/SettingsPanel";
 export interface TerminalPage {
   phase: "armed-view-once" | "consumed" | "not-found" | "delete-uncertain";
   source: string;
+  currentSource: string;
+  responseSource: string | null;
   consumedSource: string | null;
+  choiceAvailable: boolean;
   initialMarkdown: TrustedMarkdownHtml | null;
+}
+
+export interface TerminalHandoff {
+  page: TerminalPage;
+  records: OperationRecords;
 }
 
 export interface PastePageCallbacks {
   onRecordsChange?(records: OperationRecords): void;
   onSummaryChange?(summary: PasteSummary | null): void;
-  onTerminal?(page: TerminalPage): void;
+  onTerminal?(handoff: TerminalHandoff): void;
   onRootHandoff?(): void;
 }
 
 export interface PastePageActions {
   sourceEvent(event: SourceEvent): void;
   activity(eventAt: number, kind?: "recovery-credential"): void;
+  draftState(owner: "settings" | "password", dirty: boolean, eventAt?: number): void;
   autosaveInput(content: string, eventAt: number): void;
   compositionStart(): void;
   compositionEnd(content: string, eventAt: number): void;
@@ -112,6 +121,7 @@ type OrdinaryInitialPage = {
   password: string | null;
 };
 type ActiveSnapshot = Extract<PasteControllerSnapshot, { resource: "active" }>;
+type LocalWorkOwner = "content" | "settings" | "password";
 type Candidate = {
   kind: "remote" | "terminal" | "forbidden";
   snapshot?: RemoteSnapshot;
@@ -119,6 +129,8 @@ type Candidate = {
   capture?: PasteSyncCapture;
   baseline?: BaselineCapture;
   ordinaryTokenCurrent?: boolean;
+  terminalDisplay?: "ready" | "failed";
+  terminalPreview?: MarkdownPreview | null;
 };
 type DerivedResources = {
   preview: unknown;
@@ -137,11 +149,11 @@ type Runtime = {
   surface: StagedSurfaceApply;
   mountedSurfaces: Set<DerivedSurface>;
   derivedResources: DerivedResources | null;
+  previousDerivedResources: DerivedResources | null;
   records: OperationRecords;
   activeUntil: number;
   validator: `"sha256-${string}"` | null;
   candidate: Candidate | null;
-  syncRetryAction: { attempt: number; startedAt: string } | null;
   useRemoteAction: { attempt: number; startedAt: string } | null;
   reloadAction: { attempt: number; startedAt: string } | null;
   composing: boolean;
@@ -151,6 +163,7 @@ type Runtime = {
   lastIntent: MutationIntent | null;
   reloadToken: number;
   diff: HistoryDiffState;
+  dirtyDraftOwners: Set<LocalWorkOwner>;
 };
 
 function now(): number {
@@ -165,6 +178,38 @@ function active(snapshot: Readonly<PasteControllerSnapshot>): snapshot is Readon
   return snapshot.resource === "active";
 }
 
+function locallyClean(runtime: Runtime): boolean {
+  const save = runtime.autosave.snapshot();
+  return runtime.dirtyDraftOwners.size === 0 && save.draft === save.acceptedSource && save.inFlightContent === null && save.dueAt === null;
+}
+
+function markLocalWorkChanged(runtime: Runtime, owner: LocalWorkOwner): boolean {
+  if (runtime.dirtyDraftOwners.has(owner)) return false;
+  runtime.dirtyDraftOwners.add(owner);
+  runtime.sync.localWorkChanged();
+  return true;
+}
+
+function settleLocalWork(runtime: Runtime, owner: LocalWorkOwner): boolean {
+  if (!runtime.dirtyDraftOwners.delete(owner)) return false;
+  if (locallyClean(runtime)) runtime.sync.localWorkSettled(now());
+  return true;
+}
+
+function settleLocalWorkIfClean(runtime: Runtime): void {
+  if (locallyClean(runtime)) runtime.sync.localWorkSettled(now());
+}
+
+function mutationOwner(snapshot: Readonly<PasteControllerSnapshot>): LocalWorkOwner | null {
+  if (!active(snapshot) || snapshot.mutation.state === "idle") return null;
+  if (snapshot.mutation.state === "content-reconciliation") return "content";
+  const intent = snapshot.mutation.intent;
+  if (intent.kind === "content") return "content";
+  if (intent.kind === "settings-title" || intent.kind === "settings-format" || intent.kind === "settings-expiration" || intent.kind === "settings-view-once") return "settings";
+  if (intent.kind === "password-set" || intent.kind === "password-clear") return "password";
+  return null;
+}
+
 function isMarkdownPreview(value: unknown): value is MarkdownPreview {
   return typeof value === "object" && value !== null
     && "source" in value && typeof value.source === "string"
@@ -176,6 +221,14 @@ function isPreparedMarkdownVisual(value: unknown): value is PreparedMarkdownVisu
     && "root" in value && value.root instanceof HTMLElement
     && "source" in value && typeof value.source === "object" && value.source !== null
     && "dispose" in value && typeof value.dispose === "function";
+}
+
+function isStagedHistoryDiff(value: unknown): value is StagedHistoryDiff {
+  return typeof value === "object" && value !== null
+    && "id" in value && typeof value.id === "number"
+    && "previous" in value && typeof value.previous === "string"
+    && "current" in value && typeof value.current === "string"
+    && "lines" in value && Array.isArray(value.lines);
 }
 
 function acceptedFrom(initialPage: OrdinaryInitialPage): AcceptedPasteState {
@@ -342,7 +395,7 @@ function initialView(initialPage: OrdinaryInitialPage): PastePageSnapshot {
     result: { field: null, state: "idle", message: null },
   };
   return {
-    paste: { ...accepted, resource: "active", lastSavedContent: accepted.acceptedSource, mutation: { state: "idle", nextToken: 0 }, coalescedSource: null, phase: "ordinary", credential: { committed: initialPage.password, pending: null }, autosave: { state: "clean", confirmedAt: null, failedAt: null }, lastAction: { state: "idle" }, conflictCandidate: null, terminalResponseSource: null, terminalOrigin: null, originalMutationFailure: null, reconciliationRequired: false, serverCapabilities: true },
+    paste: { ...accepted, resource: "active", lastSavedContent: accepted.acceptedSource, mutation: { state: "idle", nextToken: 0 }, coalescedSource: null, phase: "ordinary", credential: { committed: initialPage.password, pending: null }, autosave: { state: "clean", confirmedAt: null, failedAt: null }, lastAction: { state: "idle" }, conflictCandidate: null, terminalResponseSource: null, terminalOrigin: null, originalMutationFailure: null, reconciliationRequired: false, reconciliation: { owner: null, requestPending: false }, serverCapabilities: true },
     autosave,
     records: initialRecords(),
     history: emptyHistory(),
@@ -431,6 +484,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         versionUsable: paste.versionUsable,
         mutationPending: paste.lastAction.state === "pending",
         mutationOccupied: paste.mutation.state !== "idle",
+        reconciliationOwner: paste.reconciliation.owner,
+        reconciliationRequestPending: paste.reconciliation.requestPending,
         result: {
           field: settingsState === "idle" ? null : lastActionKey === "settings-format" ? "format" : lastActionKey === "settings-expiration" ? "expiration" : lastActionKey === "settings-view-once" ? "viewOnce" : "title",
           state: settingsState,
@@ -443,6 +498,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         versionUsable: paste.versionUsable,
         mutationPending: paste.lastAction.state === "pending",
         mutationOccupied: paste.mutation.state !== "idle",
+        reconciliationOwner: paste.reconciliation.owner,
+        reconciliationRequestPending: paste.reconciliation.requestPending,
         result: { action: passwordAction, state: passwordState, message: null },
         currentUrl: location.href,
         representations: [
@@ -569,7 +626,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     return {
       phase: snapshot.phase,
       activeUntil: runtime.activeUntil,
-      locallyClean: save.draft === save.acceptedSource && save.inFlightContent === null && save.dueAt === null,
+      locallyClean: locallyClean(runtime),
       offline: navigator.onLine === false,
       localGeneration: snapshot.localGeneration,
       acceptedApplyGeneration: snapshot.acceptedApplyGeneration,
@@ -622,59 +679,77 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.paste.recordLocalAction({ key: "reload-server", state, attempt: action.attempt, startedAt: action.startedAt, settledAt: displayTime() });
   }
 
-  function settleSyncRetryAction(runtime: Runtime, state: "succeeded" | "failed"): void {
-    const action = runtime.syncRetryAction;
-    if (action === null) return;
-    runtime.syncRetryAction = null;
-    runtime.paste.recordLocalAction({ key: "retry-sync", state, attempt: action.attempt, startedAt: action.startedAt, settledAt: displayTime() });
-  }
-
   function scheduleSyncRetry(runtime: Runtime, credential: string | null): void {
     const snapshot = runtime.paste.snapshot();
-    if (!active(snapshot) || !runtime.sync.retrySync(now(), credential)) return;
     const attempt = snapshot.lastAction.state === "idle" ? 1 : snapshot.lastAction.attempt + 1;
     const startedAt = displayTime();
-    runtime.syncRetryAction = { attempt, startedAt };
     runtime.paste.recordLocalAction({ key: "retry-sync", state: "pending", attempt, startedAt });
+    const state = active(snapshot) && runtime.sync.retrySync(now(), credential) ? "succeeded" : "failed";
+    runtime.paste.recordLocalAction({ key: "retry-sync", state, attempt, startedAt, settledAt: displayTime() });
   }
 
-  function completeTerminal(runtime: Runtime, phase: TerminalPage["phase"], source: string, consumedSource: string | null = null): void {
+  function completeTerminal(runtime: Runtime, page: TerminalPage): void {
     if (runtime.disposed || runtime.terminalSignalled) return;
     runtime.terminalSignalled = true;
-    callbacksRef.current.onTerminal?.({ phase, source, consumedSource, initialMarkdown: source === initial.exactSource ? initial.initialMarkdown : null });
+    callbacksRef.current.onTerminal?.({
+      page,
+      records: { ...runtime.records, lastAction: runtime.paste.snapshot().lastAction },
+    });
+  }
+
+  function terminalPage(phase: TerminalPage["phase"], source: string, currentSource: string, responseSource: string | null, choiceAvailable: boolean, initialMarkdown: TrustedMarkdownHtml | null = source === initial.exactSource ? initial.initialMarkdown : null): TerminalPage {
+    return {
+      phase,
+      source,
+      currentSource,
+      responseSource,
+      consumedSource: choiceAvailable ? responseSource : null,
+      choiceAvailable,
+      initialMarkdown,
+    };
   }
 
   function terminalFromEffect(runtime: Runtime, phase: PastePhase): void {
     const snapshot = runtime.paste.snapshot();
     if (!active(snapshot)) return;
-    if (phase === "armed-view-once") {
-      completeTerminal(runtime, "armed-view-once", snapshot.draft);
-      return;
-    }
-    if (phase === "not-found") {
-      completeTerminal(runtime, "not-found", snapshot.draft);
-      return;
-    }
-    if (phase === "delete-uncertain") {
-      completeTerminal(runtime, "delete-uncertain", snapshot.draft);
+    if (phase === "armed-view-once" || phase === "not-found" || phase === "delete-uncertain") {
+      completeTerminal(runtime, terminalPage(phase, snapshot.draft, snapshot.draft, null, false));
       return;
     }
     const candidate = runtime.candidate?.kind === "terminal" ? runtime.candidate : null;
+    const responseSource = candidate?.source ?? snapshot.terminalResponseSource;
     const terminalBaseline = candidate?.capture?.baseline ?? candidate?.baseline;
-    const useConsumed = candidate?.snapshot !== undefined
+    const responseIsDefinitelyNewer = candidate?.snapshot !== undefined
       && terminalBaseline !== undefined
       && candidate.ordinaryTokenCurrent === true
       && classifyRemote(candidate.snapshot, terminalBaseline) === "definitely-newer";
-    const source = useConsumed ? candidate.source : snapshot.draft;
-    const consumedSource = candidate?.source ?? snapshot.terminalResponseSource;
-    completeTerminal(runtime, "consumed", source, consumedSource === source ? null : consumedSource);
-    if (snapshot.terminalOrigin !== null) {
-      const outcome = runtime.surface.settleTerminal(
-        snapshot.terminalOrigin,
-        useConsumed ? "displayed" : "current-unchanged",
-      );
+    const currentSource = snapshot.draft;
+    let source = currentSource;
+    let choiceAvailable = responseSource !== null && responseSource !== currentSource;
+    const origin = snapshot.terminalOrigin;
+    if (origin?.actionKey === "reload-server") {
+      const result = responseSource === currentSource
+        ? "current-unchanged"
+        : responseIsDefinitelyNewer
+          ? candidate?.terminalDisplay === "failed" ? "display-failed" : "displayed"
+          : "current-kept-choice";
+      if (result === "displayed" && responseSource !== null) {
+        source = responseSource;
+        choiceAvailable = false;
+      }
+      const outcome = runtime.surface.settleTerminal(origin, result);
       if (outcome !== null) runtime.paste.settleTerminal(outcome, now());
+    } else if (origin?.actionKey === "content-reconcile") {
+      const outcome = runtime.surface.settleTerminal(origin, "current-kept-choice");
+      if (outcome !== null) runtime.paste.settleTerminal(outcome, now());
+    } else if (responseIsDefinitelyNewer && responseSource !== null && candidate?.terminalDisplay !== "failed") {
+      source = responseSource;
+      choiceAvailable = false;
     }
+    const preparedPreview = source === responseSource && isMarkdownPreview(candidate?.terminalPreview)
+      ? candidate.terminalPreview.html as TrustedMarkdownHtml
+      : undefined;
+    completeTerminal(runtime, terminalPage("consumed", source, currentSource, responseSource, choiceAvailable, preparedPreview));
   }
 
   function dispatchContentReconcile(runtime: Runtime, dispatch: ContentReconcileDispatch): void {
@@ -691,7 +766,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const before = runtime.paste.snapshot();
       const decoded = result.kind === "snapshot" ? { kind: "snapshot", snapshot: result.snapshot } as const : reconcileFailure(result.kind === "failure" ? result.failure : { kind: "malformed", status: 304, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false });
       const accepted = runtime.paste.acceptContentReconcile(dispatch.requestToken, decoded, now());
-      if (accepted && active(before)) retainHistoryAfterAcceptance(runtime, baseline(before));
+      if (accepted && active(before)) {
+        const current = runtime.paste.snapshot();
+        if (result.kind === "snapshot" && active(current)) runtime.historyDiff.replaceCurrent(current.draft);
+        retainHistoryAfterAcceptance(runtime, baseline(before));
+      }
       if (accepted && result.kind === "snapshot" && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
       if (accepted && result.kind === "failure" && result.failure.kind === "network" && navigator.onLine !== false) updateNetworkRecord(runtime, "degraded");
       drainEffects(runtime);
@@ -795,7 +874,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         const before = runtime.paste.snapshot();
         const accepted = runtime.paste.acceptContentMutation(start.token, result.value, now());
         if (!accepted) return { status: 0, mutationMayHaveApplied: false };
-        if (active(before)) retainHistoryAfterAcceptance(runtime, baseline(before));
+        if (active(before)) {
+          const current = runtime.paste.snapshot();
+          if (active(current)) runtime.historyDiff.replaceCurrent(current.draft);
+          retainHistoryAfterAcceptance(runtime, baseline(before));
+        }
         // Update both controller authorities before the autosave promise publishes a render.
         drainEffects(runtime);
         publish(runtime);
@@ -825,9 +908,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         if (runtime.disposed || runtimeRef.current !== runtime) return;
         if (effect.type === "invalidate-sync") {
           clearExpiringCandidate(runtime);
-          if (runtime.paste.snapshot().phase === "ordinary") settleReloadAction(runtime, "failed");
-          settleSyncRetryAction(runtime, "failed");
-          runtime.sync.localWorkChanged();
+          const snapshot = runtime.paste.snapshot();
+          if (snapshot.phase === "ordinary") settleReloadAction(runtime, "failed");
+          const owner = mutationOwner(snapshot);
+          if (owner !== null) markLocalWorkChanged(runtime, owner);
           continue;
         }
         if (effect.type === "invalidate-history") {
@@ -860,7 +944,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
             if (active(snapshot)) {
               runtime.validator = effect.kind === "remote" ? snapshot.responseEtag : null;
               runtime.surface.replaceCapture(surfaceCapture(snapshot));
-              if (effect.kind !== "remote") runtime.sync.localWorkSettled(now());
+              if (effect.kind === "content" || effect.kind === "reconciled-applied") settleLocalWork(runtime, "content");
+              else if (effect.kind !== "remote") settleLocalWorkIfClean(runtime);
             }
           }
           updateAutosaveRecord(runtime);
@@ -887,6 +972,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           runtime.surface.invalidate();
           if (isPreparedMarkdownVisual(runtime.derivedResources?.visual)) void runtime.derivedResources.visual.dispose();
           runtime.derivedResources = null;
+          runtime.previousDerivedResources = null;
           for (const request of runtime.requestControllers) request.abort();
           runtime.requestControllers.clear();
           terminalFromEffect(runtime, effect.phase);
@@ -987,6 +1073,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (!runtime.paste.applyRemoteSnapshot(remote)) return false;
     const current = runtime.paste.snapshot();
     if (!active(current)) return false;
+    runtime.historyDiff.replaceCurrent(current.draft);
     runtime.history.retainAfterApply(baseline(previous), baseline(current));
     runtime.validator = remote.etag;
     settleUseRemoteAction(runtime, "succeeded");
@@ -994,7 +1081,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (attempt !== undefined) {
       runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
     } else {
-      runtime.sync.localWorkSettled(now());
+      settleLocalWork(runtime, "content");
     }
     drainEffects(runtime);
     publish(runtime);
@@ -1088,10 +1175,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.candidate = null;
       settleUseRemoteAction(runtime, "failed");
       settleReloadAction(runtime, "failed");
-      settleSyncRetryAction(runtime, "failed");
     }
-    if (event.type === "unchanged" || event.type === "candidate" || event.type === "proven-newer" || event.type === "terminal-view-once") settleSyncRetryAction(runtime, "succeeded");
-    if (event.type === "forbidden" || event.type === "not-found" || event.type === "conflict" || event.type === "error") settleSyncRetryAction(runtime, "failed");
     if (event.type === "credential-proved") {
       runtime.paste.setPendingCredential(event.password);
       runtime.paste.commitProvenCredential(event.password);
@@ -1101,17 +1185,50 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     } else if (event.type === "proven-newer") {
       void applyRemote(runtime, event.snapshot, "autosync", event.attempt, event.capture);
     } else if (event.type === "terminal-view-once") {
-      const snapshot = runtime.paste.snapshot();
-      if (!active(snapshot)) return;
-      runtime.candidate = {
-        kind: "terminal",
-        source: event.snapshot.source,
-        snapshot: event.snapshot,
-        capture: event.capture,
-        ordinaryTokenCurrent: event.ordinaryTokenCurrent,
+      const current = (): boolean => {
+        const snapshot = runtime.paste.snapshot();
+        return event.ordinaryTokenCurrent
+          && !runtime.disposed
+          && runtimeRef.current === runtime
+          && active(snapshot)
+          && snapshot.phase === "ordinary"
+          && snapshot.mutation.state === "idle"
+          && snapshot.draft === snapshot.acceptedSource
+          && snapshot.localGeneration === event.capture.localGeneration
+          && sameBaseline(event.capture.baseline, baseline(snapshot))
+          && now() < event.capture.activeUntil;
       };
-      runtime.paste.enterTerminal("consumed", now());
-      drainEffects(runtime);
+      const enter = (ordinaryTokenCurrent: boolean, terminalDisplay?: Candidate["terminalDisplay"], terminalPreview: MarkdownPreview | null = null): void => {
+        if (runtime.disposed || runtimeRef.current !== runtime) return;
+        runtime.candidate = {
+          kind: "terminal",
+          source: event.snapshot.source,
+          snapshot: event.snapshot,
+          capture: event.capture,
+          ordinaryTokenCurrent,
+          ...(terminalDisplay === undefined ? {} : { terminalDisplay }),
+          ...(terminalPreview === null ? {} : { terminalPreview }),
+        };
+        runtime.paste.enterTerminal("consumed", now());
+        drainEffects(runtime);
+        publish(runtime);
+      };
+      const automaticallySelected = current()
+        && event.snapshot.source !== event.capture.baseline.acceptedSource
+        && classifyRemote(event.snapshot, event.capture.baseline) === "definitely-newer";
+      if (!automaticallySelected) {
+        enter(event.ordinaryTokenCurrent);
+        return;
+      }
+      void runtime.surface.apply(event.snapshot.source).then((staged) => {
+        const ordinaryTokenCurrent = current();
+        const terminalDisplay = ordinaryTokenCurrent && staged && runtime.surface.snapshot().status === "committed" ? "ready" : ordinaryTokenCurrent ? "failed" : undefined;
+        const terminalPreview = terminalDisplay === "ready" && isMarkdownPreview(runtime.derivedResources?.preview) && runtime.derivedResources.preview.source === event.snapshot.source
+          ? runtime.derivedResources.preview
+          : null;
+        enter(ordinaryTokenCurrent, terminalDisplay, terminalPreview);
+      }, () => enter(current(), "failed"));
+      return;
     } else if (event.type === "forbidden") {
       runtime.candidate = { kind: "forbidden", source: "" };
     } else if (event.type === "not-found") {
@@ -1128,7 +1245,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.activeUntil = loadAt + 300_000;
     runtime.validator = accepted.responseEtag;
     runtime.candidate = null;
-    runtime.syncRetryAction = null;
     runtime.useRemoteAction = null;
     runtime.reloadAction = null;
     runtime.composing = false;
@@ -1139,7 +1255,9 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.reloadToken = 0;
     runtime.mountedSurfaces = new Set();
     runtime.derivedResources = null;
+    runtime.previousDerivedResources = null;
     runtime.diff = { state: "idle", lines: [] };
+    runtime.dirtyDraftOwners = new Set();
     runtime.paste = createPasteController({ accepted, credential });
     runtime.history = createHistoryController();
     runtime.historyDiff = createHistoryDiff({
@@ -1164,11 +1282,19 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           visual.root.dataset.stagedVisual = String(generation);
           return visual;
         },
-        stageDiff: async (source, generation) => ({ kind: "target-bound-fallback", source, generation }),
+        stageDiff: (source) => runtime.historyDiff.stageCurrent(source),
         mounted: () => Array.from(runtime.mountedSurfaces),
         commit: (staged, generation) => {
           const previous = runtime.derivedResources;
+          runtime.previousDerivedResources = previous;
           runtime.derivedResources = { ...staged, generation };
+          if (isStagedHistoryDiff(staged.diff) && runtime.historyDiff.adoptStaged(staged.diff)) {
+            runtime.diff = { state: "ready", lines: staged.diff.lines };
+          } else if (staged.diff === null) {
+            runtime.diff = { state: "manual", lines: [] };
+          } else if (staged.diff !== undefined) {
+            runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
+          }
           if (
             isPreparedMarkdownVisual(previous?.visual)
             && previous.visual !== staged.visual
@@ -1177,8 +1303,26 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
             void previous.visual.dispose();
           }
         },
-        restoreOld: async () => true,
-        showOldGenerationFailure: () => undefined,
+        restoreOld: async (generation) => {
+          const previous = runtime.derivedResources?.generation === generation
+            ? runtime.derivedResources
+            : runtime.previousDerivedResources?.generation === generation
+              ? runtime.previousDerivedResources
+              : null;
+          if (previous === null) return false;
+          runtime.derivedResources = previous;
+          return true;
+        },
+        showOldGenerationFailure: (generation, source) => {
+          runtime.derivedResources = {
+            preview: { kind: "fallback", surface: "preview", source, generation },
+            visual: { kind: "fallback", surface: "visual", source, generation },
+            diff: { kind: "fallback", surface: "diff", source, generation },
+            generation,
+          };
+          if (runtime.mountedSurfaces.has("diff")) runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
+          queuePublish();
+        },
         disposeAttemptResources: (attempt) => {
           const staged = (attempt as { staged?: Record<string, unknown> }).staged;
           if (isPreparedMarkdownVisual(staged?.visual)) void staged.visual.dispose();
@@ -1195,7 +1339,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       }, delay),
       clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       tryDispatch: (request) => dispatchAutosave(runtime, request),
-      onCoalescedIntent: () => runtime.sync.localWorkChanged(),
+      onCoalescedIntent: () => markLocalWorkChanged(runtime, "content"),
       getPassword: () => {
         const snapshot = runtime.paste.snapshot();
         return active(snapshot) ? snapshot.credential.pending ?? snapshot.credential.committed : null;
@@ -1239,7 +1383,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       updateNetworkRecord(runtime, "offline");
       clearExpiringCandidate(runtime);
       settleReloadAction(runtime, "failed");
-      settleSyncRetryAction(runtime, "failed");
       runtime.surface.invalidate();
       runtime.sync.setOnline(false, now());
       publish(runtime);
@@ -1262,15 +1405,16 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       if (runtime === null || runtime.disposed) return;
       runtime.composing = event.type === "composition-start" ? true : event.type === "composition-end" ? false : runtime.composing;
       runtime.paste.sourceEvent(event);
+      const snapshot = runtime.paste.snapshot();
+      if (active(snapshot)) runtime.historyDiff.replaceCurrent(snapshot.draft);
       clearExpiringCandidate(runtime);
       settleReloadAction(runtime, "failed");
-      settleSyncRetryAction(runtime, "failed");
       runtime.surface.invalidate();
       if (event.type !== "composition-start" && event.type !== "composition-input") {
         runtime.activeUntil = event.eventAt + 300_000;
         runtime.sync.recordUserActivity(event.eventAt);
       }
-      runtime.sync.localWorkChanged();
+      markLocalWorkChanged(runtime, "content");
       queuePublish();
     },
     activity(eventAt, kind) {
@@ -1283,17 +1427,28 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.sync.recordUserActivity(eventAt);
       if (kind !== "recovery-credential") {
         clearExpiringCandidate(runtime);
-        settleSyncRetryAction(runtime, "failed");
-        runtime.sync.localWorkChanged();
-        runtime.sync.localWorkSettled(now());
+        settleLocalWorkIfClean(runtime);
       }
       publish(runtime);
+    },
+    draftState(owner, dirty, eventAt) {
+      const runtime = runtimeRef.current;
+      if (runtime === null || runtime.disposed) return;
+      const at = eventAt ?? now();
+      runtime.paste.recordLocalActivity();
+      settleReloadAction(runtime, "failed");
+      runtime.surface.invalidate();
+      runtime.activeUntil = at + 300_000;
+      runtime.sync.recordUserActivity(at);
+      clearExpiringCandidate(runtime);
+      const changed = dirty ? markLocalWorkChanged(runtime, owner) : settleLocalWork(runtime, owner);
+      if (changed) publish(runtime);
     },
     autosaveInput(content, eventAt) {
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
       runtime.autosave.input(content, eventAt);
-      if (runtime.autosave.snapshot().state === "clean") runtime.sync.localWorkSettled(now());
+      if (runtime.autosave.snapshot().state === "clean") settleLocalWork(runtime, "content");
     },
     compositionStart() {
       const runtime = runtimeRef.current;
@@ -1304,7 +1459,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
       runtime.autosave.compositionEnd(content, eventAt);
-      if (runtime.autosave.snapshot().state === "clean") runtime.sync.localWorkSettled(now());
+      if (runtime.autosave.snapshot().state === "clean") settleLocalWork(runtime, "content");
     },
     retry(credential) {
       const runtime = runtimeRef.current;
@@ -1362,20 +1517,52 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       void runtime.api.readResource({ id: snapshot.summary.id, password: credential, ifNoneMatch: null, signal: controller.signal }).then(async (result) => {
         if (!settleRequest(runtime, controller)) return;
         const current = runtime.paste.snapshot();
+        const reloadCurrent = (): boolean => {
+          const latest = runtime.paste.snapshot();
+          return !runtime.disposed
+            && runtimeRef.current === runtime
+            && token === runtime.reloadToken
+            && active(latest)
+            && latest.phase === "ordinary"
+            && latest.mutation.state === "idle"
+            && latest.draft === draft
+            && sameBaseline(capture, baseline(latest));
+        };
         if (result.kind === "snapshot" && result.snapshot.summary.viewOnce) {
           if (navigator.onLine !== false) updateNetworkRecord(runtime, "online");
-          const ordinaryTokenCurrent = token === runtime.reloadToken
-            && active(current)
-            && current.phase === "ordinary"
-            && current.mutation.state === "idle"
-            && sameBaseline(capture, baseline(current))
-            && current.draft === draft;
+          let ordinaryTokenCurrent = reloadCurrent();
+          let terminalDisplay: Candidate["terminalDisplay"];
+          let terminalPreview: MarkdownPreview | null = null;
+          const automaticallySelected = ordinaryTokenCurrent
+            && result.snapshot.source !== draft
+            && classifyRemote(result.snapshot, capture) === "definitely-newer";
+          if (automaticallySelected) {
+            const latest = runtime.paste.snapshot();
+            const staged = active(latest) && await runtime.surface.applyReload(result.snapshot.source, {
+              requestCurrent: reloadCurrent(),
+              acceptedBaselineCurrent: sameBaseline(capture, baseline(latest)),
+              draftCurrent: latest.draft === draft,
+              localGenerationCurrent: capture.localGeneration === latest.localGeneration,
+              mutationOccupied: latest.mutation.state !== "idle",
+              terminal: latest.phase !== "ordinary",
+              commitCurrent: reloadCurrent,
+            });
+            ordinaryTokenCurrent = reloadCurrent();
+            if (ordinaryTokenCurrent) {
+              terminalDisplay = staged && runtime.surface.snapshot().status === "committed" ? "ready" : "failed";
+              if (terminalDisplay === "ready" && isMarkdownPreview(runtime.derivedResources?.preview) && runtime.derivedResources.preview.source === result.snapshot.source) {
+                terminalPreview = runtime.derivedResources.preview;
+              }
+            }
+          }
           runtime.candidate = {
             kind: "terminal",
             source: result.snapshot.source,
             snapshot: result.snapshot,
             baseline: capture,
             ordinaryTokenCurrent,
+            ...(terminalDisplay === undefined ? {} : { terminalDisplay }),
+            ...(terminalPreview === null ? {} : { terminalPreview }),
           };
           if (runtime.reloadAction?.attempt === token) runtime.reloadAction = null;
           runtime.paste.enterTerminal("consumed", now(), { actionKey: "reload-server", actionAttempt: token, startedAt });
@@ -1407,18 +1594,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           publish(runtime);
           return;
         }
-        settleReloadAction(runtime, "succeeded");
-        const reloadCurrent = (): boolean => {
-          const latest = runtime.paste.snapshot();
-          return !runtime.disposed
-            && runtimeRef.current === runtime
-            && token === runtime.reloadToken
-            && active(latest)
-            && latest.phase === "ordinary"
-            && latest.mutation.state === "idle"
-            && latest.draft === draft
-            && sameBaseline(capture, baseline(latest));
-        };
         const applied = await runtime.surface.applyReload(result.snapshot.source, {
           requestCurrent: reloadCurrent(),
           acceptedBaselineCurrent: sameBaseline(capture, baseline(current)),
@@ -1428,7 +1603,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           terminal: current.phase !== "ordinary",
           commitCurrent: reloadCurrent,
         });
-        if (applied && reloadCurrent() && applyRemoteSnapshot(runtime, result.snapshot)) return;
+        if (applied && reloadCurrent()) {
+          settleReloadAction(runtime, "succeeded");
+          if (applyRemoteSnapshot(runtime, result.snapshot)) return;
+        }
+        settleReloadAction(runtime, "failed");
         runtime.candidate = { kind: "remote", source: result.snapshot.source, snapshot: result.snapshot };
         publish(runtime);
       }, () => {
@@ -1448,8 +1627,9 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           acceptedSource: snapshot.acceptedSource,
           version: snapshot.version,
         });
+        runtime.historyDiff.replaceCurrent(snapshot.draft);
         runtime.surface.replaceCapture(surfaceCapture(snapshot));
-        runtime.sync.localWorkSettled(now());
+        settleLocalWork(runtime, "content");
       }
       drainEffects(runtime);
       updateAutosaveRecord(runtime);
