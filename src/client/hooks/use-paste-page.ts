@@ -29,6 +29,7 @@ export interface SurfaceFallbackState {
   surface: Exclude<SurfaceFallback, null>;
   source: string;
   generation: number;
+  hostGeneration?: number;
 }
 
 export interface TerminalPage {
@@ -481,8 +482,14 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       };
     }
 
-    const settingsState = statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile"], paste);
-    const passwordState = statusFor(paste.lastAction, ["password-set", "password-clear", "password-reconcile"], paste);
+    const settingsOwnsReconciliation = paste.reconciliation.owner === "title" || paste.reconciliation.owner === "format" || paste.reconciliation.owner === "expiration" || paste.reconciliation.owner === "viewOnce";
+    const passwordOwnsReconciliation = paste.reconciliation.owner === "password";
+    const settingsState = paste.reconciliationRequired
+      ? settingsOwnsReconciliation ? "reconciliation-required" : "idle"
+      : statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile"], paste);
+    const passwordState = paste.reconciliationRequired
+      ? passwordOwnsReconciliation ? "reconciliation-required" : "idle"
+      : statusFor(paste.lastAction, ["password-set", "password-clear", "password-reconcile"], paste);
     const deleteState = statusFor(paste.lastAction, ["delete"], paste);
     const expiration = paste.summary.expiration.kind === "permanent"
       ? null
@@ -509,8 +516,9 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         mutationOccupied: paste.mutation.state !== "idle",
         reconciliationOwner: paste.reconciliation.owner,
         reconciliationRequestPending: paste.reconciliation.requestPending,
+        resultIdentity: paste.lastAction,
         result: {
-          field: settingsState === "idle" ? null : lastActionKey === "settings-format" ? "format" : lastActionKey === "settings-expiration" ? "expiration" : lastActionKey === "settings-view-once" ? "viewOnce" : "title",
+          field: settingsState === "idle" ? null : settingsState === "reconciliation-required" && settingsOwnsReconciliation ? paste.reconciliation.owner : lastActionKey === "settings-format" ? "format" : lastActionKey === "settings-expiration" ? "expiration" : lastActionKey === "settings-view-once" ? "viewOnce" : "title",
           state: settingsState,
           message: null,
           ...(settingsState === "reconciliation-required" && paste.mutation.state === "metadata-reconciliation" && paste.mutation.intent.kind === "settings-expiration" && typeof paste.mutation.intent.expiration === "number" ? { reconciliationIntent: "relative" as const } : {}),
@@ -523,6 +531,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         mutationOccupied: paste.mutation.state !== "idle",
         reconciliationOwner: paste.reconciliation.owner,
         reconciliationRequestPending: paste.reconciliation.requestPending,
+        resultIdentity: paste.lastAction,
         result: { action: passwordAction, state: passwordState, message: null },
         currentUrl: location.href,
         representations: [
@@ -1781,6 +1790,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         if (state !== "unchanged") runtime.diff = { state, lines: [] };
       }
       runtime.surface.remount();
+      publish(runtime);
     },
     localAction(action) {
       const runtime = runtimeRef.current;

@@ -30,6 +30,7 @@ type TerminalLocalRuntime = {
   pending: boolean;
   actionAttempt: number | null;
   surface: StagedSurfaceApply;
+  previewHost: HTMLDivElement | null;
   mountedSurfaces: Set<DerivedSurface>;
   resources: { preview: unknown; visual: unknown; diff: unknown; generation: number } | null;
   previousResources: { preview: unknown; visual: unknown; diff: unknown; generation: number } | null;
@@ -227,12 +228,21 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
   onLocalAction(state: LocalActionState): void;
   onUseConsumedResponse(): void;
   onKeepCurrent(): void;
-  onTerminalPreviewMounted(mounted: boolean): void;
+  onTerminalPreviewMounted(host: HTMLDivElement | null): void;
   onTerminalRetry(surface: SurfaceFallbackState["surface"]): void;
   onRootHandoff(): void;
 }) {
   if (rootHandoff) return create === null ? null : <CreatePage locale={locale} create={create} />;
-  if (terminal !== null) return <LocalOnlyPastePage locale={locale} {...terminal} derivedPreview={isMarkdownPreview(terminal.local.resources?.preview) ? terminal.local.resources.preview : null} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} onSurfaceMounted={onTerminalPreviewMounted} onRetrySurface={onTerminalRetry} onActionState={onLocalAction} />;
+  if (terminal !== null) {
+    const capture = terminal.local.surface.snapshot().capture;
+    const fallback = terminal.local.previewHost !== null
+      && terminal.fallback?.surface === "preview"
+      && terminal.fallback.generation === capture.currentDisplayGeneration
+      && terminal.fallback.hostGeneration === capture.hostGeneration
+      ? terminal.fallback
+      : null;
+    return <LocalOnlyPastePage locale={locale} {...terminal} fallback={fallback} derivedPreview={isMarkdownPreview(terminal.local.resources?.preview) ? terminal.local.resources.preview : null} onUseConsumedResponse={onUseConsumedResponse} onKeepCurrent={onKeepCurrent} onSurfaceMounted={onTerminalPreviewMounted} onRetrySurface={onTerminalRetry} onActionState={onLocalAction} />;
+  }
   if (!initialPage.ok) return <ErrorPage locale={locale} status={500} errorCode={initialPage.errorCode} />;
 
   const { bootstrap } = initialPage;
@@ -348,6 +358,7 @@ export function App({ initialPage }: AppProps) {
     local.source = page.source;
     local.pending = false;
     local.actionAttempt = null;
+    local.previewHost = null;
     local.mountedSurfaces = new Set();
     local.resources = null;
     local.previousResources = null;
@@ -413,22 +424,42 @@ export function App({ initialPage }: AppProps) {
 
   React.useEffect(() => () => disposeTerminalResources(terminalRef.current?.local.resources ?? null, terminalRef.current?.local.previousResources ?? null), []);
 
-  const terminalPreviewMounted = React.useCallback((mounted: boolean) => {
+  const terminalPreviewMounted = React.useCallback((host: HTMLDivElement | null) => {
     const current = terminalRef.current;
-    if (current === null) return;
-    if (mounted) current.local.mountedSurfaces.add("preview");
-    else current.local.mountedSurfaces.delete("preview");
+    if (current === null || current.local.previewHost === host) return;
+    current.local.previewHost = host;
+    if (host === null) current.local.mountedSurfaces.delete("preview");
+    else current.local.mountedSurfaces.add("preview");
     current.local.surface.remount();
+    if (host === null) return;
+    const capture = current.local.surface.snapshot().capture;
+    setTerminal((page) => page?.local === current.local && page.fallback?.surface === "preview"
+      ? { ...page, fallback: { ...page.fallback, generation: capture.currentDisplayGeneration, hostGeneration: capture.hostGeneration } }
+      : page);
   }, []);
 
   const retryTerminalSurface = React.useCallback((surface: SurfaceFallbackState["surface"]) => {
     const current = terminalRef.current;
-    if (current === null || current.fallback?.surface !== surface) return;
+    const fallback = current?.fallback;
+    if (current === null || surface !== "preview" || fallback?.surface !== "preview" || current.local.previewHost === null) return;
     const local = current.local;
-    const retry = surface === "preview" ? local.surface.retryPreview : surface === "visual" ? local.surface.retryVisual : local.surface.retryDiff;
-    void retry(current.fallback.source).then((applied) => {
+    const host = local.previewHost;
+    const capture = local.surface.snapshot().capture;
+    if (
+      fallback.source !== local.surface.snapshot().source
+      || fallback.generation !== capture.currentDisplayGeneration
+      || fallback.hostGeneration !== capture.hostGeneration
+    ) return;
+    void local.surface.retryPreview(fallback.source).then((applied) => {
       if (!applied) return;
-      setTerminal((page) => page?.local === local && page.fallback?.surface === surface ? { ...page, fallback: null } : page);
+      const latest = local.surface.snapshot().capture;
+      setTerminal((page) => page?.local === local
+        && page.fallback === fallback
+        && local.previewHost === host
+        && latest.currentDisplayGeneration === capture.currentDisplayGeneration
+        && latest.hostGeneration === capture.hostGeneration
+        ? { ...page, fallback: null }
+        : page);
     });
   }, []);
 
@@ -493,7 +524,8 @@ export function App({ initialPage }: AppProps) {
           ? { ...page, source, consumedSource: null, initialMarkdown: null, fallback: null }
           : page);
       } else if (receipt?.outcome === "fallback" && receipt.fallback !== null) {
-        const fallback = { surface: receipt.fallback, source, generation: local.surface.snapshot().capture.currentDisplayGeneration };
+        const capture = local.surface.snapshot().capture;
+        const fallback = { surface: receipt.fallback, source, generation: capture.currentDisplayGeneration, hostGeneration: capture.hostGeneration };
         setTerminal((page) => page?.local === local && local.epoch === epoch && page.consumedSource === source
           ? { ...page, fallback }
           : page);

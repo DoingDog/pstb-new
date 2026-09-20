@@ -37,6 +37,12 @@ interface PendingStagedHistoryDiff {
   reject(reason: Error): void;
 }
 
+interface ActiveDiffRequest {
+  worker: DiffWorker;
+  id: number;
+  generation: number;
+}
+
 export interface HistoryDiffOptions {
   onLines(lines: DiffLine[]): void;
   onError?(message: string): void;
@@ -92,6 +98,8 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
   let selected: SelectedDiff | undefined;
   let mounted = false;
   let latestId = 0;
+  let nextRequestGeneration = 0;
+  let activeRequest: ActiveDiffRequest | undefined;
 
   let staged: PendingStagedHistoryDiff | undefined;
 
@@ -100,39 +108,69 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     staged = undefined;
     pending?.resolve(null);
   };
-  const ensureWorker = (): boolean => {
-    if (worker !== undefined) return true;
+  const retireRequest = (): void => {
+    activeRequest = undefined;
+    nextRequestGeneration += 1;
+    latestId += 1;
+  };
+  const ensureWorker = (): DiffWorker | undefined => {
+    if (worker !== undefined) return worker;
     try {
       worker = (options.createWorker ?? defaultDiffWorker)();
-      worker.onmessage = (event) => {
-        if (!isDiffResponse(event.data) || event.data.id !== latestId) return;
-        const pending = staged?.id === event.data.id ? staged : undefined;
-        if (pending !== undefined) {
-          staged = undefined;
-          if (event.data.type === "result") pending.resolve({ id: pending.id, previous: pending.previous, current: pending.current, lines: event.data.lines });
-          else pending.reject(new Error(event.data.message));
-          return;
-        }
-        if (event.data.type === "result") options.onLines(event.data.lines);
-        else options.onError?.(event.data.message);
-      };
-      worker.onerror = () => {
-        const pending = staged;
-        staged = undefined;
-        if (pending !== undefined) pending.reject(new Error("Unable to calculate diff"));
-        else options.onError?.("Unable to calculate diff");
-      };
-      return true;
+      return worker;
     } catch (error) {
       options.onError?.(error instanceof Error ? error.message : "Unable to calculate diff");
-      return false;
+      return undefined;
     }
   };
+  const requestDiff = (activeWorker: DiffWorker, previous: string, current: string): number => {
+    const id = ++latestId;
+    const generation = ++nextRequestGeneration;
+    const request: ActiveDiffRequest = { worker: activeWorker, id, generation };
+    activeRequest = request;
+    activeWorker.onmessage = (event) => {
+      if (
+        worker !== activeWorker
+        || activeRequest?.worker !== activeWorker
+        || activeRequest.id !== id
+        || activeRequest.generation !== generation
+        || !isDiffResponse(event.data)
+        || event.data.id !== id
+      ) return;
+      activeRequest = undefined;
+      const pending = staged?.id === event.data.id ? staged : undefined;
+      if (pending !== undefined) {
+        staged = undefined;
+        if (event.data.type === "result") pending.resolve({ id: pending.id, previous: pending.previous, current: pending.current, lines: event.data.lines });
+        else pending.reject(new Error(event.data.message));
+        return;
+      }
+      if (event.data.type === "result") options.onLines(event.data.lines);
+      else options.onError?.(event.data.message);
+    };
+    activeWorker.onerror = () => {
+      if (
+        worker !== activeWorker
+        || activeRequest?.worker !== activeWorker
+        || activeRequest.id !== id
+        || activeRequest.generation !== generation
+      ) return;
+      activeRequest = undefined;
+      const pending = staged?.id === id ? staged : undefined;
+      if (pending !== undefined) {
+        staged = undefined;
+        pending.reject(new Error("Unable to calculate diff"));
+      } else options.onError?.("Unable to calculate diff");
+    };
+    activeWorker.postMessage({ type: "diff", id, previous, current });
+    return id;
+  };
   const startDiff = (): boolean => {
-    if (selected === undefined || !ensureWorker()) return false;
+    if (selected === undefined) return false;
+    const activeWorker = ensureWorker();
+    if (activeWorker === undefined) return false;
     retireStaged();
-    latestId += 1;
-    worker!.postMessage({ type: "diff", id: latestId, previous: selected.previous, current: selected.current });
+    requestDiff(activeWorker, selected.previous, selected.current);
     return true;
   };
 
@@ -144,7 +182,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
         if (mounted) startDiff();
         return "automatic";
       }
-      latestId += 1;
+      retireRequest();
       return "manual";
     },
     replaceCurrent(current) {
@@ -152,7 +190,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
       if (selected.current === current) return "unchanged";
       retireStaged();
       selected = { ...selected, current };
-      latestId += 1;
+      retireRequest();
       if (!automaticDiffAllowed(selected.previous, current)) return "manual";
       if (!mounted) return "idle";
       startDiff();
@@ -160,13 +198,14 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     },
     stageCurrent(current) {
       if (selected === undefined || !mounted || !automaticDiffAllowed(selected.previous, current)) return Promise.resolve(null);
-      if (!ensureWorker()) return Promise.reject(new Error("Unable to calculate diff"));
+      const activeWorker = ensureWorker();
+      if (activeWorker === undefined) return Promise.reject(new Error("Unable to calculate diff"));
       retireStaged();
       const previous = selected.previous;
-      const id = ++latestId;
+      const id = latestId + 1;
       return new Promise<StagedHistoryDiff | null>((resolve, reject) => {
         staged = { id, previous, current, resolve, reject };
-        worker!.postMessage({ type: "diff", id, previous, current });
+        requestDiff(activeWorker, previous, current);
       });
     },
     adoptStaged(stage) {
@@ -182,7 +221,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
       mounted = nextMounted;
       if (!mounted) {
         retireStaged();
-        latestId += 1;
+        retireRequest();
         worker?.terminate();
         worker = undefined;
         return "idle";
@@ -196,12 +235,12 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     clearSelection() {
       retireStaged();
       selected = undefined;
-      latestId += 1;
+      retireRequest();
     },
     destroy() {
       retireStaged();
       selected = undefined;
-      latestId += 1;
+      retireRequest();
       worker?.terminate();
       worker = undefined;
     },

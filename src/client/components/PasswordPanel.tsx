@@ -13,6 +13,7 @@ export interface PasswordPanelState {
   mutationOccupied?: boolean;
   reconciliationOwner?: "content" | "title" | "format" | "expiration" | "viewOnce" | "password" | null;
   reconciliationRequestPending?: boolean;
+  resultIdentity?: object;
   result: { action: "set" | "clear" | null; state: PasswordResultState; message: string | null };
   currentUrl: string;
   representations: readonly { label: string; href: string }[];
@@ -47,15 +48,16 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
   const generations = React.useRef<Record<PasswordField, number>>({ newPassword: 0, currentPassword: 0, retryCredential: 0 });
   const submitted = React.useRef<Partial<Record<PasswordField, number>>>({});
   const discardedResult = React.useRef<PasswordPanelState["result"] | null>(null);
+  const settledResult = React.useRef<object | null>(null);
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { action: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const ownsReconciliation = state.reconciliationOwner === "password"
-    || ((state.reconciliationOwner === null || state.reconciliationOwner === undefined) && state.result.state === "reconciliation-required");
+  const ownsReconciliation = state.reconciliationOwner === "password";
+  const foreignReconciliation = state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation;
   const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
-  const discardBlocked = pending || (!ownsReconciliation && state.mutationOccupied === true) || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation) || recoveryBlocked;
+  const discardBlocked = pending || foreignReconciliation || (!ownsReconciliation && state.mutationOccupied === true) || recoveryBlocked;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
@@ -70,12 +72,14 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
     if (field === "retryCredential") setRetryCredential(value);
   };
   const reportDraftState = (eventAt?: number) => onDraftState?.(passwords.current.newPassword !== "" || passwords.current.currentPassword !== "", eventAt);
+  const resultIdentity = state.resultIdentity ?? state.result;
   const capture = (...fields: PasswordField[]) => {
     for (const field of fields) submitted.current[field] = generations.current[field];
   };
 
   React.useLayoutEffect(() => {
-    if (result.state !== "succeeded") return;
+    if (result.state !== "succeeded" || settledResult.current === resultIdentity) return;
+    settledResult.current = resultIdentity;
     const clear = (field: PasswordField) => {
       if (submitted.current[field] !== generations.current[field]) return;
       if (field === "newPassword") {
@@ -93,7 +97,7 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
     clear("retryCredential");
     submitted.current = {};
     reportDraftState();
-  }, [result.action, result.state, reportDraftState]);
+  }, [result.action, result.state, resultIdentity, reportDraftState]);
 
   const authorization = state.protected ? (currentPassword === "" ? null : currentPassword) : null;
   const retryAuthorization = retryCredential === "" ? null : retryCredential;
@@ -113,11 +117,11 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
     retry(retryAuthorization);
   };
   const reconcilePassword = () => {
-    if (recoveryBlocked) return;
+    if (!ownsReconciliation || recoveryBlocked) return;
     reconcile();
   };
   const reset = () => {
-    if (discardBlocked) return;
+    if (foreignReconciliation || discardBlocked) return;
     submitted.current = {};
     passwords.current = { newPassword: "", currentPassword: "" };
     setNewPassword("");
@@ -142,9 +146,9 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
       {result.state === "credential-required" && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label><Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
       {result.state === "retryable" && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
       {result.state === "conflict" && state.versionUsable && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" disabled={recoveryBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
+      {result.state === "reconciliation-required" && ownsReconciliation && <Button type="button" disabled={recoveryBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
       {(!state.versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>
+      {!foreignReconciliation && <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>}
       <nav aria-label={copy.representations} className="flex flex-wrap gap-2"><a aria-label={copy.paste} href={state.currentUrl}>{copy.paste}</a>{state.representations.map((representation) => <a key={representation.href} href={representation.href}>{representation.label}</a>)}</nav>
     </section>
   );

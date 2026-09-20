@@ -570,6 +570,24 @@ describe("local-only capability", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("does not expose Visual or diff Retry controls in a terminal page", async () => {
+    for (const surface of ["visual", "diff"] as const) {
+      const fixture = await mount(
+        <LocalOnlyPastePage
+          locale="en"
+          phase="consumed"
+          source="current source"
+          initialMarkdown={null}
+          fallback={{ surface, source: "consumed source", generation: 1 }}
+          onRetrySurface={vi.fn()}
+        />,
+      );
+
+      expect(fixture.host.querySelector(`[data-derived-fallback="${surface}"]`)).toBeNull();
+      expect(Array.from(fixture.host.querySelectorAll("button")).some((item) => item.textContent === "Retry")).toBe(false);
+    }
+  });
+
   it("keeps recompute preview publication and failures owned by the current source attempt", async () => {
     const attempts: Array<{ options: MarkdownModesOptions; render: Deferred<string>; destroyed: number }> = [];
     markdownHarness.create.mockImplementation((options: MarkdownModesOptions): MarkdownModes => {

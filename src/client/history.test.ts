@@ -143,6 +143,44 @@ describe("history diff", () => {
     expect(workers[0]!.terminate).toHaveBeenCalledOnce();
   });
 
+  it("retires ready lines and ignores terminated worker callbacks after remount", () => {
+    const workers: Array<{
+      postMessage: ReturnType<typeof vi.fn>;
+      terminate: ReturnType<typeof vi.fn>;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null;
+      onerror: ((event: ErrorEvent) => void) | null;
+    }> = [];
+    const onLines = vi.fn();
+    const onError = vi.fn();
+    const history = createHistoryDiff({
+      createWorker: () => {
+        const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null };
+        workers.push(worker);
+        return worker;
+      },
+      onLines,
+      onError,
+    });
+
+    history.selectRevision("1", "old\n", "current\n");
+    expect(history.setMounted(true)).toBe("computing");
+    workers[0]!.onmessage?.({ data: { type: "result", id: 1, lines: [{ kind: "same", text: "ready\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenCalledWith([{ kind: "same", text: "ready\n" }]);
+
+    expect(history.setMounted(false)).toBe("idle");
+    expect(workers[0]!.terminate).toHaveBeenCalledOnce();
+    expect(history.setMounted(true)).toBe("computing");
+    expect(workers).toHaveLength(2);
+
+    workers[0]!.onmessage?.({ data: { type: "result", id: 1, lines: [{ kind: "same", text: "stale\n" }] } } as MessageEvent<unknown>);
+    workers[0]!.onerror?.({} as ErrorEvent);
+    expect(onLines).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+
+    workers[1]!.onmessage?.({ data: { type: "result", id: 3, lines: [{ kind: "add", text: "current\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).toHaveBeenLastCalledWith([{ kind: "add", text: "current\n" }]);
+  });
+
   it("replaces the selected diff current side and retires its old worker response", () => {
     const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
     const onLines = vi.fn();

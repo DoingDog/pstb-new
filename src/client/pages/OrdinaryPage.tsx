@@ -61,9 +61,10 @@ function SyncCandidate({ candidate, locale, useRemote, keepCurrent, retrySync, a
   );
 }
 
-function ContentRecovery({ state, reconciliationRequired, retry, reconcile, reload, overwrite, activity, locale }: {
+function ContentRecovery({ state, reconciliationRequired, reconciliationRequestPending, retry, reconcile, reload, overwrite, activity, locale }: {
   state: "clean" | "waiting" | "saving" | "saved" | "error" | "password-required" | "not-found" | "conflict";
   reconciliationRequired: boolean;
+  reconciliationRequestPending: boolean;
   retry(credential: string | null): void;
   reconcile(): void;
   reload(): void;
@@ -77,7 +78,7 @@ function ContentRecovery({ state, reconciliationRequired, retry, reconcile, relo
   return (
     <section aria-label={copy.autosave} className="flex flex-wrap items-end gap-2">
       {state === "password-required" && <label>{copy.currentPassword}<Input name="contentRetryCredential" type="password" value={credential} onInput={(event) => { setCredential(event.currentTarget.value); activity(event.timeStamp, "recovery-credential"); }} /></label>}
-      {reconciliationRequired && <Button type="button" onClick={reconcile}>{copy.reconcile}</Button>}
+      {reconciliationRequired && <Button type="button" disabled={reconciliationRequestPending} onClick={() => { if (reconciliationRequestPending) return; reconcile(); }}>{copy.reconcile}</Button>}
       {!reconciliationRequired && state !== "conflict" && <Button type="button" onClick={() => retry(credential === "" ? null : credential)}>{copy.retry}</Button>}
       {state === "conflict" && <>
         <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>
@@ -195,7 +196,8 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
     />
     <ContentRecovery
       state={snapshot.autosave.state}
-      reconciliationRequired={snapshot.paste.resource === "active" && snapshot.paste.reconciliationRequired}
+      reconciliationRequired={snapshot.paste.resource === "active" && snapshot.paste.reconciliation.owner === "content"}
+      reconciliationRequestPending={snapshot.paste.resource === "active" && snapshot.paste.reconciliation.owner === "content" && snapshot.paste.reconciliation.requestPending}
       retry={actions.retry}
       reconcile={actions.reconcile}
       reload={requestReload}

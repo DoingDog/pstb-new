@@ -1523,19 +1523,13 @@ describe("Task 15 async lifecycle behavior", () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    await selectTab(rendered, "Settings");
     const recovery = rendered.querySelector<HTMLElement>('[aria-label="Autosave"]');
     expect(recovery).not.toBeNull();
     await vi.waitFor(() => expect(button(recovery!, "Reconcile")).toBeDefined());
     await clickButton(recovery!, "Reconcile");
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await clickButton(rendered, "Copy");
-    const discard = button(rendered, "Discard");
-    expect(discard.disabled).toBe(true);
-    await act(async () => {
-      discard.click();
-      await Promise.resolve();
-    });
+    expect(Array.from(rendered.querySelectorAll("button")).some((item) => item.textContent === "Discard")).toBe(false);
     await act(async () => {
       resolveRead!(await resourceResponse("consumed", { viewOnce: true, version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
       for (let step = 0; step < 10; step += 1) await Promise.resolve();
@@ -1679,6 +1673,31 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");
     expect(button(rendered, "Use remote")).toBeDefined();
     expect(rendered.querySelector("[data-derived-fallback=preview]")).not.toBeNull();
+  });
+
+  it("adopts a terminal Preview Retry without consuming the retained source choice", async () => {
+    vi.useFakeTimers();
+    stagedMarkdown.prepareMarkdownPreview.mockRejectedValueOnce(new Error("preview unavailable"));
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
+      viewOnce: true,
+      version: "other-generation.1",
+      contentRevision: 1,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    const rendered = await mountOrdinary("current");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await vi.dynamicImportSettled(); });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await clickButton(rendered, "Use remote");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-derived-fallback="preview"]')).not.toBeNull());
+    stagedMarkdown.prepareMarkdownPreview.mockResolvedValueOnce({ source: "consumed", html: "<p>retried consumed</p>" });
+
+    await clickButton(rendered, "Retry");
+    await vi.waitFor(() => expect(rendered.querySelector("[data-safe-markdown]")?.textContent).toContain("retried consumed"));
+    expect(rendered.querySelector('[data-derived-fallback="preview"]')).toBeNull();
+    expect(button(rendered, "Use remote")).toBeDefined();
+    await clickButton(rendered, "Source");
+    expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");
   });
 
   it("settles an invalidated consumed-response action as failed exactly once", async () => {

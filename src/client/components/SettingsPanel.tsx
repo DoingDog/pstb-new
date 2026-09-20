@@ -25,6 +25,7 @@ export interface SettingsPanelState {
   mutationOccupied?: boolean;
   reconciliationOwner?: "content" | SettingsField | "password" | null;
   reconciliationRequestPending?: boolean;
+  resultIdentity?: object;
   result: SettingsResult;
 }
 
@@ -121,7 +122,7 @@ function resultMessage(result: SettingsPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-function ResultActions({ result, versionUsable, mutationBlocked, recoveryBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; recoveryBlocked: boolean; locale: Locale }) {
+function ResultActions({ result, versionUsable, mutationBlocked, ownsReconciliation, recoveryBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; ownsReconciliation: boolean; recoveryBlocked: boolean; locale: Locale }) {
   const [credential, setCredential] = React.useState("");
   const copy = labels(locale);
   if (result.state === "idle") return !versionUsable ? <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button> : null;
@@ -135,7 +136,7 @@ function ResultActions({ result, versionUsable, mutationBlocked, recoveryBlocked
       {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label>}
       {recovery && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; retry(credential === "" ? null : credential); }}>{copy.retry}</Button>}
       {(!versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      {result.state === "reconciliation-required" && <Button type="button" disabled={recoveryBlocked} onClick={() => { if (recoveryBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
+      {result.state === "reconciliation-required" && ownsReconciliation && <Button type="button" disabled={recoveryBlocked} onClick={() => { if (!ownsReconciliation || recoveryBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
     </div>
   );
 }
@@ -146,30 +147,34 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
   const expiration = useDraft(inputExpiration(state.accepted.expiration));
   const viewOnce = useDraft(state.accepted.viewOnce);
   const discardedResult = React.useRef<SettingsPanelState["result"] | null>(null);
+  const settledResult = React.useRef<object | null>(null);
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
   const pending = state.result.state === "pending";
   const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
-  const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce"
-    || ((state.reconciliationOwner === null || state.reconciliationOwner === undefined) && state.result.state === "reconciliation-required");
+  const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce";
+  const foreignReconciliation = state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation;
+  const resultOwnsReconciliation = ownsReconciliation && (result.field === null || state.reconciliationOwner === result.field);
   const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
-  const discardBlocked = pending || (!ownsReconciliation && state.mutationOccupied === true) || (state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation) || recoveryBlocked;
+  const discardBlocked = pending || foreignReconciliation || (!ownsReconciliation && state.mutationOccupied === true) || recoveryBlocked;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
   const reportDraftState = (eventAt?: number) => onDraftState?.(title.dirty() || format.dirty() || expiration.dirty() || viewOnce.dirty(), eventAt);
+  const resultIdentity = state.resultIdentity ?? state.result;
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
 
   React.useEffect(() => {
-    if (result.state !== "succeeded" || result.field === null) return;
+    if (result.state !== "succeeded" || result.field === null || settledResult.current === resultIdentity) return;
+    settledResult.current = resultIdentity;
     if (result.field === "title") title.settle(state.accepted.title);
     if (result.field === "format") format.settle(state.accepted.format);
     if (result.field === "expiration") expiration.settle(inputExpiration(state.accepted.expiration));
     if (result.field === "viewOnce") viewOnce.settle(state.accepted.viewOnce);
     reportDraftState();
-  }, [result, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce, reportDraftState]);
+  }, [result, resultIdentity, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce, reportDraftState]);
 
   const reset = () => {
-    if (discardBlocked) return;
+    if (foreignReconciliation || discardBlocked) return;
     if (state.reconciliationOwner === "title") title.discard(state.accepted.title);
     else if (state.reconciliationOwner === "format") format.discard(state.accepted.format);
     else if (state.reconciliationOwner === "expiration") expiration.discard(inputExpiration(state.accepted.expiration));
@@ -208,8 +213,8 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
         <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} />{copy.viewOnce}</label>
         <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
       </div>
-      <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>
-      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} recoveryBlocked={recoveryBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
+      {!foreignReconciliation && <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>}
+      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} ownsReconciliation={resultOwnsReconciliation} recoveryBlocked={recoveryBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
 }

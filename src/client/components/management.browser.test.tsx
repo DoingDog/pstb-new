@@ -401,7 +401,7 @@ describe("settings result table", () => {
 
     await fixture.render(
       <SettingsPanel
-        state={settingsState({ accepted: { id: "demo", title: "Latest accepted", format: "text", expiration: 3_600, viewOnce: false }, result: { field: "expiration", state: "reconciliation-required", message: "Request outcome is uncertain.", reconciliationIntent: "relative" } })}
+        state={settingsState({ accepted: { id: "demo", title: "Latest accepted", format: "text", expiration: 3_600, viewOnce: false }, reconciliationOwner: "expiration", result: { field: "expiration", state: "reconciliation-required", message: "Request outcome is uncertain.", reconciliationIntent: "relative" } })}
         onActivity={vi.fn()}
         saveTitle={vi.fn()}
         saveFormat={vi.fn()}
@@ -419,7 +419,7 @@ describe("settings result table", () => {
     const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
     input(title, "Discard me");
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
-    expect(title.value).toBe("Latest accepted");
+    expect(title.value).toBe("Discard me");
   });
 });
 
@@ -432,6 +432,7 @@ describe("reconciliation ownership", () => {
         state={settingsState({
           mutationOccupied: true,
           mutationPending: false,
+          reconciliationOwner: "title",
           result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
         })}
         onActivity={vi.fn()}
@@ -555,6 +556,7 @@ describe("reconciliation ownership", () => {
         state={passwordState({
           mutationOccupied: true,
           mutationPending: false,
+          reconciliationOwner: "password",
           result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." },
         })}
         onActivity={vi.fn()}
@@ -572,6 +574,100 @@ describe("reconciliation ownership", () => {
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
     expect(reconcile).toHaveBeenCalledOnce();
     expect(discard).toHaveBeenCalledOnce();
+  });
+
+  it("does not render foreign reconciliation controls or invoke their handlers", async () => {
+    const settingsReconcile = vi.fn();
+    const settingsDiscard = vi.fn();
+    const settingsFixture = await mount(
+      <SettingsPanel
+        state={settingsState({
+          mutationOccupied: true,
+          reconciliationOwner: "password",
+          reconciliationRequestPending: false,
+          result: { field: "title", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        saveTitle={vi.fn()}
+        saveFormat={vi.fn()}
+        saveExpiration={vi.fn()}
+        saveViewOnce={vi.fn()}
+        retry={vi.fn()}
+        reconcile={settingsReconcile}
+        reload={vi.fn()}
+        discard={settingsDiscard}
+      />,
+    );
+    expect(Array.from(settingsFixture.element.querySelectorAll("button")).some((item) => item.textContent === "Reconcile" || item.textContent === "Discard")).toBe(false);
+    expect(settingsReconcile).not.toHaveBeenCalled();
+    expect(settingsDiscard).not.toHaveBeenCalled();
+
+    const passwordReconcile = vi.fn();
+    const passwordDiscard = vi.fn();
+    const passwordFixture = await mount(
+      <PasswordPanel
+        state={passwordState({
+          mutationOccupied: true,
+          reconciliationOwner: "title",
+          reconciliationRequestPending: false,
+          result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." },
+        })}
+        onActivity={vi.fn()}
+        setPassword={vi.fn()}
+        clearPassword={vi.fn()}
+        retry={vi.fn()}
+        reconcile={passwordReconcile}
+        reload={vi.fn()}
+        discard={passwordDiscard}
+      />,
+    );
+    expect(Array.from(passwordFixture.element.querySelectorAll("button")).some((item) => item.textContent === "Reconcile" || item.textContent === "Discard")).toBe(false);
+    expect(passwordReconcile).not.toHaveBeenCalled();
+    expect(passwordDiscard).not.toHaveBeenCalled();
+  });
+});
+
+describe("retained success settlement", () => {
+  it("reports Settings and Password success once per retained result", async () => {
+    const settingsDraftState = vi.fn();
+    const settingsResult = { field: "title" as const, state: "succeeded" as const, message: "Title saved." };
+    const settingsProps = {
+      onActivity: vi.fn(),
+      onDraftState: settingsDraftState,
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const settingsFixture = await mount(<SettingsPanel state={settingsState({ result: settingsResult })} {...settingsProps} />);
+    expect(settingsDraftState).toHaveBeenCalledTimes(1);
+    await settingsFixture.render(<SettingsPanel state={settingsState({ result: settingsResult })} {...settingsProps} />);
+    expect(settingsDraftState).toHaveBeenCalledTimes(1);
+    await settingsFixture.render(<SettingsPanel state={settingsState({ result: { field: "title", state: "succeeded", message: "Title saved again." } })} {...settingsProps} />);
+    expect(settingsDraftState).toHaveBeenCalledTimes(2);
+
+    const passwordDraftState = vi.fn();
+    const passwordResult = { action: "set" as const, state: "succeeded" as const, message: "Password saved." };
+    const passwordProps = {
+      onActivity: vi.fn(),
+      onDraftState: passwordDraftState,
+      setPassword: vi.fn(),
+      clearPassword: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const passwordFixture = await mount(<PasswordPanel state={passwordState({ result: passwordResult })} {...passwordProps} />);
+    expect(passwordDraftState).toHaveBeenCalledTimes(1);
+    await passwordFixture.render(<PasswordPanel state={passwordState({ result: passwordResult })} {...passwordProps} />);
+    expect(passwordDraftState).toHaveBeenCalledTimes(1);
+    await passwordFixture.render(<PasswordPanel state={passwordState({ result: { action: "set", state: "succeeded", message: "Password saved again." } })} {...passwordProps} />);
+    expect(passwordDraftState).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -682,7 +778,7 @@ describe("password result table", () => {
     const reconcile = vi.fn();
     const fixture = await mount(
       <PasswordPanel
-        state={passwordState({ protected: true, result: { action: "clear", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
+        state={passwordState({ protected: true, reconciliationOwner: "password", result: { action: "clear", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
         onActivity={vi.fn()}
         setPassword={vi.fn()}
         clearPassword={vi.fn()}
@@ -849,7 +945,7 @@ describe("management hardening regressions", () => {
           discard={settingsDiscard}
         />
         <PasswordPanel
-          state={passwordState({ result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
+          state={passwordState({ reconciliationOwner: "password", result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
           onActivity={vi.fn()}
           setPassword={vi.fn()}
           clearPassword={vi.fn()}
@@ -1033,7 +1129,7 @@ describe("management hardening regressions", () => {
 
     await fixture.render(
       <PasswordPanel
-        state={passwordState({ versionUsable: false, result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
+        state={passwordState({ versionUsable: false, reconciliationOwner: "password", result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
         onActivity={vi.fn()}
         setPassword={setPassword}
         clearPassword={clearPassword}
@@ -1291,7 +1387,7 @@ describe("management hardening regressions", () => {
   it("uses expiration intent to reserve rewrite copy for relative seconds", async () => {
     const fixture = await mount(
       <SettingsPanel
-        state={settingsState({ result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "relative" } })}
+        state={settingsState({ reconciliationOwner: "expiration", result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "relative" } })}
         onActivity={vi.fn()}
         saveTitle={vi.fn()}
         saveFormat={vi.fn()}
@@ -1310,7 +1406,7 @@ describe("management hardening regressions", () => {
 
     await fixture.render(
       <SettingsPanel
-        state={settingsState({ result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "permanent" } })}
+        state={settingsState({ reconciliationOwner: "expiration", result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "permanent" } })}
         onActivity={vi.fn()}
         saveTitle={vi.fn()}
         saveFormat={vi.fn()}
@@ -1328,7 +1424,7 @@ describe("management hardening regressions", () => {
 
     await fixture.render(
       <SettingsPanel
-        state={settingsState({ result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "absolute" } })}
+        state={settingsState({ reconciliationOwner: "expiration", result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "absolute" } })}
         onActivity={vi.fn()}
         saveTitle={vi.fn()}
         saveFormat={vi.fn()}
