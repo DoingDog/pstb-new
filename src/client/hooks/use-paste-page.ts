@@ -19,7 +19,7 @@ import { createHistoryController, createHistoryDiff, type HistoryController, typ
 import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, type PreparedMarkdownVisual } from "../markdown";
 import type { HistoryDiffState, HistoryPanelState } from "../components/HistoryPanel";
 import { createPasteController, type ContentReconcileDispatch, type MetadataReconcileDispatch, type MutationDispatch, type MutationIntent, type PasteController, type PasteControllerSnapshot, type ReconcileReadFailure } from "../paste-controller";
-import { PasteSync, classifyRemote, type PasteSyncCapture, type PasteSyncEvent, type PasteSyncReadResult } from "../paste-sync";
+import { PasteSync, classifyRemote, type PasteSyncCapture, type PasteSyncEvent, type PasteSyncReadResult, type RemoteApplyAttempt } from "../paste-sync";
 import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply, type SurfaceFallback } from "../surface-apply";
 import type { DeleteFlowState } from "../components/DeleteFlow";
 import type { PasswordPanelState } from "../components/PasswordPanel";
@@ -145,6 +145,14 @@ type Candidate = {
   terminalPreview?: MarkdownPreview | null;
   terminalFallback?: SurfaceFallbackState | null;
 };
+type PendingRemoteApply = {
+  mode: "autosync" | "candidate";
+  attempt: RemoteApplyAttempt;
+  capture: PasteSyncCapture;
+  candidate: Candidate | null;
+  action: { attempt: number; startedAt: string } | null;
+};
+
 type DerivedResources = {
   preview: unknown;
   visual: unknown;
@@ -167,6 +175,7 @@ type Runtime = {
   activeUntil: number;
   validator: `"sha256-${string}"` | null;
   candidate: Candidate | null;
+  pendingRemoteApply: PendingRemoteApply | null;
   useRemoteAction: { attempt: number; startedAt: string } | null;
   reloadAction: { attempt: number; startedAt: string } | null;
   composing: boolean;
@@ -685,6 +694,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
 
   function disposeRuntime(runtime: Runtime): void {
     if (runtime.disposed) return;
+    cancelPendingRemoteApply(runtime, "terminal");
     if (runtime.reloadAction !== null) {
       runtime.reloadToken += 1;
       runtime.reloadController?.abort();
@@ -719,11 +729,26 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     settleUseRemoteAction(runtime, "failed");
   }
 
-  function settleUseRemoteAction(runtime: Runtime, state: "succeeded" | "failed"): void {
+  function settleUseRemoteAction(runtime: Runtime, state: "succeeded" | "failed", expected?: { attempt: number }): void {
     const action = runtime.useRemoteAction;
-    if (action === null) return;
+    if (action === null || (expected !== undefined && action.attempt !== expected.attempt)) return;
     runtime.useRemoteAction = null;
     runtime.paste.recordLocalAction({ key: "use-remote", state, attempt: action.attempt, startedAt: action.startedAt, settledAt: displayTime() });
+  }
+
+  function cancelPendingRemoteApply(runtime: Runtime, reason: "local" | "offline" | "surface" | "deadline" | "terminal" | "authoritative"): boolean {
+    const pending = runtime.pendingRemoteApply;
+    if (pending === null) return false;
+
+    runtime.surface.invalidate();
+    const restored = reason === "surface" && runtime.sync.cancelRemoteApply(pending.attempt, now());
+    const retired = restored || runtime.sync.retireRemoteApply(pending.attempt, now());
+    if (pending.mode === "candidate") {
+      runtime.candidate = restored ? pending.candidate : null;
+      if (pending.action !== null) settleUseRemoteAction(runtime, "failed", pending.action);
+    }
+    runtime.pendingRemoteApply = null;
+    return retired;
   }
 
   function settleReloadAction(runtime: Runtime, state: "succeeded" | "failed"): void {
@@ -963,6 +988,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       for (const effect of effects) {
         if (runtime.disposed || runtimeRef.current !== runtime) return;
         if (effect.type === "invalidate-sync") {
+          cancelPendingRemoteApply(runtime, "authoritative");
           clearExpiringCandidate(runtime);
           const snapshot = runtime.paste.snapshot();
           const owner = mutationOwner(snapshot);
@@ -1020,6 +1046,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           continue;
         }
         if (effect.type === "dispose-server-capabilities") {
+          cancelPendingRemoteApply(runtime, "terminal");
           if (runtime.reloadAction !== null) {
             runtime.reloadToken += 1;
             runtime.reloadController?.abort();
@@ -1040,6 +1067,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           continue;
         }
         if (effect.type === "root-handoff") {
+          cancelPendingRemoteApply(runtime, "terminal");
           if (runtime.reloadAction !== null) {
             runtime.reloadToken += 1;
             runtime.reloadController?.abort();
@@ -1067,6 +1095,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     }
     runtime.lastIntent = intent;
     runtime.suppressedRecovery = null;
+    cancelPendingRemoteApply(runtime, "authoritative");
     clearExpiringCandidate(runtime);
     runtime.surface.invalidate();
     drainEffects(runtime);
@@ -1139,45 +1168,58 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (active(current)) runtime.history.retainAfterApply(previous, baseline(current));
   }
 
-  function applyRemoteSnapshot(runtime: Runtime, remote: RemoteSnapshot, attempt?: import("../paste-sync").RemoteApplyAttempt): boolean {
+  function applyRemoteSnapshot(runtime: Runtime, remote: RemoteSnapshot, attempt?: RemoteApplyAttempt): boolean {
     const previous = runtime.paste.snapshot();
     if (!active(previous) || runtime.disposed || runtimeRef.current !== runtime) return false;
+    if (attempt !== undefined && !runtime.sync.isRemoteApplyCurrent(attempt)) return false;
     if (!runtime.paste.applyRemoteSnapshot(remote)) return false;
-    if (attempt !== undefined && !runtime.sync.completeRemoteApply(attempt, now())) return false;
-    const current = runtime.paste.snapshot();
-    if (!active(current)) return false;
+
+    const current = runtime.paste.snapshot() as ActiveSnapshot;
     replaceHistoryCurrent(runtime, current.draft);
     runtime.history.retainAfterApply(baseline(previous), baseline(current));
     runtime.validator = remote.etag;
     settleUseRemoteAction(runtime, "succeeded");
     runtime.candidate = null;
     if (attempt !== undefined) {
+      drainEffects(runtime);
+      runtime.sync.completeRemoteApply(attempt, now());
       runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
     } else {
       settleLocalWork(runtime, "content");
+      drainEffects(runtime);
     }
-    drainEffects(runtime);
     publish(runtime);
     return true;
   }
 
-  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: import("../paste-sync").RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
+  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
     const candidate = mode === "candidate" ? candidateOverride ?? runtime.candidate : null;
     const capture = mode === "candidate" ? candidate?.capture : originCapture;
-    if (capture === undefined) return;
+    if (capture === undefined || attempt === undefined) return;
+    const pendingCurrent = (): boolean => {
+      const pending = runtime.pendingRemoteApply;
+      return pending !== null
+        && pending.attempt === attempt
+        && pending.mode === mode
+        && pending.capture === capture
+        && pending.candidate === candidate;
+    };
+    if (!pendingCurrent()) return;
     const current = (): ActiveSnapshot | null => {
       const snapshot = runtime.paste.snapshot();
       return active(snapshot) ? snapshot : null;
     };
     const commitCurrent = (): boolean => {
       const snapshot = current();
-      if (snapshot === null || runtime.disposed || runtimeRef.current !== runtime) return false;
+      if (snapshot === null || runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return false;
       const save = runtime.autosave.snapshot();
       const captureNow = captureForSync(runtime);
       const baselineCurrent = sameBaseline(capture.baseline, baseline(snapshot));
       const localGenerationCurrent = capture.localGeneration === snapshot.localGeneration;
       const activeCurrent = now() < capture.activeUntil && captureNow.activeUntil === capture.activeUntil;
-      const shared = baselineCurrent
+      const shared = runtime.sync.isRemoteApplyCurrent(attempt)
+        && captureNow.offline === false
+        && baselineCurrent
         && localGenerationCurrent
         && snapshot.phase === "ordinary"
         && activeCurrent
@@ -1198,9 +1240,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     const baselineCurrent = sameBaseline(capture.baseline, baseline(snapshot));
     const localGenerationCurrent = capture.localGeneration === snapshot.localGeneration;
     const activeCurrent = now() < capture.activeUntil && runtime.activeUntil === capture.activeUntil;
+    const schedulerCurrent = runtime.sync.isRemoteApplyCurrent(attempt);
     const applied = mode === "autosync"
       ? await runtime.surface.applyAutosync(remote.source, {
-        requestCurrent: attempt !== undefined,
+        requestCurrent: pendingCurrent() && schedulerCurrent,
         acceptedBaselineCurrent: baselineCurrent,
         localGenerationCurrent,
         active: activeCurrent,
@@ -1215,7 +1258,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         commitCurrent,
       })
       : await runtime.surface.applyUseRemote(remote.source, {
-        candidateCurrent: candidate?.snapshot === remote,
+        candidateCurrent: pendingCurrent() && schedulerCurrent && candidate?.snapshot === remote,
         acceptedBaselineCurrent: baselineCurrent,
         localGenerationCurrent,
         ordinary: snapshot.phase === "ordinary",
@@ -1232,15 +1275,27 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         conflictCausedByCandidate: candidate !== null,
         commitCurrent,
       });
-    if (runtime.disposed || runtimeRef.current !== runtime) return;
-    if (applied && commitCurrent() && applyRemoteSnapshot(runtime, remote, attempt)) return;
-    if (mode === "candidate") settleUseRemoteAction(runtime, "failed");
-    if (attempt !== undefined && runtime.sync.cancelRemoteApply(attempt, now()) && mode === "candidate") runtime.candidate = candidate;
+    if (runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return;
+    if (applied && commitCurrent() && applyRemoteSnapshot(runtime, remote, attempt)) {
+      runtime.pendingRemoteApply = null;
+      return;
+    }
+    const latest = runtime.paste.snapshot();
+    const invalidated = !active(latest)
+      || now() >= capture.activeUntil
+      || navigator.onLine === false
+      || latest.localGeneration !== capture.localGeneration
+      || !sameBaseline(capture.baseline, baseline(latest));
+    cancelPendingRemoteApply(runtime, invalidated ? now() >= capture.activeUntil ? "deadline" : navigator.onLine === false ? "offline" : "local" : "surface");
     publish(runtime);
   }
 
   function handleSyncEvent(runtime: Runtime, event: PasteSyncEvent): void {
     if (runtime.disposed || runtimeRef.current !== runtime) return;
+    if (event.type === "remote-apply-invalidated") {
+      cancelPendingRemoteApply(runtime, "deadline");
+      return;
+    }
     updateSyncRecord(runtime, event);
     if (event.type === "terminal-view-once" && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
     if (event.type === "state" && event.state === "inactive") {
@@ -1254,6 +1309,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     } else if (event.type === "candidate") {
       runtime.candidate = { kind: "remote", source: event.snapshot.source, snapshot: event.snapshot, capture: event.capture };
     } else if (event.type === "proven-newer") {
+      cancelPendingRemoteApply(runtime, "authoritative");
+      runtime.pendingRemoteApply = { mode: "autosync", attempt: event.attempt, capture: event.capture, candidate: null, action: null };
       void applyRemote(runtime, event.snapshot, "autosync", event.attempt, event.capture);
     } else if (event.type === "terminal-view-once") {
       const current = (): boolean => {
@@ -1271,6 +1328,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       };
       const enter = (ordinaryTokenCurrent: boolean, terminalDisplay?: Candidate["terminalDisplay"], terminalFallback: SurfaceFallbackState | null = null): void => {
         if (runtime.disposed || runtimeRef.current !== runtime) return;
+        cancelPendingRemoteApply(runtime, "terminal");
         runtime.candidate = {
           kind: "terminal",
           source: event.snapshot.source,
@@ -1309,6 +1367,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.activeUntil = loadAt + 300_000;
     runtime.validator = accepted.responseEtag;
     runtime.candidate = null;
+    runtime.pendingRemoteApply = null;
     runtime.useRemoteAction = null;
     runtime.reloadAction = null;
     runtime.composing = false;
@@ -1447,6 +1506,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     };
     const offline = () => {
       updateNetworkRecord(runtime, "offline");
+      cancelPendingRemoteApply(runtime, "offline");
       clearExpiringCandidate(runtime);
       runtime.sync.setOnline(false, now());
       publish(runtime);
@@ -1471,6 +1531,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.paste.sourceEvent(event);
       const snapshot = runtime.paste.snapshot();
       if (active(snapshot)) replaceHistoryCurrent(runtime, snapshot.draft);
+      cancelPendingRemoteApply(runtime, "local");
       clearExpiringCandidate(runtime);
       runtime.surface.invalidate();
       if (event.type !== "composition-start" && event.type !== "composition-input") {
@@ -1484,6 +1545,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
       runtime.paste.recordLocalActivity();
+      cancelPendingRemoteApply(runtime, "local");
       runtime.surface.invalidate();
       runtime.activeUntil = eventAt + 300_000;
       runtime.sync.recordUserActivity(eventAt);
@@ -1496,6 +1558,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     draftState(owner, dirty, eventAt) {
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
+      if (dirty) cancelPendingRemoteApply(runtime, "local");
       if (eventAt !== undefined) {
         runtime.paste.recordLocalActivity();
         runtime.surface.invalidate();
@@ -1566,6 +1629,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       if (runtime === null || runtime.disposed) return;
       const snapshot = runtime.paste.snapshot();
       if (!active(snapshot) || snapshot.mutation.state !== "idle") return;
+      cancelPendingRemoteApply(runtime, "authoritative");
       settleReloadAction(runtime, "failed");
       const token = ++runtime.reloadToken;
       const capture = baseline(snapshot);
@@ -1763,18 +1827,20 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const startedAt = displayTime();
       runtime.useRemoteAction = { attempt, startedAt };
       runtime.paste.recordLocalAction({ key: "use-remote", state: "pending", attempt, startedAt });
-      if (remoteAttempt === null) {
+      if (remoteAttempt === null || candidate.capture === undefined) {
         settleUseRemoteAction(runtime, "failed");
         publish(runtime);
         return;
       }
+      runtime.pendingRemoteApply = { mode: "candidate", attempt: remoteAttempt, capture: candidate.capture, candidate, action: runtime.useRemoteAction };
       runtime.candidate = null;
       void applyRemote(runtime, candidate.snapshot, "candidate", remoteAttempt, candidate.capture, candidate);
       publish(runtime);
     },
     keepCurrent() {
       const runtime = runtimeRef.current;
-      if (runtime === null || runtime.disposed || runtime.candidate?.kind === "terminal") return;
+      const candidate = runtime?.candidate ?? null;
+      if (runtime === null || runtime.disposed || candidate === null || candidate.kind === "terminal") return;
       runtime.candidate = null;
       settleUseRemoteAction(runtime, "failed");
       runtime.sync.keepCurrent(now());
@@ -1782,9 +1848,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     },
     retrySync(credential) {
       const runtime = runtimeRef.current;
+      const candidate = runtime?.candidate ?? null;
       if (runtime === null || runtime.disposed) return;
       const snapshot = runtime.paste.snapshot();
-      if (!active(snapshot)) return;
+      if (!active(snapshot) || candidate === null || candidate.kind === "terminal") return;
       runtime.paste.setPendingCredential(credential);
       runtime.candidate = null;
       settleUseRemoteAction(runtime, "failed");
@@ -1818,6 +1885,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         const state = runtime.historyDiff.setMounted(mounted);
         if (state !== "unchanged" && state !== "failed") runtime.diff = { state, lines: [] };
       }
+      cancelPendingRemoteApply(runtime, "surface");
       runtime.surface.remount();
       publish(runtime);
     },

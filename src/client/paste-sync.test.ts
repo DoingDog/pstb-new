@@ -532,6 +532,26 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(2);
   });
 
+  it("keeps exact remote apply ownership only while the captured ordinary scheduler state is current", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({ source: "remote" });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const candidate = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "candidate" }> => event.type === "candidate",
+    );
+    if (!candidate) throw new Error("missing candidate");
+
+    const attempt = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    expect(attempt).not.toBeNull();
+    expect(fixture.controller.isRemoteApplyCurrent(attempt!)).toBe(true);
+
+    fixture.setCapture(capture({ offline: true }));
+    expect(fixture.controller.isRemoteApplyCurrent(attempt!)).toBe(false);
+  });
+
   it("rejects invalidated retained candidates and restores a cancelled candidate apply", async () => {
     const fixture = syncFixture({ loadAt: 0 });
     const remote = snapshot({ source: "remote" });

@@ -706,7 +706,7 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "retry-sync" });
   });
 
-  it("fails Retry sync immediately when no legal due can be armed", async () => {
+  it("does not let stale Retry sync create an action without a current candidate", async () => {
     let page: UsePastePageResult | null = null;
 
     function Probe() {
@@ -721,7 +721,7 @@ describe("Task 15 async lifecycle behavior", () => {
       await Promise.resolve();
     });
 
-    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "retry-sync" });
+    expect(page!.snapshot.records.lastAction).toEqual({ state: "idle" });
   });
 
   it("hands a settled Reload record to the terminal handoff", async () => {
@@ -1033,6 +1033,217 @@ describe("Task 15 async lifecycle behavior", () => {
     });
 
     expect(rendered.querySelector("[data-plain-view]")?.textContent).toBe("remote");
+  });
+
+  it("does not partially apply an autosync stage invalidated by offline", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("remote"));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      resolvePreview!({ source: "remote", html: "<p>remote</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.paste).toMatchObject({ acceptedSource: "initial", summary: { version: "generation.1" } });
+    expect(page!.snapshot.autosaveAcceptedSource).toBe("initial");
+    expect(page!.snapshot.records.autosync.state).toBe("paused-offline");
+    expect(page!.snapshot.candidate).toBeNull();
+  });
+
+  it("does not partially apply a candidate stage invalidated by offline", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "other-generation.1",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "remote" });
+
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledWith("remote"));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      resolvePreview!({ source: "remote", html: "<p>remote</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.paste).toMatchObject({ acceptedSource: "initial" });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "use-remote" });
+    expect(page!.snapshot.records.autosync.state).toBe("paused-offline");
+    expect(page!.snapshot.candidate).toBeNull();
+  });
+
+  it("settles a never-settling candidate apply on edit without accepting stale candidate actions", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const preview = new Promise<unknown>(() => undefined);
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "other-generation.1",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "remote" }));
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "pending", key: "use-remote" });
+
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "local draft", eventAt: 1 });
+      await Promise.resolve();
+    });
+    expect(page!.snapshot.paste).toMatchObject({ acceptedSource: "initial", draft: "local draft" });
+    expect(page!.snapshot.candidate).toBeNull();
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "use-remote" });
+    const action = page!.snapshot.records.lastAction;
+
+    await act(async () => {
+      page!.actions.keepCurrent();
+      page!.actions.retrySync("stale");
+      await Promise.resolve();
+    });
+    expect(page!.snapshot.records.lastAction).toEqual(action);
+  });
+
+  it("recovers a candidate after a never-settling Preview host remount and ignores its stale settlement", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "other-generation.1",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "remote" }));
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.setSurfaceMounted("preview", false);
+      page!.actions.setSurfaceMounted("preview", true);
+      await Promise.resolve();
+    });
+    expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "remote" });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "use-remote" });
+
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.paste.acceptedSource).toBe("remote");
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "use-remote" });
+
+    await act(async () => {
+      resolvePreview!({ source: "remote", html: "<p>stale remote</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.paste.acceptedSource).toBe("remote");
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "use-remote" });
+  });
+
+  it("settles a never-settling candidate apply at the active deadline", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "other-generation.1",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "remote" }));
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(297_000);
+    });
+    expect(page!.snapshot.candidate).toBeNull();
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "use-remote" });
+    expect(page!.snapshot.records.autosync.state).toBe("inactive");
+
+    await act(async () => {
+      resolvePreview!({ source: "remote", html: "<p>late remote</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.paste.acceptedSource).toBe("initial");
   });
 
   it("renders an autosync candidate with remote, current, and retry ownership", async () => {

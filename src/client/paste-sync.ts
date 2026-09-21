@@ -72,6 +72,7 @@ export type PasteSyncEvent =
   | { type: "unchanged"; etag: Etag; checkedAt: number }
   | { type: "proven-newer"; snapshot: RemoteSnapshot; capture: PasteSyncCapture; attempt: RemoteApplyAttempt; checkedAt: number }
   | { type: "candidate"; snapshot: RemoteSnapshot; capture: PasteSyncCapture; checkedAt: number }
+  | { type: "remote-apply-invalidated"; attempt: RemoteApplyAttempt; at: number }
   | { type: "terminal-view-once"; snapshot: RemoteSnapshot; capture: PasteSyncCapture; ordinaryTokenCurrent: boolean; receivedAt: number }
   | { type: "credential-proved"; password: string; at: number }
   | { type: "not-found" | "forbidden" | "conflict"; at: number }
@@ -86,8 +87,10 @@ export interface PasteSyncController {
   keepCurrent(actionAt: number): void;
   retrySync(actionAt: number, pendingCredential: string | null): boolean;
   startCandidateApply(snapshot: RemoteSnapshot, capture: PasteSyncCapture): RemoteApplyAttempt | null;
+  isRemoteApplyCurrent(attempt: RemoteApplyAttempt): boolean;
   completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean;
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean;
+  retireRemoteApply(attempt: RemoteApplyAttempt, retiredAt: number): boolean;
   dispose(): void;
 }
 
@@ -178,6 +181,7 @@ export class PasteSync implements PasteSyncController {
   private stagedCandidate: Candidate | null = null;
   private locallyCleanOverride = false;
   private remoteApplyAttempt: RemoteApplyAttempt | null = null;
+  private remoteApplyCapture: PasteSyncCapture | null = null;
   private permanentlyStopped = false;
   private terminal = false;
   private state: AutosyncStatus = "inactive";
@@ -222,12 +226,11 @@ export class PasteSync implements PasteSyncController {
   localWorkChanged(): void {
     if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
+    this.invalidateRemoteApply(this.options.now());
     this.localDirty = true;
     this.syncDueAt = null;
     this.candidate = null;
-    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
-    this.remoteApplyAttempt = null;
     this.clearRetryIntent();
     this.invalidateRead();
     if (this.isActive() && !this.retryRequired) this.setState("paused-local", this.options.now());
@@ -255,13 +258,12 @@ export class PasteSync implements PasteSyncController {
   setOnline(online: boolean, eventAt: number): void {
     if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
+    if (!online) this.invalidateRemoteApply(eventAt);
     this.online = online;
     if (!online) {
       this.syncDueAt = null;
       this.candidate = null;
-      this.stagedCandidate = null;
       this.locallyCleanOverride = false;
-      this.remoteApplyAttempt = null;
       this.clearRetryIntent();
       this.invalidateRead();
       if (this.isActive() && !this.retryRequired) this.setState("paused-offline", eventAt);
@@ -324,15 +326,21 @@ export class PasteSync implements PasteSyncController {
     this.candidate = null;
     this.stagedCandidate = candidate;
     this.remoteApplyAttempt = attempt;
+    this.remoteApplyCapture = candidate.capture;
     this.locallyCleanOverride = false;
     this.armTimer();
     return attempt;
   }
 
+  isRemoteApplyCurrent(attempt: RemoteApplyAttempt): boolean {
+    return this.canSettleRemoteApply(attempt);
+  }
+
   completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean {
-    if (!this.canSettleRemoteApply(attempt)) return false;
+    if (this.remoteApplyAttempt !== attempt) return false;
 
     this.remoteApplyAttempt = null;
+    this.remoteApplyCapture = null;
     this.stagedCandidate = null;
     this.candidate = null;
     this.locallyCleanOverride = true;
@@ -346,6 +354,7 @@ export class PasteSync implements PasteSyncController {
 
     const candidate = this.stagedCandidate;
     this.remoteApplyAttempt = null;
+    this.remoteApplyCapture = null;
     this.stagedCandidate = null;
     this.candidate = candidate;
     this.options.emit({ type: "error", at: cancelledAt });
@@ -361,14 +370,27 @@ export class PasteSync implements PasteSyncController {
     return true;
   }
 
+  retireRemoteApply(attempt: RemoteApplyAttempt, retiredAt: number): boolean {
+    if (this.remoteApplyAttempt !== attempt) return false;
+
+    this.remoteApplyAttempt = null;
+    this.remoteApplyCapture = null;
+    this.stagedCandidate = null;
+    this.candidate = null;
+    this.locallyCleanOverride = true;
+    this.options.emit({ type: "error", at: retiredAt });
+    this.setState("error", retiredAt);
+    this.scheduleAfterSettle(retiredAt);
+    return true;
+  }
+
   dispose(): void {
     if (this.disposed) return;
 
+    this.invalidateRemoteApply(this.options.now());
     this.disposed = true;
     this.syncDueAt = null;
     this.candidate = null;
-    this.stagedCandidate = null;
-    this.remoteApplyAttempt = null;
     this.clearRetryIntent();
     this.clearTimer();
     this.invalidateRead();
@@ -437,13 +459,27 @@ export class PasteSync implements PasteSyncController {
   }
 
   private canSettleRemoteApply(attempt: RemoteApplyAttempt): boolean {
+    const capture = this.remoteApplyCapture;
     const current = this.options.capture();
     return this.remoteApplyAttempt === attempt
+      && capture !== null
       && !this.disposed
       && !this.terminal
       && !this.permanentlyStopped
       && this.isActive()
+      && this.activeUntil === capture.activeUntil
       && current.phase === "ordinary"
+      && current.activeUntil === capture.activeUntil
+      && current.locallyClean
+      && current.localGeneration === capture.localGeneration
+      && current.acceptedApplyGeneration === capture.acceptedApplyGeneration
+      && current.baseline.acceptedApplyGeneration === capture.baseline.acceptedApplyGeneration
+      && current.baseline.localGeneration === capture.baseline.localGeneration
+      && current.baseline.generation === capture.baseline.generation
+      && current.baseline.version === capture.baseline.version
+      && current.baseline.contentRevision === capture.baseline.contentRevision
+      && current.baseline.updatedAt === capture.baseline.updatedAt
+      && current.baseline.acceptedSource === capture.baseline.acceptedSource
       && !current.offline
       && this.online
       && !this.localDirty;
@@ -457,6 +493,13 @@ export class PasteSync implements PasteSyncController {
       && !current.offline
       && this.online
       && !this.localDirty;
+  }
+
+  private invalidateRemoteApply(at: number): void {
+    const attempt = this.remoteApplyAttempt;
+    if (attempt === null) return;
+    this.options.emit({ type: "remote-apply-invalidated", attempt, at });
+    this.retireRemoteApply(attempt, at);
   }
 
   private clearRetryIntent(): void {
@@ -582,6 +625,7 @@ export class PasteSync implements PasteSyncController {
         this.locallyCleanOverride = false;
         const attempt = {} as RemoteApplyAttempt;
         this.remoteApplyAttempt = attempt;
+        this.remoteApplyCapture = read.capture;
         this.options.emit({ type: "proven-newer", snapshot: result.snapshot, capture: read.capture, attempt, checkedAt: receivedAt });
         this.armTimer();
         return;
@@ -666,11 +710,10 @@ export class PasteSync implements PasteSyncController {
     if (this.disposed || this.terminal) return;
 
     const ordinaryTokenCurrent = this.canOrder(read);
+    this.invalidateRemoteApply(receivedAt);
     this.terminal = true;
     this.candidate = null;
-    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
-    this.remoteApplyAttempt = null;
     this.clearRetryIntent();
     this.syncDueAt = null;
     this.inFlight?.controller.abort();
@@ -714,11 +757,10 @@ export class PasteSync implements PasteSyncController {
   }
 
   private expire(): void {
+    this.invalidateRemoteApply(this.options.now());
     this.syncDueAt = null;
     this.candidate = null;
-    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
-    this.remoteApplyAttempt = null;
     this.clearRetryIntent();
     this.invalidateRead();
     this.clearTimer();
