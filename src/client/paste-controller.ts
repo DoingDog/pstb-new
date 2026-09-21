@@ -176,7 +176,6 @@ export interface PasteController {
   setPendingCredential(value: string | null): void;
   commitProvenCredential(value: string): boolean;
   prepareRemoteSnapshot(remote: RemoteSnapshot, options: PrepareRemoteSnapshotOptions): PreparedPasteRemoteCommit | null;
-  applyRemoteSnapshot(remote: RemoteSnapshot): boolean;
   retireForRemoteApply(): void;
   enterTerminal(phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void;
   settleTerminal(outcome: TerminalOutcomeKey, at?: number): boolean;
@@ -968,7 +967,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
         slot = committedSlot;
         clearRequestOwnership();
         state = settle(committedState, "succeeded", settledAt);
-        effects.push({ type: "apply-authoritative", kind: "remote", acceptedSource: remote.source, version: remote.summary.version });
       },
       fail(settledAt: string): void {
         if (settled) return;
@@ -976,34 +974,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
         state = settle(state, "failed", settledAt);
       },
     };
-  };
-
-  const applyRemoteSnapshot = (remote: RemoteSnapshot): boolean => {
-    if (state.phase !== "ordinary" || !state.serverCapabilities) return false;
-    nextToken += 1;
-    slot = { state: "idle", nextToken };
-    clearRequestOwnership();
-    state = {
-      ...state,
-      acceptedSource: remote.source,
-      draft: remote.source,
-      summary: remote.summary,
-      version: remote.summary.version,
-      versionUsable: true,
-      contentRevision: remote.contentRevision,
-      updatedAt: remote.summary.updatedAt,
-      responseEtag: remote.etag,
-      acceptedApplyGeneration: state.acceptedApplyGeneration + 1,
-      displayGeneration: state.displayGeneration + 1,
-      lastSavedContent: remote.source,
-      coalescedSource: null,
-      conflictCandidate: null,
-      originalMutationFailure: null,
-      reconciliationRequired: false,
-      autosave: { state: "clean", confirmedAt: state.autosave.confirmedAt, failedAt: null },
-    };
-    effects.push({ type: "apply-authoritative", kind: "remote", acceptedSource: remote.source, version: remote.summary.version });
-    return true;
   };
 
   const retireForRemoteApply = (): void => {
@@ -1090,7 +1060,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     setPendingCredential,
     commitProvenCredential,
     prepareRemoteSnapshot,
-    applyRemoteSnapshot,
     retireForRemoteApply,
     enterTerminal,
     settleTerminal,

@@ -20,7 +20,7 @@ import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, ty
 import type { HistoryDiffState, HistoryPanelState } from "../components/HistoryPanel";
 import { createPasteController, type ContentReconcileDispatch, type MetadataReconcileDispatch, type MutationDispatch, type MutationIntent, type PasteController, type PasteControllerSnapshot, type ReconcileReadFailure } from "../paste-controller";
 import { PasteSync, classifyRemote, type PasteSyncCapture, type PasteSyncEvent, type PasteSyncReadResult, type RemoteApplyAttempt } from "../paste-sync";
-import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply, type SurfaceFallback } from "../surface-apply";
+import { createStagedSurfaceApply, type DerivedSurface, type GuardedSurfaceOperation, type StagedSurfaceApply, type SurfaceFallback } from "../surface-apply";
 import type { DeleteFlowState } from "../components/DeleteFlow";
 import type { PasswordPanelState } from "../components/PasswordPanel";
 import type { SettingsPanelState } from "../components/SettingsPanel";
@@ -188,7 +188,6 @@ type Runtime = {
   reloadController: AbortController | null;
   diff: HistoryDiffState;
   dirtyDraftOwners: Set<LocalWorkOwner>;
-  finalizingRemoteApply: boolean;
 };
 
 function now(): number {
@@ -741,11 +740,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.paste.recordLocalAction({ key: "use-remote", state, attempt: action.attempt, startedAt: action.startedAt, settledAt: displayTime() });
   }
 
-  function cancelPendingRemoteApply(runtime: Runtime, reason: "local" | "offline" | "surface" | "deadline" | "terminal" | "authoritative"): boolean {
+  function cancelPendingRemoteApply(runtime: Runtime, reason: "local" | "offline" | "surface" | "deadline" | "terminal" | "authoritative", cancelSurface = true): boolean {
     const pending = runtime.pendingRemoteApply;
     if (pending === null) return false;
 
-    runtime.surface.invalidate();
+    if (cancelSurface) runtime.surface.invalidate();
     const restored = reason === "surface" && runtime.sync.cancelRemoteApply(pending.attempt, now());
     const retired = restored || runtime.sync.retireRemoteApply(pending.attempt, now());
     if (pending.mode === "candidate") {
@@ -1186,151 +1185,124 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (active(current)) runtime.history.retainAfterApply(previous, baseline(current));
   }
 
-  function applyRemoteSnapshot(runtime: Runtime, remote: RemoteSnapshot, attempt?: RemoteApplyAttempt): boolean {
-    const previous = runtime.paste.snapshot();
-    if (!active(previous) || runtime.disposed || runtimeRef.current !== runtime) return false;
-    if (attempt !== undefined && !runtime.sync.isRemoteApplyCurrent(attempt)) return false;
-    if (!runtime.paste.applyRemoteSnapshot(remote)) return false;
-
-    const current = runtime.paste.snapshot() as ActiveSnapshot;
-    replaceHistoryCurrent(runtime, current.draft);
-    runtime.history.retainAfterApply(baseline(previous), baseline(current));
-    runtime.validator = remote.etag;
-    settleUseRemoteAction(runtime, "succeeded");
-    runtime.candidate = null;
-    if (attempt !== undefined) {
-      drainEffects(runtime);
-      runtime.sync.completeRemoteApply(attempt, now());
-      runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
-    } else {
-      settleLocalWork(runtime, "content");
-      drainEffects(runtime);
-    }
-    publish(runtime);
-    return true;
-  }
-
-  function finalizeRemoteApply(runtime: Runtime, remote: RemoteSnapshot, attempt: RemoteApplyAttempt): void {
-    runtime.finalizingRemoteApply = true;
-    try {
-      const previous = runtime.paste.snapshot() as ActiveSnapshot;
-      if (!runtime.paste.applyRemoteSnapshot(remote)) throw new Error("remote apply preflight violated");
-      const current = runtime.paste.snapshot() as ActiveSnapshot;
-      replaceHistoryCurrent(runtime, current.draft);
-      runtime.history.retainAfterApply(baseline(previous), baseline(current));
-      runtime.validator = remote.etag;
-      drainEffects(runtime);
-      runtime.pendingRemoteApply = null;
-      if (!runtime.sync.completeRemoteApply(attempt, now())) throw new Error("remote apply ownership lost");
-      runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
-      runtime.candidate = null;
-      settleUseRemoteAction(runtime, "succeeded");
-    } catch {
-      runtime.pendingRemoteApply = null;
-      runtime.sync.retireRemoteApply(attempt, now());
-      settleUseRemoteAction(runtime, "failed");
-    } finally {
-      runtime.finalizingRemoteApply = false;
-      queuePublish();
-    }
-  }
-
-  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
+  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", initialAttempt?: RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
     const candidate = mode === "candidate" ? candidateOverride ?? runtime.candidate : null;
     const capture = mode === "candidate" ? candidate?.capture : originCapture;
-    if (capture === undefined || attempt === undefined) return;
+    if (capture === undefined) return;
+    let attempt = initialAttempt;
+    const current = (): ActiveSnapshot | null => {
+      const snapshot = runtime.paste.snapshot();
+      return active(snapshot) ? snapshot : null;
+    };
     const pendingCurrent = (): boolean => {
       const pending = runtime.pendingRemoteApply;
-      return pending !== null
+      return attempt !== undefined
+        && pending !== null
         && pending.attempt === attempt
         && pending.mode === mode
         && pending.capture === capture
         && pending.candidate === candidate;
     };
-    if (!pendingCurrent()) return;
-    const current = (): ActiveSnapshot | null => {
-      const snapshot = runtime.paste.snapshot();
-      return active(snapshot) ? snapshot : null;
-    };
-    const commitCurrent = (): boolean => {
+    const canCommit = (): boolean => {
       const snapshot = current();
-      if (snapshot === null || runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return false;
+      if (snapshot === null || attempt === undefined || runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return false;
       const save = runtime.autosave.snapshot();
-      const captureNow = captureForSync(runtime);
-      const baselineCurrent = sameBaseline(capture.baseline, baseline(snapshot));
-      const localGenerationCurrent = capture.localGeneration === snapshot.localGeneration;
-      const activeCurrent = now() < capture.activeUntil && captureNow.activeUntil === capture.activeUntil;
-      const shared = runtime.sync.isRemoteApplyCurrent(attempt)
-        && captureNow.offline === false
-        && baselineCurrent
-        && localGenerationCurrent
+      const currentCapture = captureForSync(runtime);
+      return runtime.sync.isRemoteApplyCurrent(attempt)
+        && !currentCapture.offline
+        && sameBaseline(capture.baseline, baseline(snapshot))
+        && capture.localGeneration === snapshot.localGeneration
         && snapshot.phase === "ordinary"
         && snapshot.serverCapabilities
-        && activeCurrent
+        && now() < capture.activeUntil
+        && currentCapture.activeUntil === capture.activeUntil
         && !runtime.composing
         && save.dueAt === null
         && save.inFlightContent === null
         && !save.coalescedIntent
         && snapshot.mutation.state === "idle"
-        && !snapshot.reconciliationRequired;
-      if (mode === "autosync") return shared && save.draft === save.acceptedSource;
-      return shared
-        && candidate?.snapshot === remote
+        && !snapshot.reconciliationRequired
         && save.draft === save.acceptedSource;
     };
-    const snapshot = current();
-    if (snapshot === null) return;
-    const save = runtime.autosave.snapshot();
-    const baselineCurrent = sameBaseline(capture.baseline, baseline(snapshot));
-    const localGenerationCurrent = capture.localGeneration === snapshot.localGeneration;
-    const activeCurrent = now() < capture.activeUntil && runtime.activeUntil === capture.activeUntil;
-    const schedulerCurrent = runtime.sync.isRemoteApplyCurrent(attempt);
-    const applied = mode === "autosync"
-      ? await runtime.surface.applyAutosync(remote.source, {
-        requestCurrent: pendingCurrent() && schedulerCurrent,
-        acceptedBaselineCurrent: baselineCurrent,
-        localGenerationCurrent,
-        active: activeCurrent,
-        activeUntil: capture.activeUntil,
-        composing: runtime.composing,
-        autosaveTimer: save.dueAt !== null,
-        autosaveInFlight: save.inFlightContent !== null,
-        coalescedIntent: save.coalescedIntent,
-        mutationOccupied: snapshot.mutation.state !== "idle",
-        unresolvedMutation: snapshot.reconciliationRequired,
-        localSourceWork: save.draft !== save.acceptedSource,
-        commitCurrent,
-        finalizeCurrent: () => finalizeRemoteApply(runtime, remote, attempt),
-      })
-      : await runtime.surface.applyUseRemote(remote.source, {
-        candidateCurrent: pendingCurrent() && schedulerCurrent && candidate?.snapshot === remote,
-        acceptedBaselineCurrent: baselineCurrent,
-        localGenerationCurrent,
-        ordinary: snapshot.phase === "ordinary",
-        active: activeCurrent,
-        activeDeadlineCurrent: runtime.activeUntil === capture.activeUntil,
-        activeUntil: capture.activeUntil,
-        draftMatchesAccepted: save.draft === save.acceptedSource,
-        composing: runtime.composing,
-        autosaveTimer: save.dueAt !== null,
-        autosaveInFlight: save.inFlightContent !== null,
-        coalescedIntent: save.coalescedIntent,
-        mutationOccupied: snapshot.mutation.state !== "idle",
-        unresolvedMutation: snapshot.reconciliationRequired,
-        conflictCausedByCandidate: candidate !== null,
-        commitCurrent,
-        finalizeCurrent: () => finalizeRemoteApply(runtime, remote, attempt),
-      });
-    if (applied) return;
-    if (runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return;
-    const latest = runtime.paste.snapshot();
-    const invalidated = !active(latest)
-      || now() >= capture.activeUntil
-      || navigator.onLine === false
-      || latest.localGeneration !== capture.localGeneration
-      || !sameBaseline(capture.baseline, baseline(latest));
-    cancelPendingRemoteApply(runtime, invalidated ? now() >= capture.activeUntil ? "deadline" : navigator.onLine === false ? "offline" : "local" : "surface");
-    publish(runtime);
+    const operation: GuardedSurfaceOperation = {
+      enter: () => {
+        if (mode === "autosync") return canCommit();
+        const snapshot = current();
+        if (snapshot === null || runtime.disposed || runtimeRef.current !== runtime || candidate?.snapshot !== remote || runtime.candidate !== candidate) return false;
+        const claimed = runtime.sync.startCandidateApply(remote, capture);
+        if (claimed === null) return false;
+        attempt = claimed;
+        const actionAttempt = snapshot.lastAction.state === "idle" ? 1 : snapshot.lastAction.attempt + 1;
+        const action = { attempt: actionAttempt, startedAt: displayTime() };
+        runtime.useRemoteAction = action;
+        runtime.paste.recordLocalAction({ key: "use-remote", state: "pending", attempt: action.attempt, startedAt: action.startedAt });
+        runtime.pendingRemoteApply = { mode, attempt, capture, candidate, action };
+        runtime.candidate = null;
+        queuePublish();
+        return canCommit();
+      },
+      prepare: (context) => {
+        if (!canCommit() || attempt === undefined) return null;
+        const pending = runtime.pendingRemoteApply;
+        const action = mode === "candidate" && pending !== null && pending.action !== null
+          ? { key: "use-remote" as const, ...pending.action }
+          : null;
+        const paste = runtime.paste.prepareRemoteSnapshot(remote, {
+          expectedBaseline: capture.baseline,
+          expectedDraft: capture.baseline.acceptedSource,
+          targetDisplayGeneration: context.target.currentDisplayGeneration,
+          action,
+        });
+        if (paste === null) return null;
+        const sync = runtime.sync.prepareRemoteApplyCommit(attempt, now());
+        if (sync === null) return null;
+        return {
+          commit: () => {
+            const settledAt = displayTime();
+            paste.commit(settledAt);
+            const autosaveRelease = runtime.autosave.commitRemoteReplace(remote.source, remote.summary.version);
+            const retention = runtime.history.commitRetention(paste.previousBaseline, paste.nextBaseline);
+            const syncRelease = sync.commit();
+            runtime.validator = remote.etag;
+            runtime.pendingRemoteApply = null;
+            runtime.candidate = null;
+            runtime.useRemoteAction = null;
+            runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: settledAt } };
+            return () => {
+              autosaveRelease();
+              retention.release();
+              syncRelease();
+              queuePublish();
+            };
+          },
+          fail: () => {
+            const settledAt = displayTime();
+            paste.fail(settledAt);
+            const syncRelease = sync.fail();
+            runtime.pendingRemoteApply = null;
+            runtime.candidate = mode === "candidate" ? candidate : null;
+            runtime.useRemoteAction = null;
+            return () => {
+              syncRelease();
+              queuePublish();
+            };
+          },
+        };
+      },
+      reject: () => {
+        if (!pendingCurrent()) return;
+        const latest = current();
+        const reason = latest === null || now() >= capture.activeUntil
+          ? "deadline"
+          : navigator.onLine === false ? "offline" : "surface";
+        cancelPendingRemoteApply(runtime, reason, false);
+      },
+    };
+    try {
+      await runtime.surface.apply(remote.source, operation);
+    } catch {
+      queuePublish();
+    }
   }
 
   function handleSyncEvent(runtime: Runtime, event: PasteSyncEvent): void {
@@ -1343,7 +1315,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (event.type === "terminal-view-once" && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
     if (event.type === "state" && event.state === "inactive") {
       runtime.candidate = null;
-      if (!runtime.finalizingRemoteApply) settleUseRemoteAction(runtime, "failed");
+      settleUseRemoteAction(runtime, "failed");
     }
     if (event.type === "credential-proved") {
       runtime.paste.setPendingCredential(event.password);
@@ -1400,7 +1372,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.paste.enterTerminal("not-found", now());
       drainEffects(runtime);
     }
-    if (!runtime.finalizingRemoteApply) publish(runtime);
+    publish(runtime);
   }
 
   function createRuntime(accepted: AcceptedPasteState, credential: { committed: string | null; pending: string | null }, loadAt: number, api: PasteApi | null = null, carriedRecords: OperationRecords | null = null): Runtime {
@@ -1426,7 +1398,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.previousDerivedResources = null;
     runtime.diff = { state: "idle", lines: [] };
     runtime.dirtyDraftOwners = new Set();
-    runtime.finalizingRemoteApply = false;
     runtime.paste = createPasteController({ accepted, credential });
     runtime.history = createHistoryController();
     runtime.historyDiff = createHistoryDiff({
@@ -1443,7 +1414,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     });
     runtime.surface = createStagedSurfaceApply({
       capture: surfaceCapture(runtime.paste.snapshot() as ActiveSnapshot),
-      now,
       ports: {
         stagePreview: (source) => prepareMarkdownPreview(source),
         stageVisual: async (source, generation) => {
@@ -1453,48 +1423,54 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         },
         stageDiff: (source) => runtime.historyDiff.stageCurrent(source),
         mounted: () => Array.from(runtime.mountedSurfaces),
+        prepareCommit: ({ staged }) => {
+          const stagedDiff = isStagedHistoryDiff(staged.diff) ? staged.diff : null;
+          const adopt = stagedDiff === null ? null : runtime.historyDiff.prepareAdoptStaged(stagedDiff);
+          return () => {
+            if (stagedDiff !== null && adopt !== null) {
+              adopt();
+              runtime.diff = { state: "ready", lines: stagedDiff.lines };
+            } else if (staged.diff === null) {
+              runtime.diff = { state: "manual", lines: [] };
+            } else if (staged.diff !== undefined) {
+              runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
+            }
+          };
+        },
         commit: (staged, generation) => {
           const previous = runtime.derivedResources;
           runtime.previousDerivedResources = previous;
-          runtime.derivedResources = { ...staged, generation };
-          if (isStagedHistoryDiff(staged.diff) && runtime.historyDiff.adoptStaged(staged.diff)) {
-            runtime.diff = { state: "ready", lines: staged.diff.lines };
-          } else if (staged.diff === null) {
-            runtime.diff = { state: "manual", lines: [] };
-          } else if (staged.diff !== undefined) {
-            runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
-          }
-          if (
-            isPreparedMarkdownVisual(previous?.visual)
-            && previous.visual !== staged.visual
-            && !previous.visual.root.isConnected
-          ) {
-            void previous.visual.dispose();
-          }
+          runtime.derivedResources = { preview: staged.preview, visual: staged.visual, diff: staged.diff, generation };
+          return () => {
+            if (isPreparedMarkdownVisual(previous?.visual) && previous.visual !== staged.visual && !previous.visual.root.isConnected) {
+              void previous.visual.dispose();
+            }
+          };
         },
-        restoreOld: async (generation) => {
-          const previous = runtime.derivedResources?.generation === generation
-            ? runtime.derivedResources
-            : runtime.previousDerivedResources?.generation === generation
-              ? runtime.previousDerivedResources
-              : null;
+        restoreOld: async (rollback) => {
+          if (runtime.derivedResources?.generation !== rollback.failedGeneration) return false;
+          const previous = runtime.previousDerivedResources?.generation === rollback.oldGeneration
+            ? runtime.previousDerivedResources
+            : null;
           if (previous === null) return false;
           runtime.derivedResources = previous;
           return true;
         },
-        showOldGenerationFailure: (generation, source) => {
+        showOldGenerationFailure: (rollback) => {
+          if (runtime.derivedResources?.generation !== rollback.failedGeneration) return;
           runtime.derivedResources = {
-            preview: { kind: "fallback", surface: "preview", source, generation },
-            visual: { kind: "fallback", surface: "visual", source, generation },
-            diff: { kind: "fallback", surface: "diff", source, generation },
-            generation,
+            preview: { kind: "fallback", surface: "preview", source: rollback.oldSource, generation: rollback.oldGeneration },
+            visual: { kind: "fallback", surface: "visual", source: rollback.oldSource, generation: rollback.oldGeneration },
+            diff: { kind: "fallback", surface: "diff", source: rollback.oldSource, generation: rollback.oldGeneration },
+            generation: rollback.oldGeneration,
           };
           if (runtime.mountedSurfaces.has("diff")) runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
-          queuePublish();
+          return queuePublish;
         },
         disposeAttemptResources: (attempt) => {
           const staged = (attempt as { staged?: Record<string, unknown> }).staged;
-          if (isPreparedMarkdownVisual(staged?.visual)) void staged.visual.dispose();
+          const visual = staged?.visual;
+          if (isPreparedMarkdownVisual(visual)) queueMicrotask(() => { void visual.dispose(); });
         },
       },
     });
@@ -1574,10 +1550,12 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.composing = event.type === "composition-start" ? true : event.type === "composition-end" ? false : runtime.composing;
       runtime.paste.sourceEvent(event);
       const snapshot = runtime.paste.snapshot();
-      if (active(snapshot)) replaceHistoryCurrent(runtime, snapshot.draft);
+      if (active(snapshot)) {
+        replaceHistoryCurrent(runtime, snapshot.draft);
+        runtime.surface.replaceCapture(surfaceCapture(snapshot));
+      }
       cancelPendingRemoteApply(runtime, "local");
       clearExpiringCandidate(runtime);
-      runtime.surface.invalidate();
       if (event.type !== "composition-start" && event.type !== "composition-input") {
         runtime.activeUntil = event.eventAt + 300_000;
         runtime.sync.recordUserActivity(event.eventAt);
@@ -1752,21 +1730,52 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           publish(runtime);
           return;
         }
-        const applied = await runtime.surface.applyReload(result.snapshot.source, {
-          requestCurrent: reloadCurrent(),
-          acceptedBaselineCurrent: sameBaseline(capture, baseline(current)),
-          draftCurrent: current.draft === draft,
-          localGenerationCurrent: capture.localGeneration === current.localGeneration,
-          mutationOccupied: current.mutation.state !== "idle",
-          terminal: current.phase !== "ordinary",
-          commitCurrent: reloadCurrent,
-        });
-        if (applied && reloadCurrent()) {
-          settleReloadAction(runtime, "succeeded");
-          if (applyRemoteSnapshot(runtime, result.snapshot)) return;
+        const operation: GuardedSurfaceOperation = {
+          enter: reloadCurrent,
+          prepare: (context) => {
+            if (!reloadCurrent()) return null;
+            const action = runtime.reloadAction;
+            if (action === null) return null;
+            const prepared = runtime.paste.prepareRemoteSnapshot(result.snapshot, {
+              expectedBaseline: capture,
+              expectedDraft: draft,
+              targetDisplayGeneration: context.target.currentDisplayGeneration,
+              action: { key: "reload-server", ...action },
+            });
+            if (prepared === null) return null;
+            return {
+              commit: () => {
+                const settledAt = displayTime();
+                prepared.commit(settledAt);
+                const autosaveRelease = runtime.autosave.commitRemoteReplace(result.snapshot.source, result.snapshot.summary.version);
+                const retention = runtime.history.commitRetention(prepared.previousBaseline, prepared.nextBaseline);
+                runtime.validator = result.snapshot.etag;
+                runtime.candidate = null;
+                runtime.reloadAction = null;
+                return () => {
+                  autosaveRelease();
+                  retention.release();
+                  if (locallyClean(runtime)) runtime.sync.localWorkSettled(now());
+                  queuePublish();
+                };
+              },
+              fail: () => {
+                prepared.fail(displayTime());
+                runtime.reloadAction = null;
+                return queuePublish;
+              },
+            };
+          },
+          reject: () => {
+            settleReloadAction(runtime, "failed");
+            queuePublish();
+          },
+        };
+        try {
+          await runtime.surface.apply(result.snapshot.source, operation);
+        } catch {
+          queuePublish();
         }
-        settleReloadAction(runtime, "failed");
-        publish(runtime);
       }, () => {
         if (!settleRequest(runtime, controller)) return;
         settleReloadAction(runtime, "failed");
@@ -1864,22 +1873,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const runtime = runtimeRef.current;
       const candidate = runtime?.candidate;
       const snapshot = runtime?.paste.snapshot();
-      if (runtime === null || runtime.disposed || candidate?.snapshot === undefined || snapshot === undefined || !active(snapshot) || runtime.useRemoteAction !== null) return;
+      if (runtime === null || runtime.disposed || candidate?.snapshot === undefined || candidate.capture === undefined || snapshot === undefined || !active(snapshot) || runtime.useRemoteAction !== null) return;
       if (candidate.kind === "terminal") return;
-      const remoteAttempt = candidate.capture === undefined ? null : runtime.sync.startCandidateApply(candidate.snapshot, candidate.capture);
-      const attempt = snapshot.lastAction.state === "idle" ? 1 : snapshot.lastAction.attempt + 1;
-      const startedAt = displayTime();
-      runtime.useRemoteAction = { attempt, startedAt };
-      runtime.paste.recordLocalAction({ key: "use-remote", state: "pending", attempt, startedAt });
-      if (remoteAttempt === null || candidate.capture === undefined) {
-        settleUseRemoteAction(runtime, "failed");
-        publish(runtime);
-        return;
-      }
-      runtime.pendingRemoteApply = { mode: "candidate", attempt: remoteAttempt, capture: candidate.capture, candidate, action: runtime.useRemoteAction };
-      runtime.candidate = null;
-      void applyRemote(runtime, candidate.snapshot, "candidate", remoteAttempt, candidate.capture, candidate);
-      publish(runtime);
+      void applyRemote(runtime, candidate.snapshot, "candidate", undefined, candidate.capture, candidate);
+      queuePublish();
     },
     keepCurrent() {
       const runtime = runtimeRef.current;

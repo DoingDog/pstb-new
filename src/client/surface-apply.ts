@@ -11,19 +11,48 @@ export interface DerivedSurfaceCapture {
 }
 
 export type DerivedSurface = "preview" | "visual" | "diff";
+export type SurfaceFallback = DerivedSurface | null;
+export type StagedSurfaces = { preview: unknown; visual: unknown; diff: unknown };
+
+export interface SurfaceCommitContext {
+  readonly source: string;
+  readonly target: Readonly<DerivedSurfaceCapture>;
+  readonly staged: Readonly<StagedSurfaces>;
+}
+
+export type SurfaceReleaseWork = () => void;
+
+export interface PreparedSurfaceCommit {
+  commit(): SurfaceReleaseWork | void;
+  fail(): SurfaceReleaseWork | void;
+}
+
+export interface GuardedSurfaceOperation {
+  enter(): boolean;
+  prepare(context: SurfaceCommitContext): PreparedSurfaceCommit | null;
+  reject(): void;
+}
+
+export interface SurfaceRollback {
+  readonly failedGeneration: number;
+  readonly oldGeneration: number;
+  readonly oldSource: string;
+  readonly parentApplyToken: number;
+  readonly hostGeneration: number;
+}
 
 export interface StagedSurfacePorts {
   stagePreview(source: string, generation: number): Promise<unknown>;
   stageVisual(source: string, generation: number): Promise<unknown>;
   stageDiff(source: string, generation: number): Promise<unknown>;
   mounted(): readonly DerivedSurface[];
-  commit(staged: { preview: unknown; visual: unknown; diff: unknown }, generation: number): void;
-  restoreOld(generation: number, source: string, parentToken: number): Promise<boolean>;
-  showOldGenerationFailure(generation: number, source: string, parentToken: number): void;
+  prepareCommit?(context: SurfaceCommitContext): () => void;
+  commit(staged: Readonly<StagedSurfaces>, generation: number): SurfaceReleaseWork | void;
+  restoreOld: (...args: any[]) => Promise<boolean>;
+  showOldGenerationFailure: (...args: any[]) => SurfaceReleaseWork | void;
   disposeAttemptResources(attempt: unknown): void;
 }
 
-export type SurfaceFallback = "preview" | "visual" | "diff" | null;
 export interface StagedSurfaceSnapshot {
   capture: DerivedSurfaceCapture;
   source: string;
@@ -31,56 +60,12 @@ export interface StagedSurfaceSnapshot {
   fallback: SurfaceFallback;
   complete: boolean;
 }
+
 export interface StagedSurfaceApplyOptions {
   ports: StagedSurfacePorts;
   capture: DerivedSurfaceCapture;
-  now?(): number;
 }
 
-export interface AutosyncApplyEntry {
-  requestCurrent: boolean;
-  acceptedBaselineCurrent: boolean;
-  localGenerationCurrent: boolean;
-  active: boolean;
-  activeUntil: number;
-  composing: boolean;
-  autosaveTimer: boolean;
-  autosaveInFlight: boolean;
-  coalescedIntent: boolean;
-  mutationOccupied: boolean;
-  unresolvedMutation: boolean;
-  localSourceWork: boolean;
-  commitCurrent?(): boolean;
-  finalizeCurrent?(): void;
-}
-export interface UseRemoteApplyEntry {
-  candidateCurrent: boolean;
-  acceptedBaselineCurrent: boolean;
-  localGenerationCurrent: boolean;
-  ordinary: boolean;
-  active: boolean;
-  activeDeadlineCurrent: boolean;
-  activeUntil: number;
-  draftMatchesAccepted: boolean;
-  composing: boolean;
-  autosaveTimer: boolean;
-  autosaveInFlight: boolean;
-  coalescedIntent: boolean;
-  mutationOccupied: boolean;
-  unresolvedMutation: boolean;
-  conflictCausedByCandidate: boolean;
-  commitCurrent?(): boolean;
-  finalizeCurrent?(): void;
-}
-export interface ReloadApplyEntry {
-  requestCurrent: boolean;
-  acceptedBaselineCurrent: boolean;
-  draftCurrent: boolean;
-  localGenerationCurrent: boolean;
-  mutationOccupied: boolean;
-  terminal: boolean;
-  commitCurrent?(): boolean;
-}
 export interface TerminalLocalApplyEntry {
   terminalEpochCurrent: boolean;
   displayGenerationCurrent: boolean;
@@ -95,30 +80,9 @@ export interface TerminalLocalApplyReceipt {
   fallback: SurfaceFallback;
 }
 
-export function autosyncApplyEntryAllowed(entry: AutosyncApplyEntry): boolean {
-  return entry.requestCurrent && entry.acceptedBaselineCurrent && entry.localGenerationCurrent && entry.active
-    && !entry.composing && !entry.autosaveTimer && !entry.autosaveInFlight && !entry.coalescedIntent
-    && !entry.mutationOccupied && !entry.unresolvedMutation && !entry.localSourceWork;
-}
-export function useRemoteApplyEntryAllowed(entry: UseRemoteApplyEntry): boolean {
-  return entry.candidateCurrent && entry.acceptedBaselineCurrent && entry.localGenerationCurrent && entry.ordinary
-    && entry.active && entry.activeDeadlineCurrent && entry.draftMatchesAccepted && !entry.composing
-    && !entry.autosaveTimer && !entry.autosaveInFlight && !entry.coalescedIntent && !entry.mutationOccupied
-    && !entry.unresolvedMutation;
-}
-export function reloadApplyEntryAllowed(entry: ReloadApplyEntry): boolean {
-  return entry.requestCurrent && entry.acceptedBaselineCurrent && entry.draftCurrent && entry.localGenerationCurrent && !entry.mutationOccupied && !entry.terminal;
-}
-export function terminalLocalApplyEntryAllowed(entry: TerminalLocalApplyEntry): boolean {
-  return entry.terminalEpochCurrent && entry.displayGenerationCurrent && entry.selectedSourceCurrent;
-}
-
 export interface StagedSurfaceApply {
   snapshot(): Readonly<StagedSurfaceSnapshot>;
-  apply(source: string): Promise<boolean>;
-  applyAutosync(source: string, entry: AutosyncApplyEntry): Promise<boolean>;
-  applyUseRemote(source: string, entry: UseRemoteApplyEntry): Promise<boolean>;
-  applyReload(source: string, entry: ReloadApplyEntry): Promise<boolean>;
+  apply(source: string, operation: GuardedSurfaceOperation): Promise<boolean>;
   applyTerminalLocal(source: string, entry: TerminalLocalApplyEntry): Promise<TerminalLocalApplyReceipt | null>;
   retry(source: string): Promise<boolean>;
   retryPreview(source: string): Promise<boolean>;
@@ -131,34 +95,34 @@ export interface StagedSurfaceApply {
   settleUseConsumedResponse(terminalLocalToken: TerminalLocalToken, result: "displayed" | "display-failed"): TerminalOutcomeKey | null;
 }
 
-type Staged = { preview: unknown; visual: unknown; diff: unknown };
-type Surface = DerivedSurface;
 type Attempt = {
   base: DerivedSurfaceCapture;
-  capture: DerivedSurfaceCapture;
+  target: DerivedSurfaceCapture;
   source: string;
   generation: number;
-  staged: Partial<Staged>;
+  staged: StagedSurfaces;
   failure: SurfaceFallback;
-  retrySurface?: Surface;
-  terminalLocal: boolean;
+  retrySurface?: DerivedSurface;
   retired: boolean;
-  owned: Set<Surface>;
-  disposed: Set<Surface>;
+  cancelled: Promise<void>;
+  cancel(): void;
+  owned: Set<DerivedSurface>;
+  disposed: Set<DerivedSurface>;
   touchedHost: boolean;
-  oldGeneration: number;
-  oldSource: string;
   oldStatus: StagedSurfaceSnapshot["status"];
   oldFallback: SurfaceFallback;
-  activeUntil?: number;
-  commitCurrent?: () => boolean;
-  finalizeCurrent?: () => void;
-  finalizing: boolean;
+};
+
+type QueueEntry = {
+  run(): Promise<boolean>;
+  resolve(value: boolean): void;
+  reject(reason: unknown): void;
 };
 
 function copyCapture(capture: DerivedSurfaceCapture): DerivedSurfaceCapture {
   return { ...capture };
 }
+
 function sameCapture(left: DerivedSurfaceCapture, right: DerivedSurfaceCapture): boolean {
   return left.localGeneration === right.localGeneration
     && left.currentExactSource === right.currentExactSource
@@ -168,7 +132,8 @@ function sameCapture(left: DerivedSurfaceCapture, right: DerivedSurfaceCapture):
     && left.parentApplyToken === right.parentApplyToken
     && left.derivedRetryToken === right.derivedRetryToken;
 }
-function fallbackResource(surface: Surface, source: string, generation: number): unknown {
+
+function fallbackResource(surface: DerivedSurface, source: string, generation: number): unknown {
   return { kind: "fallback", surface, source, generation };
 }
 
@@ -177,18 +142,19 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   let currentSource = current.currentExactSource;
   let status: StagedSurfaceSnapshot["status"] = "idle";
   let fallback: SurfaceFallback = null;
-  let mounted: Staged | undefined;
+  let mounted: StagedSurfaces | undefined;
   let activeAttempt: Attempt | undefined;
-  let criticalAttempt: Attempt | undefined;
-  const deferred: Array<() => void> = [];
-  let flushingDeferred = false;
+  let blocked = false;
+  let draining = false;
+  let poisoned: unknown = null;
+  const queue: QueueEntry[] = [];
+  const retryTokens: Record<DerivedSurface, number> = {
+    preview: current.derivedRetryToken,
+    visual: current.derivedRetryToken,
+    diff: current.derivedRetryToken,
+  };
   let terminalSettled = false;
   let terminalLocalAttempt: { token: TerminalLocalToken; settled: boolean } | null = null;
-  const retryTokens: Record<Surface, number> = { preview: current.derivedRetryToken, visual: current.derivedRetryToken, diff: current.derivedRetryToken };
-  let nextDisplayGeneration = current.currentDisplayGeneration;
-  let nextParentApplyGeneration = current.parentApplyGeneration;
-  let nextParentApplyToken = current.parentApplyToken;
-  const now = options.now ?? Date.now;
 
   const snapshot = (): Readonly<StagedSurfaceSnapshot> => ({
     capture: copyCapture(current),
@@ -198,149 +164,112 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     complete: status === "committed",
   });
   const stale = (attempt: Attempt): boolean => !sameCapture(attempt.base, current);
-  const syncRetryTokens = (token: number): void => {
-    for (const surface of ["preview", "visual", "diff"] as const) retryTokens[surface] = Math.max(retryTokens[surface], token);
+  const syncCounters = (): void => {
+    for (const surface of ["preview", "visual", "diff"] as const) {
+      retryTokens[surface] = Math.max(retryTokens[surface], current.derivedRetryToken);
+    }
   };
-  const syncCaptureCounters = (): void => {
-    nextDisplayGeneration = Math.max(nextDisplayGeneration, current.currentDisplayGeneration);
-    nextParentApplyGeneration = Math.max(nextParentApplyGeneration, current.parentApplyGeneration);
-    nextParentApplyToken = Math.max(nextParentApplyToken, current.parentApplyToken);
-    syncRetryTokens(current.derivedRetryToken);
-  };
-  const disposeResource = (attempt: Attempt, surface: Surface, value: unknown): void => {
+  const dispose = (attempt: Attempt, surface: DerivedSurface, value: unknown): void => {
     if (attempt.disposed.has(surface)) return;
     attempt.disposed.add(surface);
     try {
       options.ports.disposeAttemptResources({ ...attempt, staged: { [surface]: value } });
     } catch {}
   };
-  const disposeOwned = (attempt: Attempt): void => {
-    for (const surface of attempt.owned) disposeResource(attempt, surface, attempt.staged[surface]);
-  };
   const retire = (attempt: Attempt): void => {
     if (attempt.retired) return;
     attempt.retired = true;
-    disposeOwned(attempt);
+    attempt.cancel();
+    for (const surface of attempt.owned) dispose(attempt, surface, attempt.staged[surface]);
   };
+
   const restorePresentation = (attempt: Attempt): void => {
-    if (activeAttempt !== attempt || stale(attempt)) return;
+    if (activeAttempt !== attempt) return;
     status = attempt.oldStatus;
     fallback = attempt.oldFallback;
     activeAttempt = undefined;
   };
-  const record = (attempt: Attempt, surface: Surface, value: unknown): unknown => {
-    attempt.owned.add(surface);
-    attempt.staged[surface] = value;
-    if (attempt.retired) disposeResource(attempt, surface, value);
-    return value;
+  const poison = (error: unknown): void => {
+    if (poisoned !== null) return;
+    poisoned = error;
+    while (queue.length !== 0) queue.shift()!.reject(error);
   };
-
-  const abandonActive = (): void => {
-    if (activeAttempt === undefined) return;
-    const previous = activeAttempt;
-    retire(previous);
-    restorePresentation(previous);
-  };
-  const handOff = <T>(operation: () => Promise<T>): Promise<T> | null => {
-    if (criticalAttempt === undefined) return null;
-    return new Promise<T>((resolve, reject) => {
-      deferred.push(() => {
-        try {
-          void operation().then(resolve, reject);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-  };
-  const handOffVoid = (operation: () => void): boolean => {
-    if (criticalAttempt === undefined) return false;
-    deferred.push(operation);
-    return true;
-  };
-  const flushDeferred = (): void => {
-    if (flushingDeferred || criticalAttempt !== undefined) return;
-    flushingDeferred = true;
+  const release = (work: SurfaceReleaseWork | void): void => {
     try {
-      while (criticalAttempt === undefined) {
-        const operation = deferred.shift();
-        if (operation === undefined) return;
-        operation();
+      work?.();
+    } catch {}
+  };
+  const drain = async (): Promise<void> => {
+    if (draining || blocked || poisoned !== null) return;
+    draining = true;
+    try {
+      while (!blocked && poisoned === null && queue.length !== 0) {
+        const entry = queue.shift()!;
+        try {
+          entry.resolve(await entry.run());
+        } catch (error) {
+          entry.reject(error);
+        }
       }
     } finally {
-      flushingDeferred = false;
+      draining = false;
+      if (!blocked && poisoned === null && queue.length !== 0) void drain();
     }
   };
-  const releaseCritical = (attempt: Attempt): void => {
-    attempt.finalizing = false;
-    if (criticalAttempt === attempt) criticalAttempt = undefined;
-    if (activeAttempt === attempt) activeAttempt = undefined;
-    flushDeferred();
+  const enqueue = (run: () => Promise<boolean>): Promise<boolean> => {
+    if (poisoned !== null) return Promise.reject(poisoned);
+    const promise = new Promise<boolean>((resolve, reject) => {
+      queue.push({ run, resolve, reject });
+    });
+    void drain();
+    return promise;
   };
-  const allocate = (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Attempt => {
-    abandonActive();
+  const enqueueVoid = (run: () => void): void => {
+    if (poisoned !== null) return;
+    void enqueue(async () => {
+      run();
+      return false;
+    }).catch(() => undefined);
+  };
+  const finishCritical = (attempt: Attempt): void => {
+    if (activeAttempt === attempt) activeAttempt = undefined;
+    blocked = false;
+    void drain();
+  };
+
+  const allocate = (source: string, retrySurface?: DerivedSurface): Attempt => {
     const base = copyCapture(current);
-    const retryToken = Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff);
-    syncRetryTokens(retryToken);
-    const generation = ++nextDisplayGeneration;
-    const captured = {
-      ...base,
-      currentExactSource: source,
-      currentDisplayGeneration: generation,
-      parentApplyGeneration: ++nextParentApplyGeneration,
-      parentApplyToken: ++nextParentApplyToken,
-      derivedRetryToken: retryToken,
-    };
+    const retryToken = retrySurface === undefined
+      ? Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff)
+      : Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff) + 1;
+    if (retrySurface !== undefined) retryTokens[retrySurface] = retryToken;
+    const generation = retrySurface === undefined ? current.currentDisplayGeneration + 1 : current.currentDisplayGeneration;
+    const target = retrySurface === undefined
+      ? {
+        ...base,
+        currentExactSource: source,
+        currentDisplayGeneration: generation,
+        parentApplyGeneration: current.parentApplyGeneration + 1,
+        parentApplyToken: current.parentApplyToken + 1,
+        derivedRetryToken: retryToken,
+      }
+      : { ...base, derivedRetryToken: retryToken };
+    let cancel!: () => void;
+    const cancelled = new Promise<void>((resolve) => { cancel = resolve; });
     const attempt: Attempt = {
       base,
-      capture: captured,
+      target,
       source,
       generation,
-      staged: {},
+      staged: { preview: undefined, visual: undefined, diff: undefined },
       failure: null,
-      terminalLocal,
+      ...(retrySurface === undefined ? {} : { retrySurface }),
       retired: false,
+      cancelled,
+      cancel,
       owned: new Set(),
       disposed: new Set(),
       touchedHost: false,
-      finalizing: false,
-      oldGeneration: current.currentDisplayGeneration,
-      oldSource: currentSource,
-      oldStatus: status,
-      oldFallback: fallback,
-      ...(activeUntil === undefined ? {} : { activeUntil }),
-      ...(commitCurrent === undefined ? {} : { commitCurrent }),
-      ...(finalizeCurrent === undefined ? {} : { finalizeCurrent }),
-    };
-    activeAttempt = attempt;
-    if (status !== "fallback") {
-      status = "staging";
-      fallback = null;
-    }
-    return attempt;
-  };
-  const allocateRetry = (source: string, surface: Surface): Attempt => {
-    abandonActive();
-    const base = copyCapture(current);
-    const retryToken = Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff) + 1;
-    syncRetryTokens(retryToken);
-    const captured = { ...base, derivedRetryToken: retryToken };
-    const attempt: Attempt = {
-      base,
-      capture: captured,
-      source,
-      generation: current.currentDisplayGeneration,
-      staged: {},
-      failure: null,
-      retrySurface: surface,
-      terminalLocal: false,
-      retired: false,
-      owned: new Set(),
-      disposed: new Set(),
-      touchedHost: false,
-      finalizing: false,
-      oldGeneration: current.currentDisplayGeneration,
-      oldSource: currentSource,
       oldStatus: status,
       oldFallback: fallback,
     };
@@ -352,182 +281,247 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     return attempt;
   };
 
-  const stageOne = async (attempt: Attempt, surface: Surface): Promise<unknown> => {
-    const stagePort = surface === "preview" ? options.ports.stagePreview : surface === "visual" ? options.ports.stageVisual : options.ports.stageDiff;
+  const stagePort = (surface: DerivedSurface) => surface === "preview"
+    ? options.ports.stagePreview
+    : surface === "visual" ? options.ports.stageVisual : options.ports.stageDiff;
+
+  const stageOne = async (attempt: Attempt, surface: DerivedSurface): Promise<void> => {
+    let pending: Promise<unknown>;
     try {
-      return record(attempt, surface, await stagePort(attempt.source, attempt.generation));
-    } catch {
-      attempt.failure ??= surface;
-      return record(attempt, surface, fallbackResource(surface, attempt.source, attempt.generation));
+      pending = Promise.resolve(stagePort(surface)(attempt.source, attempt.generation));
+    } catch (error) {
+      pending = Promise.reject(error);
     }
+    const result = await Promise.race([
+      pending.then((value) => ({ kind: "value" as const, value }), () => ({ kind: "failure" as const })),
+      attempt.cancelled.then(() => ({ kind: "cancelled" as const })),
+    ]);
+    if (result.kind === "cancelled") {
+      void pending.then((value) => dispose(attempt, surface, value), () => undefined);
+      return;
+    }
+    const value = result.kind === "failure"
+      ? fallbackResource(surface, attempt.source, attempt.generation)
+      : result.value;
+    if (result.kind === "failure") attempt.failure ??= surface;
+    attempt.staged[surface] = value;
+    attempt.owned.add(surface);
+    if (attempt.retired) dispose(attempt, surface, value);
   };
-
-  const attemptIsCurrent = (attempt: Attempt): boolean => activeAttempt === attempt && !attempt.retired && !stale(attempt);
-  const restore = async (attempt: Attempt, afterRelease = false): Promise<void> => {
+  const stageAll = async (attempt: Attempt): Promise<void> => {
+    await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
+  };
+  const rollback = (attempt: Attempt): SurfaceRollback => ({
+    failedGeneration: attempt.generation,
+    oldGeneration: attempt.base.currentDisplayGeneration,
+    oldSource: attempt.base.currentExactSource,
+    parentApplyToken: attempt.target.parentApplyToken,
+    hostGeneration: attempt.base.hostGeneration,
+  });
+  const restore = async (attempt: Attempt): Promise<SurfaceReleaseWork | void> => {
     if (!attempt.touchedHost) return;
+    const rollbackState = rollback(attempt);
     let restored = false;
     try {
-      restored = await options.ports.restoreOld(attempt.oldGeneration, attempt.oldSource, attempt.capture.parentApplyToken);
+      restored = options.ports.showOldGenerationFailure.length >= 2
+        ? await (options.ports.restoreOld as (generation: number, source: string, parentToken: number) => Promise<boolean>)(rollbackState.oldGeneration, rollbackState.oldSource, rollbackState.parentApplyToken)
+        : await (options.ports.restoreOld as (rollback: SurfaceRollback) => Promise<boolean>)(rollbackState);
     } catch {}
-    if (!restored && (attemptIsCurrent(attempt) || (afterRelease && activeAttempt === undefined && sameCapture(attempt.base, current)))) {
+    if (!restored) {
       try {
-        options.ports.showOldGenerationFailure(attempt.oldGeneration, attempt.oldSource, attempt.capture.parentApplyToken);
+        return options.ports.showOldGenerationFailure.length >= 2
+          ? (options.ports.showOldGenerationFailure as (generation: number, source: string, parentToken: number) => SurfaceReleaseWork | void)(rollbackState.oldGeneration, rollbackState.oldSource, rollbackState.parentApplyToken)
+          : (options.ports.showOldGenerationFailure as (rollback: SurfaceRollback) => SurfaceReleaseWork | void)(rollbackState);
       } catch {}
     }
   };
 
-  const publish = async (attempt: Attempt): Promise<boolean> => {
-    if (!attemptIsCurrent(attempt) || (attempt.activeUntil !== undefined && now() >= attempt.activeUntil) || attempt.commitCurrent?.() === false) {
-      retire(attempt);
-      restorePresentation(attempt);
+  const reject = (operation: GuardedSurfaceOperation): void => {
+    try {
+      operation.reject();
+    } catch {}
+  };
+  const execute = async (source: string, operation: GuardedSurfaceOperation, retrySurface?: DerivedSurface): Promise<boolean> => {
+    if (poisoned !== null) throw poisoned;
+    let entered = false;
+    try {
+      entered = operation.enter();
+    } catch (error) {
+      poison(error);
+      throw error;
+    }
+    if (!entered) {
+      reject(operation);
       return false;
     }
-    const staged = attempt.staged as Staged;
-    attempt.finalizing = true;
-    criticalAttempt = attempt;
+
+    const attempt = allocate(source, retrySurface);
+    if (retrySurface !== undefined) {
+      attempt.staged = mounted ?? {
+        preview: fallbackResource("preview", source, attempt.generation),
+        visual: fallbackResource("visual", source, attempt.generation),
+        diff: fallbackResource("diff", source, attempt.generation),
+      };
+    }
+    await stageAll(attempt);
+    if (attempt.retired || activeAttempt !== attempt || stale(attempt)) {
+      retire(attempt);
+      restorePresentation(attempt);
+      reject(operation);
+      return false;
+    }
+
+    blocked = true;
     try {
+      const context: SurfaceCommitContext = { source, target: attempt.target, staged: attempt.staged };
+      let prepared: PreparedSurfaceCommit | null;
       try {
-        attempt.touchedHost = true;
-        options.ports.commit(staged, attempt.generation);
-      } catch {
-        disposeOwned(attempt);
-        const restoration = restore(attempt, true);
+        prepared = operation.prepare(context);
+      } catch (error) {
+        poison(error);
+        throw error;
+      }
+      if (prepared === null) {
         retire(attempt);
         restorePresentation(attempt);
-        releaseCritical(attempt);
-        await restoration;
+        reject(operation);
         return false;
       }
-      mounted = staged;
+
+      let preparePort: () => void;
+      try {
+        preparePort = options.ports.prepareCommit?.(context) ?? (() => {});
+      } catch (error) {
+        poison(error);
+        throw error;
+      }
+
+      let resourceRelease: SurfaceReleaseWork | void;
+      try {
+        attempt.touchedHost = true;
+        resourceRelease = options.ports.commit(attempt.staged, attempt.generation);
+      } catch {
+        let failureRelease: SurfaceReleaseWork | void;
+        try {
+          failureRelease = prepared.fail();
+        } catch (error) {
+          poison(error);
+          throw error;
+        }
+        retire(attempt);
+        const restoreRelease = await restore(attempt);
+        release(failureRelease);
+        release(restoreRelease);
+        return false;
+      }
+
+      let preparedRelease: SurfaceReleaseWork | void;
+      try {
+        preparePort();
+        preparedRelease = prepared.commit();
+      } catch (error) {
+        poison(error);
+        throw error;
+      }
+      mounted = attempt.staged;
       attempt.owned.clear();
-      current = copyCapture(attempt.capture);
+      current = copyCapture(attempt.target);
       currentSource = attempt.source;
-      syncCaptureCounters();
-      if (attempt.retrySurface === undefined) {
+      syncCounters();
+      if (retrySurface === undefined) {
         status = attempt.failure === null ? "committed" : "fallback";
         fallback = attempt.failure;
       } else {
-        fallback = fallback === attempt.retrySurface ? null : fallback;
+        fallback = fallback === retrySurface ? null : fallback;
         status = fallback === null ? "committed" : "fallback";
       }
-      try {
-        attempt.finalizeCurrent?.();
-      } catch {}
+      release(preparedRelease);
+      release(resourceRelease);
       return true;
     } finally {
-      releaseCritical(attempt);
+      finishCritical(attempt);
     }
   };
 
-  const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => {
-    const deferredApply = handOff(() => runAll(source, activeUntil, terminalLocal, commitCurrent, finalizeCurrent));
-    if (deferredApply !== null) return deferredApply;
-    const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent, finalizeCurrent);
-    await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
-    return publish(attempt);
-  };
-  const runTerminalLocal = async (source: string, commitCurrent?: () => boolean): Promise<TerminalLocalApplyReceipt> => {
-    const deferredApply = handOff(() => runTerminalLocal(source, commitCurrent));
-    if (deferredApply !== null) return deferredApply;
-    const terminalLocalToken = Symbol("terminal-local");
-    terminalLocalAttempt = { token: terminalLocalToken, settled: false };
-    const attempt = allocate(source, undefined, true, commitCurrent);
-    await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
-    const committed = await publish(attempt);
-    return {
-      terminalLocalToken,
-      outcome: !committed ? "failed" : attempt.failure === null ? "complete" : "fallback",
-      fallback: committed ? attempt.failure : null,
-    };
-  };
-
-  const runRetry = async (source: string, surface: Surface): Promise<boolean> => {
-    const deferredRetry = handOff(() => runRetry(source, surface));
-    if (deferredRetry !== null) return deferredRetry;
-    if (source !== current.currentExactSource) return false;
-    const attempt = allocateRetry(source, surface);
-    const stagePort = surface === "preview" ? options.ports.stagePreview : surface === "visual" ? options.ports.stageVisual : options.ports.stageDiff;
-    let value: unknown;
-    try {
-      value = await stagePort(attempt.source, attempt.generation);
-    } catch {
-      disposeResource(attempt, surface, undefined);
-      retire(attempt);
-      restorePresentation(attempt);
-      return false;
-    }
-    record(attempt, surface, value);
-    if (!attemptIsCurrent(attempt)) {
-      retire(attempt);
-      restorePresentation(attempt);
-      return false;
-    }
-    const previous = mounted ?? {
-      preview: fallbackResource("preview", source, attempt.generation),
-      visual: fallbackResource("visual", source, attempt.generation),
-      diff: fallbackResource("diff", source, attempt.generation),
-    };
-    attempt.staged = { ...previous, [surface]: value };
-    return publish(attempt);
-  };
-
-  const guarded = (allowed: boolean, source: string, activeUntil?: number, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => allowed ? runAll(source, activeUntil, false, commitCurrent, finalizeCurrent) : Promise.resolve(false);
+  const queueApply = (source: string, operation: GuardedSurfaceOperation, retrySurface?: DerivedSurface): Promise<boolean> =>
+    enqueue(() => execute(source, operation, retrySurface));
+  const retryOperation = (source: string, surface: DerivedSurface): GuardedSurfaceOperation => ({
+    enter: () => source === current.currentExactSource,
+    prepare: () => ({ commit: () => undefined, fail: () => undefined }),
+    reject: () => undefined,
+  });
   const replaceCaptureNow = (capture: DerivedSurfaceCapture): void => {
-    abandonActive();
     current = copyCapture(capture);
     currentSource = capture.currentExactSource;
-    syncCaptureCounters();
+    syncCounters();
   };
   const invalidateNow = (): void => {
-    abandonActive();
-    current = { ...current, parentApplyGeneration: current.parentApplyGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-    syncCaptureCounters();
+    current = {
+      ...current,
+      parentApplyGeneration: current.parentApplyGeneration + 1,
+      parentApplyToken: current.parentApplyToken + 1,
+      derivedRetryToken: current.derivedRetryToken + 1,
+    };
+    syncCounters();
   };
   const remountNow = (): void => {
-    abandonActive();
-    current = { ...current, hostGeneration: current.hostGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-    syncCaptureCounters();
+    current = {
+      ...current,
+      hostGeneration: current.hostGeneration + 1,
+      parentApplyToken: current.parentApplyToken + 1,
+      derivedRetryToken: current.derivedRetryToken + 1,
+    };
+    syncCounters();
   };
 
   return {
     snapshot,
-    apply: runAll,
-    applyAutosync(source, entry) {
-      return guarded(autosyncApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent, entry.finalizeCurrent);
-    },
-    applyUseRemote(source, entry) {
-      return guarded(useRemoteApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent, entry.finalizeCurrent);
-    },
-    applyReload(source, entry) {
-      return guarded(reloadApplyEntryAllowed(entry), source, undefined, entry.commitCurrent);
+    apply(source, operation) {
+      return queueApply(source, operation);
     },
     applyTerminalLocal(source, entry) {
-      return terminalLocalApplyEntryAllowed(entry) ? runTerminalLocal(source, entry.commitCurrent) : Promise.resolve(null);
+      const token = Symbol("terminal-local");
+      const currentEntry = (): boolean => entry.terminalEpochCurrent
+        && entry.displayGenerationCurrent
+        && entry.selectedSourceCurrent
+        && (entry.commitCurrent?.() ?? true);
+      if (!currentEntry()) return Promise.resolve(null);
+      terminalLocalAttempt = { token, settled: false };
+      return queueApply(source, {
+        enter: currentEntry,
+        prepare: () => currentEntry()
+          ? { commit: () => undefined, fail: () => undefined }
+          : null,
+        reject: () => undefined,
+      }).then((committed) => ({
+        terminalLocalToken: token,
+        outcome: !committed ? "failed" : fallback === null ? "complete" : "fallback",
+        fallback: committed ? fallback : null,
+      }));
     },
     retry(source) {
-      return runRetry(source, fallback ?? "preview");
+      return queueApply(source, retryOperation(source, fallback ?? "preview"), fallback ?? "preview");
     },
     retryPreview(source) {
-      return runRetry(source, "preview");
+      return queueApply(source, retryOperation(source, "preview"), "preview");
     },
     retryVisual(source) {
-      return runRetry(source, "visual");
+      return queueApply(source, retryOperation(source, "visual"), "visual");
     },
     retryDiff(source) {
-      return runRetry(source, "diff");
+      return queueApply(source, retryOperation(source, "diff"), "diff");
     },
     replaceCapture(capture) {
-      const replacement = copyCapture(capture);
-      if (handOffVoid(() => replaceCaptureNow(replacement))) return;
-      replaceCaptureNow(replacement);
+      if (!blocked && activeAttempt !== undefined) retire(activeAttempt);
+      enqueueVoid(() => replaceCaptureNow(copyCapture(capture)));
     },
     invalidate() {
-      if (handOffVoid(invalidateNow)) return;
-      invalidateNow();
+      if (!blocked && activeAttempt !== undefined) retire(activeAttempt);
+      enqueueVoid(invalidateNow);
     },
     remount() {
-      if (handOffVoid(remountNow)) return;
-      remountNow();
+      if (!blocked && activeAttempt !== undefined) retire(activeAttempt);
+      enqueueVoid(remountNow);
     },
     settleTerminal(origin, result) {
       if (terminalSettled) return null;
@@ -540,8 +534,8 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
         case "current-kept-choice": return "reload-terminal-current-kept-choice";
       }
     },
-    settleUseConsumedResponse(terminalLocalToken, result) {
-      if (terminalLocalAttempt === null || terminalLocalAttempt.token !== terminalLocalToken || terminalLocalAttempt.settled) return null;
+    settleUseConsumedResponse(token, result) {
+      if (terminalLocalAttempt === null || terminalLocalAttempt.token !== token || terminalLocalAttempt.settled) return null;
       terminalLocalAttempt.settled = true;
       return result === "displayed" ? "use-consumed-response-displayed" : "use-consumed-response-display-failed";
     },

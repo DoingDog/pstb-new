@@ -94,7 +94,6 @@ export interface PasteSyncController {
   startCandidateApply(snapshot: RemoteSnapshot, capture: PasteSyncCapture): RemoteApplyAttempt | null;
   isRemoteApplyCurrent(attempt: RemoteApplyAttempt): boolean;
   prepareRemoteApplyCommit(attempt: RemoteApplyAttempt, committedAt: number): PreparedPasteSyncRemoteCommit | null;
-  completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean;
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean;
   retireRemoteApply(attempt: RemoteApplyAttempt, retiredAt: number): boolean;
   dispose(): void;
@@ -389,14 +388,6 @@ export class PasteSync implements PasteSyncController {
         return this.releasePreparedRemoteApply("error", committedAt, true, stateChanged);
       },
     };
-  }
-
-  completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean {
-    const prepared = this.prepareRemoteApplyCommit(attempt, committedAt);
-    if (prepared === null) return false;
-
-    prepared.commit()();
-    return true;
   }
 
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean {

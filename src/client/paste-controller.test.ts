@@ -184,11 +184,13 @@ describe("PasteController mutation slot", () => {
     expect(snapshot(controller).mutation.state).toBe("idle");
   });
 
-  it("publishes a Reload snapshot atomically in the existing controller", () => {
+  it("publishes a prepared Reload snapshot atomically in the existing controller", () => {
     const { controller } = pasteControllerFixture();
     const before = snapshot(controller);
+    const prepared = controller.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(controller));
+    if (prepared === null) throw new Error("expected prepared Reload");
 
-    expect(controller.applyRemoteSnapshot(reloadSnapshot())).toBe(true);
+    prepared.commit("2026-09-20T00:00:00.000Z");
 
     expect(snapshot(controller)).toMatchObject({
       acceptedSource: "remote",
@@ -308,7 +310,7 @@ describe("PasteController prepared remote snapshots", () => {
         outcomeKey: null,
       },
     });
-    expect(controller.effects()).toEqual([{ type: "apply-authoritative", kind: "remote", acceptedSource: "remote", version: "g.2" }]);
+    expect(controller.effects()).toEqual([]);
   });
 
   it.each(["use-remote", "reload-server"] as const)("settles only the claimed %s action", (key) => {

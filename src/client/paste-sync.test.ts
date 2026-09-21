@@ -195,6 +195,13 @@ function syncFixture({ loadAt }: { loadAt: number }) {
   };
 }
 
+function commitPreparedRemoteApply(controller: PasteSync, attempt: RemoteApplyAttempt, committedAt: number): boolean {
+  const prepared = controller.prepareRemoteApplyCommit(attempt, committedAt);
+  if (prepared === null) return false;
+  prepared.commit()();
+  return true;
+}
+
 describe("PasteSync timing", () => {
   it("emits initial waiting without a transition timestamp", () => {
     const fixture = syncFixture({ loadAt: 0 });
@@ -636,7 +643,7 @@ describe("PasteSync ordering and recovery", () => {
     fixture.clock.advance(3_000);
     expect(fixture.reads).toHaveLength(1);
 
-    expect(fixture.controller.completeRemoteApply(apply!.attempt, fixture.clock.now)).toBe(true);
+    expect(commitPreparedRemoteApply(fixture.controller, apply!.attempt, fixture.clock.now)).toBe(true);
     expect(fixture.lastState()).toBe("remote-applied");
     fixture.clock.advance(2_999);
     expect(fixture.reads).toHaveLength(1);
@@ -661,7 +668,7 @@ describe("PasteSync ordering and recovery", () => {
     fixture.clock.advance(3_000);
     expect(fixture.reads).toHaveLength(1);
 
-    expect(fixture.controller.completeRemoteApply(attempt!, fixture.clock.now)).toBe(true);
+    expect(commitPreparedRemoteApply(fixture.controller, attempt!, fixture.clock.now)).toBe(true);
     expect(fixture.lastState()).toBe("remote-applied");
     fixture.clock.advance(2_999);
     expect(fixture.reads).toHaveLength(1);
@@ -709,7 +716,7 @@ describe("PasteSync ordering and recovery", () => {
     expect(second).not.toBe(first);
     fixture.controller.localWorkChanged();
     expect(fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture)).toBeNull();
-    expect(fixture.controller.completeRemoteApply(second!, fixture.clock.now)).toBe(false);
+    expect(commitPreparedRemoteApply(fixture.controller, second!, fixture.clock.now)).toBe(false);
   });
 
   it("rejects a remote apply token from another controller's first attempt", async () => {
@@ -738,8 +745,8 @@ describe("PasteSync ordering and recovery", () => {
     expect(applyA.attempt).not.toBe(applyB.attempt);
 
     expect(fixtureA.controller.cancelRemoteApply(applyA.attempt, fixtureA.clock.now)).toBe(true);
-    expect(fixtureB.controller.completeRemoteApply(applyA.attempt, fixtureB.clock.now)).toBe(false);
-    expect(fixtureB.controller.completeRemoteApply(applyB.attempt, fixtureB.clock.now)).toBe(true);
+    expect(commitPreparedRemoteApply(fixtureB.controller, applyA.attempt, fixtureB.clock.now)).toBe(false);
+    expect(commitPreparedRemoteApply(fixtureB.controller, applyB.attempt, fixtureB.clock.now)).toBe(true);
     expect(fixtureB.lastState()).toBe("remote-applied");
   });
 
@@ -769,7 +776,7 @@ describe("PasteSync ordering and recovery", () => {
     if (!applyB) throw new Error("missing remote apply B");
     expect(applyB.attempt).not.toBe(applyA.attempt);
 
-    expect(fixture.controller.completeRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
+    expect(commitPreparedRemoteApply(fixture.controller, applyA.attempt, fixture.clock.now)).toBe(false);
     expect(fixture.controller.cancelRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
     expect(fixture.lastState()).toBe("error");
   });
@@ -801,7 +808,7 @@ describe("PasteSync ordering and recovery", () => {
     expect(applyB.attempt).not.toBe(applyA.attempt);
 
     expect(fixture.controller.cancelRemoteApply(applyA.attempt, fixture.clock.now)).toBe(false);
-    expect(fixture.controller.completeRemoteApply(applyB.attempt, fixture.clock.now)).toBe(true);
+    expect(commitPreparedRemoteApply(fixture.controller, applyB.attempt, fixture.clock.now)).toBe(true);
     expect(fixture.lastState()).toBe("remote-applied");
   });
 
