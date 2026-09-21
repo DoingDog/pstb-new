@@ -249,6 +249,44 @@ describe("history diff", () => {
     expect(history.adoptStaged(result!)).toBe(true);
   });
 
+  it("rejects a staged diff after a newer selected current side publishes", async () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const history = createHistoryDiff({ createWorker: () => worker, onLines: vi.fn() });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+
+    const staged = history.stageCurrent("remote\n");
+    worker.onmessage?.({ data: { type: "result", id: 2, lines: [{ kind: "add", text: "remote\n" }] } } as MessageEvent<unknown>);
+    const result = await staged;
+    history.replaceCurrent("newer\n");
+
+    expect(history.prepareAdoptStaged(result!)).toBeNull();
+  });
+
+  it("prepares staged adoption without worker work or callbacks", async () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const onError = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines, onError });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+
+    const staged = history.stageCurrent("remote\n");
+    worker.onmessage?.({ data: { type: "result", id: 2, lines: [{ kind: "add", text: "remote\n" }] } } as MessageEvent<unknown>);
+    const result = await staged;
+    const prepared = history.prepareAdoptStaged(result!);
+
+    expect(prepared).not.toBeNull();
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(onLines).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    prepared!();
+    expect(history.replaceCurrent("remote\n")).toBe("unchanged");
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(onLines).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("defers a selected diff current replacement until its host mounts", () => {
     const createWorker = vi.fn(() => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }));
     const history = createHistoryDiff({ createWorker, onLines: vi.fn() });
@@ -332,6 +370,55 @@ describe("history lifecycle arbitration", () => {
     capture.version = "g.2";
 
     expect(controller.acceptList(request.token, baseline(), historyList())).toBe(true);
+  });
+
+  it.each([
+    ["all", baseline({ version: "g.2", updatedAt: "2026-09-15T00:00:01.000Z" })],
+    ["snapshot-only", baseline({ acceptedSource: "two" })],
+    ["none", baseline({ generation: "g.2", version: "g.2" })],
+  ] as const)("commits %s retention before releasing requests", (expectedRetention, next) => {
+    const { capture, controller } = settleHistory();
+    const list = controller.open(capture);
+    const snapshot = controller.select(2, capture);
+    let listAborts = 0;
+    let snapshotAborts = 0;
+    let listAbortState: ReturnType<typeof controller.snapshot> | undefined;
+    let snapshotAbortState: ReturnType<typeof controller.snapshot> | undefined;
+    list.signal.addEventListener("abort", () => {
+      listAborts += 1;
+      listAbortState = controller.snapshot();
+    });
+    snapshot.signal.addEventListener("abort", () => {
+      snapshotAborts += 1;
+      snapshotAbortState = controller.snapshot();
+    });
+
+    const committed = controller.commitRetention(capture, next);
+    const beforeRelease = controller.snapshot();
+
+    expect(committed.retention).toBe(expectedRetention);
+    expect(list.signal.aborted).toBe(false);
+    expect(snapshot.signal.aborted).toBe(false);
+    expect(controller.acceptList(list.token, capture, historyList())).toBe(false);
+    expect(controller.acceptSnapshot(snapshot.token, capture, revision({ revision: 2 }))).toBe(false);
+    expect(beforeRelease).toMatchObject({
+      epoch: 1,
+      listState: expectedRetention === "all" ? "ready" : expectedRetention === "snapshot-only" ? "stale" : "idle",
+      snapshotState: expectedRetention === "none" ? "idle" : "ready",
+      list: expectedRetention === "none" ? null : historyList(),
+      selected: expectedRetention === "none" ? null : revision(),
+      failure: null,
+    });
+
+    committed.release();
+    committed.release();
+
+    expect(list.signal.aborted).toBe(true);
+    expect(snapshot.signal.aborted).toBe(true);
+    expect(listAborts).toBe(1);
+    expect(snapshotAborts).toBe(1);
+    expect(listAbortState).toEqual(beforeRelease);
+    expect(snapshotAbortState).toEqual(beforeRelease);
   });
 
   it("retains settled history across a settings-only version change", () => {

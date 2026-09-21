@@ -55,6 +55,7 @@ export interface HistoryDiffController {
   selectRevision(revision: DiffId, previous: string, current: string): "automatic" | "manual";
   replaceCurrent(current: string): HistoryDiffMode;
   stageCurrent(current: string): Promise<StagedHistoryDiff | null>;
+  prepareAdoptStaged(stage: StagedHistoryDiff): (() => void) | null;
   adoptStaged(stage: StagedHistoryDiff): boolean;
   setMounted(mounted: boolean): HistoryDiffMode;
   computeDiff(): HistoryDiffMode;
@@ -173,6 +174,14 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     requestDiff(activeWorker, selected.previous, selected.current);
     return "computing";
   };
+  const prepareAdoptStaged = (stage: StagedHistoryDiff): (() => void) | null => {
+    const current = selected;
+    if (current === undefined || latestId !== stage.id || current.previous !== stage.previous) return null;
+    const next = { ...current, current: stage.current };
+    return () => {
+      selected = next;
+    };
+  };
 
   return {
     selectRevision(revision, previous, current) {
@@ -207,9 +216,11 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
         requestDiff(activeWorker, previous, current);
       });
     },
+    prepareAdoptStaged,
     adoptStaged(stage) {
-      if (selected === undefined || latestId !== stage.id || selected.previous !== stage.previous) return false;
-      selected = { ...selected, current: stage.current };
+      const adopt = prepareAdoptStaged(stage);
+      if (adopt === null) return false;
+      adopt();
       return true;
     },
     setMounted(nextMounted) {
@@ -269,6 +280,10 @@ export interface HistoryController {
   acceptSnapshot(token: number, capture: BaselineCapture, value: RevisionResource): boolean;
   failSnapshot(token: number, capture: BaselineCapture, failure: HistoryFailure): boolean;
   invalidate(reason: "remote-apply" | "reload" | "mutation" | "terminal" | "delete"): void;
+  commitRetention(previous: BaselineCapture, next: BaselineCapture): {
+    readonly retention: "all" | "snapshot-only" | "none";
+    release(): void;
+  };
   retainAfterApply(previous: BaselineCapture, next: BaselineCapture): "all" | "snapshot-only" | "none";
   destroy(): void;
 }
@@ -315,15 +330,23 @@ export function createHistoryController(): HistoryController {
   let snapshotRequest: PendingRequest | undefined;
   let destroyed = false;
 
-  const retireRequests = (finalize: (current: HistoryControllerSnapshot) => HistoryControllerSnapshot): void => {
+  const prepareRetireRequests = (finalize: (current: HistoryControllerSnapshot) => HistoryControllerSnapshot): (() => void) => {
     const current = state;
     const listAbort = listRequest?.abort;
     const snapshotAbort = snapshotRequest?.abort;
     listRequest = undefined;
     snapshotRequest = undefined;
     state = { ...finalize(current), epoch: current.epoch + 1 };
-    listAbort?.abort();
-    snapshotAbort?.abort();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      listAbort?.abort();
+      snapshotAbort?.abort();
+    };
+  };
+  const retireRequests = (finalize: (current: HistoryControllerSnapshot) => HistoryControllerSnapshot): void => {
+    prepareRetireRequests(finalize)();
   };
 
   const matches = (request: PendingRequest | undefined, token: number, capture: BaselineCapture): boolean => (
@@ -334,6 +357,47 @@ export function createHistoryController(): HistoryController {
     const abort = new AbortController();
     abort.abort();
     return { token, signal: abort.signal };
+  };
+  const commitRetention = (previous: BaselineCapture, next: BaselineCapture): {
+    readonly retention: "all" | "snapshot-only" | "none";
+    release(): void;
+  } => {
+    if (destroyed) return { retention: "none", release() {} };
+
+    const listState = settledListState(state);
+    const snapshotState = settledSnapshotState(state);
+    const retainedList = state.list;
+    const retainedSnapshot = state.selected;
+    const retention = previous.generation !== next.generation
+      ? "none"
+      : previous.contentRevision !== next.contentRevision || previous.acceptedSource !== next.acceptedSource
+        ? "snapshot-only"
+        : "all";
+    let finalState: HistoryControllerSnapshot;
+
+    if (retention === "none") {
+      finalState = { ...state, listState: "idle", snapshotState: "idle", list: null, selected: null, failure: null };
+    } else if (retention === "snapshot-only") {
+      const retainSnapshot = snapshotState === "ready" && retainedSnapshot !== null;
+      finalState = {
+        ...state,
+        listState: retainedList === null ? "idle" : "stale",
+        snapshotState: retainSnapshot ? "ready" : "idle",
+        list: retainedList,
+        selected: retainSnapshot ? retainedSnapshot : null,
+        failure: null,
+      };
+    } else {
+      finalState = {
+        ...state,
+        listState,
+        snapshotState,
+        list: listState === "idle" ? null : retainedList,
+        selected: snapshotState === "ready" ? retainedSnapshot : null,
+      };
+    }
+
+    return { retention, release: prepareRetireRequests(() => finalState) };
   };
 
   return {
@@ -412,44 +476,11 @@ export function createHistoryController(): HistoryController {
         snapshotState: settledSnapshotState(current),
       }));
     },
+    commitRetention,
     retainAfterApply(previous, next) {
-      if (destroyed) return "none";
-
-      const listState = settledListState(state);
-      const snapshotState = settledSnapshotState(state);
-      const retainedList = state.list;
-      const retainedSnapshot = state.selected;
-      const retention = previous.generation !== next.generation
-        ? "none"
-        : previous.contentRevision !== next.contentRevision || previous.acceptedSource !== next.acceptedSource
-          ? "snapshot-only"
-          : "all";
-      let finalState: HistoryControllerSnapshot;
-
-      if (retention === "none") {
-        finalState = { ...state, listState: "idle", snapshotState: "idle", list: null, selected: null, failure: null };
-      } else if (retention === "snapshot-only") {
-        const retainSnapshot = snapshotState === "ready" && retainedSnapshot !== null;
-        finalState = {
-          ...state,
-          listState: retainedList === null ? "idle" : "stale",
-          snapshotState: retainSnapshot ? "ready" : "idle",
-          list: retainedList,
-          selected: retainSnapshot ? retainedSnapshot : null,
-          failure: null,
-        };
-      } else {
-        finalState = {
-          ...state,
-          listState,
-          snapshotState,
-          list: listState === "idle" ? null : retainedList,
-          selected: snapshotState === "ready" ? retainedSnapshot : null,
-        };
-      }
-
-      retireRequests(() => finalState);
-      return retention;
+      const committed = commitRetention(previous, next);
+      committed.release();
+      return committed.retention;
     },
     destroy() {
       if (destroyed) return;
