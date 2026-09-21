@@ -811,6 +811,98 @@ describe("authoritative transitions", () => {
     expect(controller.snapshot()).toMatchObject({ state: "error", requiresExplicitRetry: true });
     expect(save.calls).toEqual([]);
   });
+
+  it("commits a remote replacement before releasing timer cleanup or notification", () => {
+    const setTimer = vi.fn(() => "timer");
+    const clearTimer = vi.fn();
+    const tryDispatch = vi.fn(() => ({ kind: "blocked" as const }));
+    const onStateChange = vi.fn();
+    const controller = new AutosaveController({
+      content: "first",
+      version: "g.1",
+      now: () => 0,
+      setTimer,
+      clearTimer,
+      tryDispatch,
+      onCoalescedIntent() {},
+      onStateChange,
+    });
+
+    controller.input("local draft", 0);
+    clearTimer.mockClear();
+    onStateChange.mockClear();
+
+    const release = controller.commitRemoteReplace("server", "g.2");
+
+    expect(controller.snapshot()).toMatchObject({
+      state: "clean",
+      draft: "server",
+      acceptedSource: "server",
+      version: "g.2",
+      lastInputAt: null,
+      dueAt: null,
+      inFlightContent: null,
+      dirtyWhileSaving: false,
+      failureStatus: null,
+      requiresExplicitRetry: false,
+      coalescedIntent: false,
+    });
+    expect(clearTimer).not.toHaveBeenCalled();
+    expect(onStateChange).not.toHaveBeenCalled();
+    expect(tryDispatch).not.toHaveBeenCalled();
+
+    release();
+    release();
+
+    expect(clearTimer).toHaveBeenCalledExactlyOnceWith("timer");
+    expect(onStateChange).toHaveBeenCalledExactlyOnceWith(controller.snapshot());
+    expect(tryDispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps a retired save completion from changing a committed remote replacement", async () => {
+    const { clock, controller, save, states } = autosaveFixture();
+
+    controller.input("local draft", clock.now());
+    clock.advance(1_000);
+    const release = controller.commitRemoteReplace("server", "g.2");
+
+    expect(controller.snapshot()).toMatchObject({
+      state: "clean",
+      draft: "server",
+      acceptedSource: "server",
+      version: "g.2",
+      inFlightContent: null,
+      coalescedIntent: false,
+    });
+    expect(lastState(states)).toMatchObject({ state: "saving", inFlightContent: "local draft" });
+
+    release();
+    save.pending[0]!.resolve({ status: 200, changed: true, paste: summary({ version: "stale.g.3" }) });
+    await settle();
+
+    expect(controller.snapshot()).toMatchObject({
+      state: "clean",
+      draft: "server",
+      acceptedSource: "server",
+      version: "g.2",
+    });
+    expect(save.calls).toHaveLength(1);
+  });
+
+  it("preserves applyAuthoritative replace behavior", () => {
+    const prepared = autosaveFixture();
+    const legacy = autosaveFixture();
+
+    prepared.controller.input("local draft", 0);
+    legacy.controller.input("local draft", 0);
+
+    prepared.controller.commitRemoteReplace("server", "g.2")();
+    legacy.controller.applyAuthoritative({ kind: "replace", acceptedSource: "server", version: "g.2" });
+
+    expect(prepared.controller.snapshot()).toEqual(legacy.controller.snapshot());
+    expect(prepared.states).toEqual(legacy.states);
+    expect(prepared.save.calls).toEqual(legacy.save.calls);
+  });
 });
 
 describe("createAutosaveMarkdownModes", () => {

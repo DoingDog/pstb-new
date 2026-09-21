@@ -66,6 +66,7 @@ export interface AutosaveControllerApi {
   retry(): void;
   overwrite(): void;
   acknowledgeAcceptedContent(acceptedSource: string, version: string): boolean;
+  commitRemoteReplace?(acceptedSource: string, version: string): () => void;
   applyAuthoritative(transition: AutosaveAuthoritativeTransition): void;
   slotAvailable(): void;
   dispose(): void;
@@ -198,25 +199,39 @@ export class AutosaveController implements AutosaveControllerApi {
     return true;
   }
 
+  commitRemoteReplace(acceptedSource: string, version: string): () => void {
+    if (this.disposed) return () => {};
+
+    const timer = this.timer;
+    this.timer = undefined;
+    this.acceptedSource = acceptedSource;
+    this.draft = acceptedSource;
+    this.version = version;
+    this.lastInputAt = null;
+    this.dueAt = null;
+    this.retireActiveAttempt();
+    this.dirtyWhileSaving = false;
+    this.failureStatus = null;
+    this.requiresExplicitRetry = false;
+    this.coalescedIntent = false;
+    this.pausedState = undefined;
+    this.state = "clean";
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (timer !== undefined) this.options.clearTimer(timer);
+      this.emit();
+    };
+  }
+
   applyAuthoritative(transition: AutosaveAuthoritativeTransition): void {
     if (this.disposed) return;
 
     switch (transition.kind) {
       case "replace":
-        this.cancelTimer();
-        this.acceptedSource = transition.acceptedSource;
-        this.draft = transition.acceptedSource;
-        this.version = transition.version;
-        this.lastInputAt = null;
-        this.dueAt = null;
-        this.retireActiveAttempt();
-        this.dirtyWhileSaving = false;
-        this.failureStatus = null;
-        this.requiresExplicitRetry = false;
-        this.coalescedIntent = false;
-        this.pausedState = undefined;
-        this.state = "clean";
-        this.emit();
+        this.commitRemoteReplace(transition.acceptedSource, transition.version)();
         return;
       case "metadata":
         if (transition.acceptedSource !== this.acceptedSource) return;
