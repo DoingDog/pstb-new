@@ -49,7 +49,7 @@ export interface HistoryDiffOptions {
   createWorker?(): DiffWorker;
 }
 
-export type HistoryDiffMode = "idle" | "computing" | "manual" | "unchanged";
+export type HistoryDiffMode = "idle" | "computing" | "manual" | "unchanged" | "failed";
 
 export interface HistoryDiffController {
   selectRevision(revision: DiffId, previous: string, current: string): "automatic" | "manual";
@@ -57,7 +57,7 @@ export interface HistoryDiffController {
   stageCurrent(current: string): Promise<StagedHistoryDiff | null>;
   adoptStaged(stage: StagedHistoryDiff): boolean;
   setMounted(mounted: boolean): HistoryDiffMode;
-  computeDiff(): boolean;
+  computeDiff(): HistoryDiffMode;
   clearSelection(): void;
   destroy(): void;
 }
@@ -165,13 +165,13 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     activeWorker.postMessage({ type: "diff", id, previous, current });
     return id;
   };
-  const startDiff = (): boolean => {
-    if (selected === undefined) return false;
+  const startDiff = (): HistoryDiffMode => {
+    if (selected === undefined) return "idle";
     const activeWorker = ensureWorker();
-    if (activeWorker === undefined) return false;
+    if (activeWorker === undefined) return "failed";
     retireStaged();
     requestDiff(activeWorker, selected.previous, selected.current);
-    return true;
+    return "computing";
   };
 
   return {
@@ -193,8 +193,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
       retireRequest();
       if (!automaticDiffAllowed(selected.previous, current)) return "manual";
       if (!mounted) return "idle";
-      startDiff();
-      return "computing";
+      return startDiff();
     },
     stageCurrent(current) {
       if (selected === undefined || !mounted || !automaticDiffAllowed(selected.previous, current)) return Promise.resolve(null);
@@ -216,7 +215,8 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     setMounted(nextMounted) {
       if (mounted === nextMounted) {
         if (selected === undefined) return "idle";
-        return automaticDiffAllowed(selected.previous, selected.current) && mounted ? "computing" : automaticDiffAllowed(selected.previous, selected.current) ? "idle" : "manual";
+        if (!automaticDiffAllowed(selected.previous, selected.current)) return "manual";
+        return mounted ? startDiff() : "idle";
       }
       mounted = nextMounted;
       if (!mounted) {
@@ -228,8 +228,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
       }
       if (selected === undefined) return "idle";
       if (!automaticDiffAllowed(selected.previous, selected.current)) return "manual";
-      startDiff();
-      return "computing";
+      return startDiff();
     },
     computeDiff: startDiff,
     clearSelection() {

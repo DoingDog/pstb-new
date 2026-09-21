@@ -81,6 +81,7 @@ async function mount(node: ReactNode): Promise<HTMLDivElement> {
   });
   await act(async () => {
     await vi.dynamicImportSettled();
+    await Promise.resolve();
   });
   mounted.push({ root, element });
   return element;
@@ -364,6 +365,8 @@ function button(root: any, label: string, occurrence = 0): HTMLButtonElement {
 async function clickButton(root: any, label: string, occurrence = 0): Promise<void> {
   await act(async () => {
     button(root, label, occurrence).click();
+    await vi.dynamicImportSettled();
+    await Promise.resolve();
     await Promise.resolve();
   });
 }
@@ -371,6 +374,7 @@ async function clickButton(root: any, label: string, occurrence = 0): Promise<vo
 async function selectTab(root: any, label: string): Promise<void> {
   await act(async () => {
     button(root, label).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    await vi.dynamicImportSettled();
     await Promise.resolve();
   });
 }
@@ -654,6 +658,7 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 10; step += 1) await Promise.resolve();
     });
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "failed", key: "reload-server" });
+    expect(page!.snapshot.candidate).toBeNull();
   });
 
   it("does not reopen the active deadline when programmatic draft settlement has no DOM timestamp", async () => {
@@ -771,7 +776,7 @@ describe("Task 15 async lifecycle behavior", () => {
 
     expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
     expect(terminal).toMatchObject({
-      page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: { surface: "preview", source: "consumed" } },
+      page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: null },
       records: { lastAction: { state: "failed", key: "reload-server", outcomeKey: "reload-terminal-response-display-failed" } },
     });
   });
@@ -948,7 +953,7 @@ describe("Task 15 async lifecycle behavior", () => {
     });
 
     expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
-    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: { surface: "preview", source: "consumed" } } });
+    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", currentSource: "initial", responseSource: "consumed", choiceAvailable: true, fallback: null } });
   });
 
   it("publishes terminal capability removal before a mounted strict view-once stage resolves", async () => {
@@ -977,7 +982,7 @@ describe("Task 15 async lifecycle behavior", () => {
     });
 
     expect(page!.snapshot.paste).toMatchObject({ phase: "consumed", serverCapabilities: false });
-    expect(terminal).toMatchObject({ page: { source: "initial", consumedSource: "consumed", fallback: { surface: "preview", source: "consumed" } } });
+    expect(terminal).toMatchObject({ page: { source: "initial", consumedSource: "consumed", fallback: null } });
     expect(stagedMarkdown.prepareMarkdownPreview).not.toHaveBeenCalled();
   });
 
@@ -1455,6 +1460,44 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(rendered.querySelector("button")?.disabled).toBe(false);
   });
 
+  it("retires a discarded settings intent without changing its frozen Last action", async () => {
+    let page: UsePastePageResult | null = null;
+    const calls: RequestInit[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return calls.length === 1
+        ? uncertainWriteResponse()
+        : mutationResponse("initial", { title: "fresh", version: "generation.2" });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.saveTitle("discarded");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.settings.result).toMatchObject({ field: "title", state: "reconciliation-required" });
+
+    await act(async () => {
+      page!.actions.discard();
+      page!.actions.retry(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.settings.result).toMatchObject({ field: null, state: "idle" });
+    expect(calls).toHaveLength(1);
+
+    await act(async () => {
+      page!.actions.saveTitle("fresh");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String(calls[1]!.body))).toMatchObject({ title: "fresh" });
+  });
+
   it("settles a reconciled view-once response into its terminal local source", async () => {
     vi.useFakeTimers();
     let rejectSave: ((reason?: unknown) => void) | undefined;
@@ -1486,12 +1529,21 @@ describe("Task 15 async lifecycle behavior", () => {
     await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
     const recovery = rendered.querySelector<HTMLElement>('[aria-label="Autosave"]');
     expect(recovery).not.toBeNull();
-    await clickButton(recovery!, "Reconcile");
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
-    await clickButton(rendered, "Use remote");
     await act(async () => {
-      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      button(recovery!, "Reconcile").click();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
+    await act(async () => {
+      button(rendered, "Use remote").click();
+      await Promise.resolve();
+      await Promise.resolve();
     });
     await vi.waitFor(() => expect(Array.from(rendered.querySelectorAll("button")).filter((button) => button.textContent?.trim() === "Use remote")).toHaveLength(0));
     await clickButton(rendered, "Source");
@@ -1672,10 +1724,10 @@ describe("Task 15 async lifecycle behavior", () => {
 
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");
     expect(button(rendered, "Use remote")).toBeDefined();
-    expect(rendered.querySelector("[data-derived-fallback=preview]")).not.toBeNull();
+    expect(rendered.querySelector("[data-derived-fallback=preview]")).toBeNull();
   });
 
-  it("adopts a terminal Preview Retry without consuming the retained source choice", async () => {
+  it("does not expose a terminal Preview Retry for an unselected consumed source", async () => {
     vi.useFakeTimers();
     stagedMarkdown.prepareMarkdownPreview.mockRejectedValueOnce(new Error("preview unavailable"));
     vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("consumed", {
@@ -1689,12 +1741,10 @@ describe("Task 15 async lifecycle behavior", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await vi.dynamicImportSettled(); });
     await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Consumed"]')).not.toBeNull());
     await clickButton(rendered, "Use remote");
-    await vi.waitFor(() => expect(rendered.querySelector('[data-derived-fallback="preview"]')).not.toBeNull());
-    stagedMarkdown.prepareMarkdownPreview.mockResolvedValueOnce({ source: "consumed", html: "<p>retried consumed</p>" });
+    await vi.waitFor(() => expect(rendered.querySelector("[data-operation-record=last-action]")?.textContent).toContain("could not be displayed"));
 
-    await clickButton(rendered, "Retry");
-    await vi.waitFor(() => expect(rendered.querySelector("[data-safe-markdown]")?.textContent).toContain("retried consumed"));
     expect(rendered.querySelector('[data-derived-fallback="preview"]')).toBeNull();
+    expect(Array.from(rendered.querySelectorAll("button")).filter((item) => item.textContent?.trim() === "Retry")).toHaveLength(0);
     expect(button(rendered, "Use remote")).toBeDefined();
     await clickButton(rendered, "Source");
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("current");

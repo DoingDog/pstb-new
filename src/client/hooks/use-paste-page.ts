@@ -174,6 +174,7 @@ type Runtime = {
   terminalSignalled: boolean;
   requestControllers: Set<AbortController>;
   lastIntent: MutationIntent | null;
+  suppressedRecovery: { key: ActionKey; attempt: number } | null;
   reloadToken: number;
   reloadController: AbortController | null;
   diff: HistoryDiffState;
@@ -352,7 +353,20 @@ function cloneIntentWithCredential(intent: MutationIntent, credential: string | 
   }
 }
 
-function statusFor(lastAction: LastAction, keys: readonly ActionKey[], snapshot: ActiveSnapshot): "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required" {
+function intentOwner(intent: MutationIntent): LocalWorkOwner {
+  if (intent.kind === "content") return "content";
+  if (intent.kind === "password-set" || intent.kind === "password-clear") return "password";
+  return "settings";
+}
+
+function actionBelongsToOwner(key: ActionKey, owner: LocalWorkOwner): boolean {
+  if (owner === "content") return key === "autosave" || key === "manual-save" || key === "save-retry" || key === "overwrite" || key === "content-reconcile";
+  if (owner === "password") return key === "password-set" || key === "password-clear" || key === "password-reconcile";
+  return key === "settings-title" || key === "settings-format" || key === "settings-expiration" || key === "settings-view-once" || key === "settings-reconcile";
+}
+
+function statusFor(lastAction: LastAction, keys: readonly ActionKey[], snapshot: ActiveSnapshot, suppressedRecovery: { key: ActionKey; attempt: number } | null): "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required" {
+  if (lastAction.state !== "idle" && suppressedRecovery?.key === lastAction.key && suppressedRecovery.attempt === lastAction.attempt) return "idle";
   if (snapshot.reconciliationRequired) return "reconciliation-required";
   if (lastAction.state === "idle" || !keys.includes(lastAction.key)) return "idle";
   if (lastAction.state === "pending") return "pending";
@@ -388,7 +402,7 @@ function shallowHistory(runtime: Runtime): HistoryPanelState {
 
 function replaceHistoryCurrent(runtime: Runtime, source: string): void {
   const state = runtime.historyDiff.replaceCurrent(source);
-  if (state !== "unchanged") runtime.diff = { state, lines: [] };
+  if (state !== "unchanged" && state !== "failed") runtime.diff = { state, lines: [] };
 }
 
 function initialView(initialPage: OrdinaryInitialPage): PastePageSnapshot {
@@ -486,11 +500,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     const passwordOwnsReconciliation = paste.reconciliation.owner === "password";
     const settingsState = paste.reconciliationRequired
       ? settingsOwnsReconciliation ? "reconciliation-required" : "idle"
-      : statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile"], paste);
+      : statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile"], paste, runtime.suppressedRecovery);
     const passwordState = paste.reconciliationRequired
       ? passwordOwnsReconciliation ? "reconciliation-required" : "idle"
-      : statusFor(paste.lastAction, ["password-set", "password-clear", "password-reconcile"], paste);
-    const deleteState = statusFor(paste.lastAction, ["delete"], paste);
+      : statusFor(paste.lastAction, ["password-set", "password-clear", "password-reconcile"], paste, runtime.suppressedRecovery);
+    const deleteState = statusFor(paste.lastAction, ["delete"], paste, runtime.suppressedRecovery);
     const expiration = paste.summary.expiration.kind === "permanent"
       ? null
       : paste.summary.expiration.kind === "relative"
@@ -790,7 +804,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     const preparedPreview = source === responseSource && isMarkdownPreview(candidate?.terminalPreview)
       ? candidate.terminalPreview.html as TrustedMarkdownHtml
       : undefined;
-    completeTerminal(runtime, terminalPage("consumed", source, currentSource, responseSource, choiceAvailable, preparedPreview, candidate?.terminalFallback ?? null));
+    completeTerminal(runtime, terminalPage("consumed", source, currentSource, responseSource, choiceAvailable, preparedPreview, candidate?.terminalFallback?.source === source ? candidate.terminalFallback : null));
   }
 
   function dispatchContentReconcile(runtime: Runtime, dispatch: ContentReconcileDispatch): void {
@@ -899,6 +913,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     const start = runtime.paste.startMutation({ kind: "content", action: request.action, content: request.content, omitVersion: request.action === "overwrite" }, now());
     if (start.kind !== "dispatch") return { kind: "blocked" };
     runtime.lastIntent = start.intent;
+    runtime.suppressedRecovery = null;
     drainEffects(runtime);
     const controller = signal(runtime);
     if (controller === null) return { kind: "blocked" };
@@ -1051,6 +1066,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       return;
     }
     runtime.lastIntent = intent;
+    runtime.suppressedRecovery = null;
     clearExpiringCandidate(runtime);
     runtime.surface.invalidate();
     drainEffects(runtime);
@@ -1100,8 +1116,9 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       if (accepted && result.ok) {
         const current = runtime.paste.snapshot();
         if (active(current)) {
+          runtime.diff = { state: "idle", lines: [] };
           const mode = runtime.historyDiff.selectRevision(revision, result.value.content, current.draft);
-          runtime.diff = { state: mode === "automatic" ? "computing" : "manual", lines: [] };
+          if (runtime.diff.state !== "failed") runtime.diff = { state: mode === "automatic" ? "computing" : "manual", lines: [] };
         }
         if (navigator.onLine !== false) updateNetworkRecord(runtime, "online");
       }
@@ -1125,8 +1142,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
   function applyRemoteSnapshot(runtime: Runtime, remote: RemoteSnapshot, attempt?: import("../paste-sync").RemoteApplyAttempt): boolean {
     const previous = runtime.paste.snapshot();
     if (!active(previous) || runtime.disposed || runtimeRef.current !== runtime) return false;
-    if (attempt !== undefined && !runtime.sync.completeRemoteApply(attempt, now())) return false;
     if (!runtime.paste.applyRemoteSnapshot(remote)) return false;
+    if (attempt !== undefined && !runtime.sync.completeRemoteApply(attempt, now())) return false;
     const current = runtime.paste.snapshot();
     if (!active(current)) return false;
     replaceHistoryCurrent(runtime, current.draft);
@@ -1144,8 +1161,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     return true;
   }
 
-  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: import("../paste-sync").RemoteApplyAttempt, originCapture?: PasteSyncCapture): Promise<void> {
-    const candidate = mode === "candidate" ? runtime.candidate : null;
+  async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: import("../paste-sync").RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
+    const candidate = mode === "candidate" ? candidateOverride ?? runtime.candidate : null;
     const capture = mode === "candidate" ? candidate?.capture : originCapture;
     if (capture === undefined) return;
     const current = (): ActiveSnapshot | null => {
@@ -1172,7 +1189,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         && !snapshot.reconciliationRequired;
       if (mode === "autosync") return shared && save.draft === save.acceptedSource;
       return shared
-        && candidate === runtime.candidate
         && candidate?.snapshot === remote
         && save.draft === save.acceptedSource;
     };
@@ -1199,7 +1215,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         commitCurrent,
       })
       : await runtime.surface.applyUseRemote(remote.source, {
-        candidateCurrent: candidate === runtime.candidate && candidate?.snapshot === remote,
+        candidateCurrent: candidate?.snapshot === remote,
         acceptedBaselineCurrent: baselineCurrent,
         localGenerationCurrent,
         ordinary: snapshot.phase === "ordinary",
@@ -1219,8 +1235,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (runtime.disposed || runtimeRef.current !== runtime) return;
     if (applied && commitCurrent() && applyRemoteSnapshot(runtime, remote, attempt)) return;
     if (mode === "candidate") settleUseRemoteAction(runtime, "failed");
-    if (attempt !== undefined) runtime.sync.cancelRemoteApply(attempt, now());
-    else publish(runtime);
+    if (attempt !== undefined && runtime.sync.cancelRemoteApply(attempt, now()) && mode === "candidate") runtime.candidate = candidate;
+    publish(runtime);
   }
 
   function handleSyncEvent(runtime: Runtime, event: PasteSyncEvent): void {
@@ -1300,6 +1316,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.terminalSignalled = false;
     runtime.requestControllers = new Set();
     runtime.lastIntent = null;
+    runtime.suppressedRecovery = null;
     runtime.reloadToken = 0;
     runtime.reloadController = null;
     runtime.mountedSurfaces = new Set();
@@ -1641,7 +1658,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           if (applyRemoteSnapshot(runtime, result.snapshot)) return;
         }
         settleReloadAction(runtime, "failed");
-        runtime.candidate = { kind: "remote", source: result.snapshot.source, snapshot: result.snapshot };
         publish(runtime);
       }, () => {
         if (!settleRequest(runtime, controller)) return;
@@ -1656,6 +1672,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const before = runtime.paste.snapshot();
       const owner = active(before) ? before.reconciliation.owner : null;
       if (owner === null || before.reconciliation.requestPending || !runtime.paste.discardReconciliation()) return;
+      const discardedOwner: LocalWorkOwner = owner === "content" ? "content" : owner === "password" ? "password" : "settings";
+      if (runtime.lastIntent !== null && intentOwner(runtime.lastIntent) === discardedOwner) runtime.lastIntent = null;
+      if (before.lastAction.state !== "idle" && actionBelongsToOwner(before.lastAction.key, discardedOwner)) {
+        runtime.suppressedRecovery = { key: before.lastAction.key, attempt: before.lastAction.attempt };
+      }
       const snapshot = runtime.paste.snapshot();
       if (owner === "content" && active(snapshot)) {
         runtime.autosave.applyAuthoritative({
@@ -1720,7 +1741,8 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
       runtime.diff = { ...runtime.diff, state: "computing" };
-      if (!runtime.historyDiff.computeDiff()) runtime.diff = { ...runtime.diff, state: "manual" };
+      const state = runtime.historyDiff.computeDiff();
+      if (state !== "failed" && state !== "unchanged") runtime.diff = { ...runtime.diff, state };
       publish(runtime);
     },
     back() {
@@ -1736,11 +1758,18 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const snapshot = runtime?.paste.snapshot();
       if (runtime === null || runtime.disposed || candidate?.snapshot === undefined || snapshot === undefined || !active(snapshot) || runtime.useRemoteAction !== null) return;
       if (candidate.kind === "terminal") return;
+      const remoteAttempt = candidate.capture === undefined ? null : runtime.sync.startCandidateApply(candidate.snapshot, candidate.capture);
       const attempt = snapshot.lastAction.state === "idle" ? 1 : snapshot.lastAction.attempt + 1;
       const startedAt = displayTime();
       runtime.useRemoteAction = { attempt, startedAt };
       runtime.paste.recordLocalAction({ key: "use-remote", state: "pending", attempt, startedAt });
-      void applyRemote(runtime, candidate.snapshot, "candidate");
+      if (remoteAttempt === null) {
+        settleUseRemoteAction(runtime, "failed");
+        publish(runtime);
+        return;
+      }
+      runtime.candidate = null;
+      void applyRemote(runtime, candidate.snapshot, "candidate", remoteAttempt, candidate.capture, candidate);
       publish(runtime);
     },
     keepCurrent() {
@@ -1787,7 +1816,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       else runtime.mountedSurfaces.delete(surface);
       if (surface === "diff") {
         const state = runtime.historyDiff.setMounted(mounted);
-        if (state !== "unchanged") runtime.diff = { state, lines: [] };
+        if (state !== "unchanged" && state !== "failed") runtime.diff = { state, lines: [] };
       }
       runtime.surface.remount();
       publish(runtime);

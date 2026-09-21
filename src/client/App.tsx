@@ -237,6 +237,7 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
     const capture = terminal.local.surface.snapshot().capture;
     const fallback = terminal.local.previewHost !== null
       && terminal.fallback?.surface === "preview"
+      && terminal.fallback.source === terminal.source
       && terminal.fallback.generation === capture.currentDisplayGeneration
       && terminal.fallback.hostGeneration === capture.hostGeneration
       ? terminal.fallback
@@ -365,7 +366,7 @@ export function App({ initialPage }: AppProps) {
     local.surface = createStagedSurfaceApply({
       capture: {
         localGeneration: 0,
-        currentExactSource: page.fallback?.source ?? page.source,
+        currentExactSource: page.source,
         currentDisplayGeneration: 0,
         hostGeneration: 0,
         parentApplyGeneration: 0,
@@ -433,7 +434,7 @@ export function App({ initialPage }: AppProps) {
     current.local.surface.remount();
     if (host === null) return;
     const capture = current.local.surface.snapshot().capture;
-    setTerminal((page) => page?.local === current.local && page.fallback?.surface === "preview"
+    setTerminal((page) => page?.local === current.local && page.fallback?.surface === "preview" && page.fallback.source === page.source
       ? { ...page, fallback: { ...page.fallback, generation: capture.currentDisplayGeneration, hostGeneration: capture.hostGeneration } }
       : page);
   }, []);
@@ -441,7 +442,7 @@ export function App({ initialPage }: AppProps) {
   const retryTerminalSurface = React.useCallback((surface: SurfaceFallbackState["surface"]) => {
     const current = terminalRef.current;
     const fallback = current?.fallback;
-    if (current === null || surface !== "preview" || fallback?.surface !== "preview" || current.local.previewHost === null) return;
+    if (current === null || surface !== "preview" || fallback?.surface !== "preview" || fallback.source !== current.source || current.local.previewHost === null) return;
     const local = current.local;
     const host = local.previewHost;
     const capture = local.surface.snapshot().capture;

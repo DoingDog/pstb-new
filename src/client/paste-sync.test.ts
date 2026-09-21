@@ -507,6 +507,54 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(2);
   });
 
+  it("owns a retained candidate through apply completion without restarting its cadence", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({ source: "remote" });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const candidate = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "candidate" }> => event.type === "candidate",
+    );
+    if (!candidate) throw new Error("missing candidate");
+
+    const attempt = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    expect(attempt).not.toBeNull();
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(1);
+
+    expect(fixture.controller.completeRemoteApply(attempt!, fixture.clock.now)).toBe(true);
+    expect(fixture.lastState()).toBe("remote-applied");
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("rejects invalidated retained candidates and restores a cancelled candidate apply", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({ source: "remote" });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const candidate = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "candidate" }> => event.type === "candidate",
+    );
+    if (!candidate) throw new Error("missing candidate");
+
+    const first = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    expect(first).not.toBeNull();
+    expect(fixture.controller.cancelRemoteApply(first!, fixture.clock.now)).toBe(true);
+    const second = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    fixture.controller.localWorkChanged();
+    expect(fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture)).toBeNull();
+    expect(fixture.controller.completeRemoteApply(second!, fixture.clock.now)).toBe(false);
+  });
+
   it("rejects a remote apply token from another controller's first attempt", async () => {
     const remote = snapshot({
       identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },

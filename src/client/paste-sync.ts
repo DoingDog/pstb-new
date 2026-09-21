@@ -85,6 +85,7 @@ export interface PasteSyncController {
   setOnline(online: boolean, eventAt: number): void;
   keepCurrent(actionAt: number): void;
   retrySync(actionAt: number, pendingCredential: string | null): boolean;
+  startCandidateApply(snapshot: RemoteSnapshot, capture: PasteSyncCapture): RemoteApplyAttempt | null;
   completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean;
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean;
   dispose(): void;
@@ -174,6 +175,7 @@ export class PasteSync implements PasteSyncController {
   private retryCredential: string | null = null;
   private retryRequired = false;
   private candidate: Candidate | null = null;
+  private stagedCandidate: Candidate | null = null;
   private locallyCleanOverride = false;
   private remoteApplyAttempt: RemoteApplyAttempt | null = null;
   private permanentlyStopped = false;
@@ -223,6 +225,7 @@ export class PasteSync implements PasteSyncController {
     this.localDirty = true;
     this.syncDueAt = null;
     this.candidate = null;
+    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
     this.remoteApplyAttempt = null;
     this.clearRetryIntent();
@@ -256,6 +259,7 @@ export class PasteSync implements PasteSyncController {
     if (!online) {
       this.syncDueAt = null;
       this.candidate = null;
+      this.stagedCandidate = null;
       this.locallyCleanOverride = false;
       this.remoteApplyAttempt = null;
       this.clearRetryIntent();
@@ -312,10 +316,25 @@ export class PasteSync implements PasteSyncController {
     return true;
   }
 
+  startCandidateApply(snapshot: RemoteSnapshot, capture: PasteSyncCapture): RemoteApplyAttempt | null {
+    const candidate = this.candidate;
+    if (!this.canStartCandidateApply(candidate, snapshot, capture)) return null;
+
+    const attempt = {} as RemoteApplyAttempt;
+    this.candidate = null;
+    this.stagedCandidate = candidate;
+    this.remoteApplyAttempt = attempt;
+    this.locallyCleanOverride = false;
+    this.armTimer();
+    return attempt;
+  }
+
   completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean {
     if (!this.canSettleRemoteApply(attempt)) return false;
 
     this.remoteApplyAttempt = null;
+    this.stagedCandidate = null;
+    this.candidate = null;
     this.locallyCleanOverride = true;
     this.setState("remote-applied", committedAt);
     this.scheduleAfterSettle(committedAt);
@@ -325,11 +344,20 @@ export class PasteSync implements PasteSyncController {
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean {
     if (!this.canSettleRemoteApply(attempt)) return false;
 
+    const candidate = this.stagedCandidate;
     this.remoteApplyAttempt = null;
-    this.locallyCleanOverride = true;
+    this.stagedCandidate = null;
+    this.candidate = candidate;
     this.options.emit({ type: "error", at: cancelledAt });
     this.setState("error", cancelledAt);
-    this.scheduleAfterSettle(cancelledAt);
+    if (candidate !== null) {
+      this.locallyCleanOverride = false;
+      this.syncDueAt = null;
+      this.armTimer();
+    } else {
+      this.locallyCleanOverride = true;
+      this.scheduleAfterSettle(cancelledAt);
+    }
     return true;
   }
 
@@ -338,6 +366,8 @@ export class PasteSync implements PasteSyncController {
 
     this.disposed = true;
     this.syncDueAt = null;
+    this.candidate = null;
+    this.stagedCandidate = null;
     this.remoteApplyAttempt = null;
     this.clearRetryIntent();
     this.clearTimer();
@@ -353,6 +383,7 @@ export class PasteSync implements PasteSyncController {
     return !this.terminal
       && !this.permanentlyStopped
       && !this.retryRequired
+      && this.candidate === null
       && this.remoteApplyAttempt === null
       && this.isActive()
       && current.phase === "ordinary"
@@ -371,6 +402,35 @@ export class PasteSync implements PasteSyncController {
       && this.candidate !== null
       && this.isActive()
       && current.phase === "ordinary"
+      && !current.offline
+      && this.online
+      && !this.localDirty;
+  }
+
+  private canStartCandidateApply(candidate: Candidate | null, snapshot: RemoteSnapshot, capture: PasteSyncCapture): candidate is Candidate {
+    const current = this.options.capture();
+    return this.started
+      && !this.disposed
+      && !this.terminal
+      && !this.permanentlyStopped
+      && this.inFlight === null
+      && this.remoteApplyAttempt === null
+      && candidate !== null
+      && candidate.snapshot === snapshot
+      && candidate.capture === capture
+      && this.isActive()
+      && this.activeUntil === capture.activeUntil
+      && current.phase === "ordinary"
+      && current.activeUntil === capture.activeUntil
+      && current.localGeneration === capture.localGeneration
+      && current.acceptedApplyGeneration === capture.acceptedApplyGeneration
+      && current.baseline.acceptedApplyGeneration === capture.baseline.acceptedApplyGeneration
+      && current.baseline.localGeneration === capture.baseline.localGeneration
+      && current.baseline.generation === capture.baseline.generation
+      && current.baseline.version === capture.baseline.version
+      && current.baseline.contentRevision === capture.baseline.contentRevision
+      && current.baseline.updatedAt === capture.baseline.updatedAt
+      && current.baseline.acceptedSource === capture.baseline.acceptedSource
       && !current.offline
       && this.online
       && !this.localDirty;
@@ -608,6 +668,7 @@ export class PasteSync implements PasteSyncController {
     const ordinaryTokenCurrent = this.canOrder(read);
     this.terminal = true;
     this.candidate = null;
+    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
     this.remoteApplyAttempt = null;
     this.clearRetryIntent();
@@ -655,6 +716,7 @@ export class PasteSync implements PasteSyncController {
   private expire(): void {
     this.syncDueAt = null;
     this.candidate = null;
+    this.stagedCandidate = null;
     this.locallyCleanOverride = false;
     this.remoteApplyAttempt = null;
     this.clearRetryIntent();

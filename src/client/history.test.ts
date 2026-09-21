@@ -181,6 +181,28 @@ describe("history diff", () => {
     expect(onLines).toHaveBeenLastCalledWith([{ kind: "add", text: "current\n" }]);
   });
 
+  it("reports a synchronous worker creation failure and retries after remount", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onError = vi.fn();
+    let creates = 0;
+    const history = createHistoryDiff({
+      createWorker: () => {
+        creates += 1;
+        if (creates === 1) throw new Error("worker unavailable");
+        return worker;
+      },
+      onLines: vi.fn(),
+      onError,
+    });
+
+    history.selectRevision("1", "old\n", "current\n");
+    expect(history.setMounted(true)).toBe("failed");
+    expect(onError).toHaveBeenCalledWith("worker unavailable");
+    expect(history.setMounted(false)).toBe("idle");
+    expect(history.setMounted(true)).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 2, previous: "old\n", current: "current\n" });
+  });
+
   it("replaces the selected diff current side and retires its old worker response", () => {
     const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
     const onLines = vi.fn();

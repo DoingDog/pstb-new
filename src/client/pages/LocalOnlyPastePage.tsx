@@ -105,7 +105,7 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
     }
   };
 
-  const displayedPreview = (derivedPreview?.html as TrustedMarkdownHtml | undefined) ?? preview;
+  const displayedPreview = (derivedPreview?.source === source ? derivedPreview.html as TrustedMarkdownHtml : undefined) ?? preview;
   const previewNode = displayedPreview === null
     ? <pre data-local-view="true" className={wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>
     : <div className={wrap ? "break-words" : "overflow-x-auto"}><SafeMarkdown html={displayedPreview} /></div>;
@@ -118,7 +118,7 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
       {canChooseConsumedSource && <div className="flex flex-wrap gap-2"><Button type="button" onClick={onUseConsumedResponse}>{copy.useRemote}</Button><Button type="button" variant="outline" onClick={onKeepCurrent}>{copy.keepCurrent}</Button></div>}
       {previewFailure !== null && <p role="alert">{previewFailure}</p>}
       <div ref={previewHost} data-terminal-preview-host="true">
-        {fallback?.surface === "preview" && <div data-derived-fallback="preview" data-derived-generation={String(fallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.("preview")}>{copy.retry}</Button></div>}
+        {fallback?.surface === "preview" && fallback.source === source && <div data-derived-fallback="preview" data-derived-generation={String(fallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.("preview")}>{copy.retry}</Button></div>}
         <LocalActions
           actionScope={`local:${phase}:${source}`}
           source={source}
