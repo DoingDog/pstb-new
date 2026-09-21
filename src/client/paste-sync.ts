@@ -78,6 +78,11 @@ export type PasteSyncEvent =
   | { type: "not-found" | "forbidden" | "conflict"; at: number }
   | { type: "error"; at: number; transport?: "network" };
 
+export interface PreparedPasteSyncRemoteCommit {
+  commit(): () => void;
+  fail(): () => void;
+}
+
 export interface PasteSyncController {
   start(loadAt: number): void;
   recordUserActivity(activityAt: number): void;
@@ -88,6 +93,7 @@ export interface PasteSyncController {
   retrySync(actionAt: number, pendingCredential: string | null): boolean;
   startCandidateApply(snapshot: RemoteSnapshot, capture: PasteSyncCapture): RemoteApplyAttempt | null;
   isRemoteApplyCurrent(attempt: RemoteApplyAttempt): boolean;
+  prepareRemoteApplyCommit(attempt: RemoteApplyAttempt, committedAt: number): PreparedPasteSyncRemoteCommit | null;
   completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean;
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean;
   retireRemoteApply(attempt: RemoteApplyAttempt, retiredAt: number): boolean;
@@ -182,6 +188,7 @@ export class PasteSync implements PasteSyncController {
   private locallyCleanOverride = false;
   private remoteApplyAttempt: RemoteApplyAttempt | null = null;
   private remoteApplyCapture: PasteSyncCapture | null = null;
+  private preparedRemoteApply: RemoteApplyAttempt | null = null;
   private permanentlyStopped = false;
   private terminal = false;
   private state: AutosyncStatus = "inactive";
@@ -336,21 +343,64 @@ export class PasteSync implements PasteSyncController {
     return this.canSettleRemoteApply(attempt);
   }
 
-  completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean {
-    if (this.remoteApplyAttempt !== attempt) return false;
+  prepareRemoteApplyCommit(attempt: RemoteApplyAttempt, committedAt: number): PreparedPasteSyncRemoteCommit | null {
+    if (this.preparedRemoteApply !== null || !this.canSettleRemoteApply(attempt)) return null;
 
-    this.remoteApplyAttempt = null;
-    this.remoteApplyCapture = null;
-    this.stagedCandidate = null;
-    this.candidate = null;
-    this.locallyCleanOverride = true;
-    this.setState("remote-applied", committedAt);
-    this.scheduleAfterSettle(committedAt);
+    this.preparedRemoteApply = attempt;
+    this.clearTimer();
+    let settled = false;
+    const noRelease = () => {};
+
+    return {
+      commit: () => {
+        if (settled || this.preparedRemoteApply !== attempt) return noRelease;
+
+        settled = true;
+        this.preparedRemoteApply = null;
+        this.remoteApplyAttempt = null;
+        this.remoteApplyCapture = null;
+        this.stagedCandidate = null;
+        this.candidate = null;
+        this.locallyCleanOverride = true;
+        this.syncDueAt = committedAt + CADENCE_MS;
+        const stateChanged = this.state !== "remote-applied";
+        this.state = "remote-applied";
+        return this.releasePreparedRemoteApply("remote-applied", committedAt, false, stateChanged);
+      },
+      fail: () => {
+        if (settled || this.preparedRemoteApply !== attempt) return noRelease;
+
+        settled = true;
+        const candidate = this.stagedCandidate;
+        this.preparedRemoteApply = null;
+        this.remoteApplyAttempt = null;
+        this.remoteApplyCapture = null;
+        this.stagedCandidate = null;
+        this.candidate = candidate;
+        if (candidate === null) {
+          this.locallyCleanOverride = true;
+          this.syncDueAt = committedAt + CADENCE_MS;
+        } else {
+          this.locallyCleanOverride = false;
+          this.syncDueAt = null;
+        }
+        const stateChanged = this.state !== "error";
+        this.state = "error";
+        return this.releasePreparedRemoteApply("error", committedAt, true, stateChanged);
+      },
+    };
+  }
+
+  completeRemoteApply(attempt: RemoteApplyAttempt, committedAt: number): boolean {
+    const prepared = this.prepareRemoteApplyCommit(attempt, committedAt);
+    if (prepared === null) return false;
+
+    prepared.commit()();
     return true;
   }
 
   cancelRemoteApply(attempt: RemoteApplyAttempt, cancelledAt: number): boolean {
-    if (!this.canSettleRemoteApply(attempt)) return false;
+    if (this.preparedRemoteApply === attempt || !this.canSettleRemoteApply(attempt)) return false;
 
     const candidate = this.stagedCandidate;
     this.remoteApplyAttempt = null;
@@ -371,7 +421,7 @@ export class PasteSync implements PasteSyncController {
   }
 
   retireRemoteApply(attempt: RemoteApplyAttempt, retiredAt: number): boolean {
-    if (this.remoteApplyAttempt !== attempt) return false;
+    if (this.preparedRemoteApply === attempt || this.remoteApplyAttempt !== attempt) return false;
 
     this.remoteApplyAttempt = null;
     this.remoteApplyCapture = null;
@@ -394,6 +444,23 @@ export class PasteSync implements PasteSyncController {
     this.clearRetryIntent();
     this.clearTimer();
     this.invalidateRead();
+  }
+
+  private releasePreparedRemoteApply(
+    state: AutosyncStatus,
+    at: number,
+    emitError: boolean,
+    stateChanged: boolean,
+  ): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+
+      released = true;
+      if (emitError) this.options.emit({ type: "error", at });
+      if (stateChanged) this.options.emit({ type: "state", state, at });
+      this.armTimer();
+    };
   }
 
   private isActive(): boolean {
@@ -497,7 +564,7 @@ export class PasteSync implements PasteSyncController {
 
   private invalidateRemoteApply(at: number): void {
     const attempt = this.remoteApplyAttempt;
-    if (attempt === null) return;
+    if (attempt === null || this.preparedRemoteApply === attempt) return;
     this.options.emit({ type: "remote-apply-invalidated", attempt, at });
     this.retireRemoteApply(attempt, at);
   }

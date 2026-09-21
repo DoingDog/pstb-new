@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PasteSync, classifyRemote } from "./paste-sync";
-import type { PasteSyncCapture, PasteSyncEvent, PasteSyncReadRequest, PasteSyncReadResult } from "./paste-sync";
+import type { PasteSyncCapture, PasteSyncEvent, PasteSyncReadRequest, PasteSyncReadResult, RemoteApplyAttempt } from "./paste-sync";
 import type { PasteSummary, RemoteSnapshot } from "./contracts";
 
 type TimerCallback = () => void;
@@ -10,8 +10,10 @@ class FakeClock {
   private nextId = 1;
   private timers = new Map<number, { at: number; callback: TimerCallback }>();
   maxActiveTimers = 0;
+  timerSetCount = 0;
 
   setTimeout = (callback: TimerCallback, delay: number): number => {
+    this.timerSetCount += 1;
     const id = this.nextId++;
     this.timers.set(id, { at: this.now + delay, callback });
     this.maxActiveTimers = Math.max(this.maxActiveTimers, this.timers.size);
@@ -422,6 +424,141 @@ describe("classifyRemote", () => {
 
     expect(classifyRemote(equalLegacy, baseline)).toBe("marker-equal");
     expect(classifyRemote(divergentLegacy, baseline)).toBe("incomparable");
+  });
+});
+
+describe("PasteSync prepared remote apply", () => {
+  it("defers remote success publication and the next cadence until release", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const apply = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    if (!apply) throw new Error("missing remote apply");
+    const eventsBeforePrepare = [...fixture.events];
+    const timerSetsBeforePrepare = fixture.clock.timerSetCount;
+
+    const prepared = fixture.controller.prepareRemoteApplyCommit(apply.attempt, fixture.clock.now);
+
+    expect(prepared).not.toBeNull();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(0);
+    expect(fixture.clock.timerSetCount).toBe(timerSetsBeforePrepare);
+    const release = prepared!.commit();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(0);
+    expect(fixture.clock.timerSetCount).toBe(timerSetsBeforePrepare);
+
+    release();
+    expect(fixture.lastState()).toBe("remote-applied");
+    expect(fixture.activeTimerCount()).toBe(1);
+    expect(fixture.clock.timerSetCount).toBe(timerSetsBeforePrepare + 1);
+    release();
+    expect(fixture.clock.timerSetCount).toBe(timerSetsBeforePrepare + 1);
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("restores a failed candidate without publishing before release", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, snapshot({ source: "remote" }));
+    await fixture.flush();
+    const candidate = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "candidate" }> => event.type === "candidate",
+    );
+    if (!candidate) throw new Error("missing candidate");
+    const attempt = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    if (!attempt) throw new Error("missing candidate attempt");
+    const eventsBeforePrepare = [...fixture.events];
+
+    const prepared = fixture.controller.prepareRemoteApplyCommit(attempt, fixture.clock.now);
+
+    expect(prepared).not.toBeNull();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(0);
+    const release = prepared!.fail();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(0);
+
+    release();
+    expect(fixture.events.slice(eventsBeforePrepare.length)).toEqual([
+      { type: "error", at: 3_000 },
+      { type: "state", state: "error", at: 3_000 },
+    ]);
+    expect(fixture.controller.retrySync(fixture.clock.now, null)).toBe(true);
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("retires a failed autosync apply and resumes one cadence after release", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+    const apply = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "proven-newer" }> => event.type === "proven-newer",
+    );
+    if (!apply) throw new Error("missing remote apply");
+    const eventsBeforePrepare = [...fixture.events];
+
+    const prepared = fixture.controller.prepareRemoteApplyCommit(apply.attempt, fixture.clock.now);
+
+    expect(prepared).not.toBeNull();
+    const release = prepared!.fail();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(0);
+    release();
+    expect(fixture.events.slice(eventsBeforePrepare.length)).toEqual([
+      { type: "error", at: 3_000 },
+      { type: "state", state: "error", at: 3_000 },
+    ]);
+    fixture.clock.advance(2_999);
+    expect(fixture.reads).toHaveLength(1);
+    fixture.clock.advance(1);
+    expect(fixture.reads).toHaveLength(2);
+  });
+
+  it("leaves wrong and stale remote apply attempts untouched", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+
+    fixture.clock.advance(3_000);
+    fixture.resolve200(0, snapshot({ source: "remote" }));
+    await fixture.flush();
+    const candidate = fixture.events.find(
+      (event): event is Extract<PasteSyncEvent, { type: "candidate" }> => event.type === "candidate",
+    );
+    if (!candidate) throw new Error("missing candidate");
+    const attempt = fixture.controller.startCandidateApply(candidate.snapshot, candidate.capture);
+    if (!attempt) throw new Error("missing candidate attempt");
+    const eventsBeforePrepare = [...fixture.events];
+    const timerSetsBeforePrepare = fixture.clock.timerSetCount;
+
+    expect(fixture.controller.prepareRemoteApplyCommit({} as RemoteApplyAttempt, fixture.clock.now)).toBeNull();
+    fixture.setCapture(capture({ offline: true }));
+    expect(fixture.controller.prepareRemoteApplyCommit(attempt, fixture.clock.now)).toBeNull();
+    expect(fixture.events).toEqual(eventsBeforePrepare);
+    expect(fixture.activeTimerCount()).toBe(1);
+    expect(fixture.clock.timerSetCount).toBe(timerSetsBeforePrepare);
   });
 });
 
