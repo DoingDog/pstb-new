@@ -1467,6 +1467,60 @@ describe("Task 15 async lifecycle behavior", () => {
     });
   });
 
+  it("publishes a coherent remote apply before a throwing records callback remounts its surface", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const dispose = vi.fn(async () => undefined);
+    stagedMarkdown.prepareMarkdownVisual.mockResolvedValueOnce({
+      root: document.createElement("div"),
+      source: { value: "remote" },
+      modes: {
+        enterSource: async () => undefined,
+        enterVisual: async () => undefined,
+        enterPreview: async () => undefined,
+        leaveVisual: async () => undefined,
+        destroy: async () => undefined,
+      },
+      bind: () => undefined,
+      dispose,
+    } as never);
+    vi.stubGlobal("fetch", vi.fn(async () => resourceResponse("remote", {
+      version: "generation.2",
+      contentRevision: 2,
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    })));
+    let callbackRuns = 0;
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], {
+        onRecordsChange(records) {
+          if (records.autosync.state !== "remote-applied" || callbackRuns !== 0) return;
+          callbackRuns += 1;
+          page!.actions.setSurfaceMounted("visual", false);
+          throw new Error("callback failed");
+        },
+      });
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("visual", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.acceptedSource).toBe("remote"));
+
+    expect(callbackRuns).toBe(1);
+    expect(dispose).not.toHaveBeenCalled();
+    expect(page!.snapshot).toMatchObject({
+      acceptedSource: "remote",
+      autosaveAcceptedSource: "remote",
+      lastSavedContent: "remote",
+      records: { autosync: { state: "remote-applied" } },
+    });
+  });
+
   it("recovers a candidate after a never-settling Preview host remount and ignores its stale settlement", async () => {
     vi.useFakeTimers();
     let page: UsePastePageResult | null = null;

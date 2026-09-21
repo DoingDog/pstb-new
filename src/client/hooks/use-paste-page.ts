@@ -594,8 +594,12 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (runtime === null || runtime.disposed) return;
     const next = makeView(runtime);
     setView(next);
-    callbacksRef.current.onRecordsChange?.(next.records);
-    callbacksRef.current.onSummaryChange?.(active(next.paste) ? next.paste.summary : null);
+    try {
+      callbacksRef.current.onRecordsChange?.(next.records);
+    } catch {}
+    try {
+      callbacksRef.current.onSummaryChange?.(active(next.paste) ? next.paste.summary : null);
+    } catch {}
   }, [makeView]);
 
   const queuePublish = React.useCallback(() => {
@@ -1207,21 +1211,28 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
   }
 
   function finalizeRemoteApply(runtime: Runtime, remote: RemoteSnapshot, attempt: RemoteApplyAttempt): void {
-    const previous = runtime.paste.snapshot() as ActiveSnapshot;
-    runtime.paste.applyRemoteSnapshot(remote);
-    const current = runtime.paste.snapshot() as ActiveSnapshot;
-    replaceHistoryCurrent(runtime, current.draft);
-    runtime.history.retainAfterApply(baseline(previous), baseline(current));
-    runtime.validator = remote.etag;
-    settleUseRemoteAction(runtime, "succeeded");
-    runtime.candidate = null;
-    drainEffects(runtime);
-    runtime.pendingRemoteApply = null;
     runtime.finalizingRemoteApply = true;
-    runtime.sync.completeRemoteApply(attempt, now());
-    runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
-    runtime.finalizingRemoteApply = false;
-    publish(runtime);
+    try {
+      const previous = runtime.paste.snapshot() as ActiveSnapshot;
+      if (!runtime.paste.applyRemoteSnapshot(remote)) throw new Error("remote apply preflight violated");
+      const current = runtime.paste.snapshot() as ActiveSnapshot;
+      replaceHistoryCurrent(runtime, current.draft);
+      runtime.history.retainAfterApply(baseline(previous), baseline(current));
+      runtime.validator = remote.etag;
+      drainEffects(runtime);
+      runtime.pendingRemoteApply = null;
+      if (!runtime.sync.completeRemoteApply(attempt, now())) throw new Error("remote apply ownership lost");
+      runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
+      runtime.candidate = null;
+      settleUseRemoteAction(runtime, "succeeded");
+    } catch {
+      runtime.pendingRemoteApply = null;
+      runtime.sync.retireRemoteApply(attempt, now());
+      settleUseRemoteAction(runtime, "failed");
+    } finally {
+      runtime.finalizingRemoteApply = false;
+      queuePublish();
+    }
   }
 
   async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
@@ -1332,7 +1343,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (event.type === "terminal-view-once" && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
     if (event.type === "state" && event.state === "inactive") {
       runtime.candidate = null;
-      settleUseRemoteAction(runtime, "failed");
+      if (!runtime.finalizingRemoteApply) settleUseRemoteAction(runtime, "failed");
     }
     if (event.type === "credential-proved") {
       runtime.paste.setPendingCredential(event.password);

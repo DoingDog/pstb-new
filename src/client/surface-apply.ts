@@ -179,6 +179,9 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   let fallback: SurfaceFallback = null;
   let mounted: Staged | undefined;
   let activeAttempt: Attempt | undefined;
+  let criticalAttempt: Attempt | undefined;
+  const deferred: Array<() => void> = [];
+  let flushingDeferred = false;
   let terminalSettled = false;
   let terminalLocalAttempt: { token: TerminalLocalToken; settled: boolean } | null = null;
   const retryTokens: Record<Surface, number> = { preview: current.derivedRetryToken, visual: current.derivedRetryToken, diff: current.derivedRetryToken };
@@ -237,6 +240,42 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     const previous = activeAttempt;
     retire(previous);
     restorePresentation(previous);
+  };
+  const handOff = <T>(operation: () => Promise<T>): Promise<T> | null => {
+    if (criticalAttempt === undefined) return null;
+    return new Promise<T>((resolve, reject) => {
+      deferred.push(() => {
+        try {
+          void operation().then(resolve, reject);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  };
+  const handOffVoid = (operation: () => void): boolean => {
+    if (criticalAttempt === undefined) return false;
+    deferred.push(operation);
+    return true;
+  };
+  const flushDeferred = (): void => {
+    if (flushingDeferred || criticalAttempt !== undefined) return;
+    flushingDeferred = true;
+    try {
+      while (criticalAttempt === undefined) {
+        const operation = deferred.shift();
+        if (operation === undefined) return;
+        operation();
+      }
+    } finally {
+      flushingDeferred = false;
+    }
+  };
+  const releaseCritical = (attempt: Attempt): void => {
+    attempt.finalizing = false;
+    if (criticalAttempt === attempt) criticalAttempt = undefined;
+    if (activeAttempt === attempt) activeAttempt = undefined;
+    flushDeferred();
   };
   const allocate = (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Attempt => {
     abandonActive();
@@ -324,13 +363,13 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   };
 
   const attemptIsCurrent = (attempt: Attempt): boolean => activeAttempt === attempt && !attempt.retired && !stale(attempt);
-  const restore = async (attempt: Attempt): Promise<void> => {
+  const restore = async (attempt: Attempt, afterRelease = false): Promise<void> => {
     if (!attempt.touchedHost) return;
     let restored = false;
     try {
       restored = await options.ports.restoreOld(attempt.oldGeneration, attempt.oldSource, attempt.capture.parentApplyToken);
     } catch {}
-    if (!restored && attemptIsCurrent(attempt)) {
+    if (!restored && (attemptIsCurrent(attempt) || (afterRelease && activeAttempt === undefined && sameCapture(attempt.base, current)))) {
       try {
         options.ports.showOldGenerationFailure(attempt.oldGeneration, attempt.oldSource, attempt.capture.parentApplyToken);
       } catch {}
@@ -344,39 +383,52 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       return false;
     }
     const staged = attempt.staged as Staged;
-    try {
-      attempt.touchedHost = true;
-      options.ports.commit(staged, attempt.generation);
-    } catch {
-      disposeOwned(attempt);
-      await restore(attempt);
-      retire(attempt);
-      restorePresentation(attempt);
-      return false;
-    }
-    mounted = staged;
-    current = copyCapture(attempt.capture);
-    currentSource = attempt.source;
-    syncCaptureCounters();
-    if (attempt.retrySurface === undefined) {
-      status = attempt.failure === null ? "committed" : "fallback";
-      fallback = attempt.failure;
-    } else {
-      fallback = fallback === attempt.retrySurface ? null : fallback;
-      status = fallback === null ? "committed" : "fallback";
-    }
     attempt.finalizing = true;
-    attempt.finalizeCurrent?.();
-    activeAttempt = undefined;
-    return true;
+    criticalAttempt = attempt;
+    try {
+      try {
+        attempt.touchedHost = true;
+        options.ports.commit(staged, attempt.generation);
+      } catch {
+        disposeOwned(attempt);
+        const restoration = restore(attempt, true);
+        retire(attempt);
+        restorePresentation(attempt);
+        releaseCritical(attempt);
+        await restoration;
+        return false;
+      }
+      mounted = staged;
+      attempt.owned.clear();
+      current = copyCapture(attempt.capture);
+      currentSource = attempt.source;
+      syncCaptureCounters();
+      if (attempt.retrySurface === undefined) {
+        status = attempt.failure === null ? "committed" : "fallback";
+        fallback = attempt.failure;
+      } else {
+        fallback = fallback === attempt.retrySurface ? null : fallback;
+        status = fallback === null ? "committed" : "fallback";
+      }
+      try {
+        attempt.finalizeCurrent?.();
+      } catch {}
+      return true;
+    } finally {
+      releaseCritical(attempt);
+    }
   };
 
   const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => {
+    const deferredApply = handOff(() => runAll(source, activeUntil, terminalLocal, commitCurrent, finalizeCurrent));
+    if (deferredApply !== null) return deferredApply;
     const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent, finalizeCurrent);
     await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
     return publish(attempt);
   };
   const runTerminalLocal = async (source: string, commitCurrent?: () => boolean): Promise<TerminalLocalApplyReceipt> => {
+    const deferredApply = handOff(() => runTerminalLocal(source, commitCurrent));
+    if (deferredApply !== null) return deferredApply;
     const terminalLocalToken = Symbol("terminal-local");
     terminalLocalAttempt = { token: terminalLocalToken, settled: false };
     const attempt = allocate(source, undefined, true, commitCurrent);
@@ -390,6 +442,8 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   };
 
   const runRetry = async (source: string, surface: Surface): Promise<boolean> => {
+    const deferredRetry = handOff(() => runRetry(source, surface));
+    if (deferredRetry !== null) return deferredRetry;
     if (source !== current.currentExactSource) return false;
     const attempt = allocateRetry(source, surface);
     const stagePort = surface === "preview" ? options.ports.stagePreview : surface === "visual" ? options.ports.stageVisual : options.ports.stageDiff;
@@ -418,6 +472,22 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
   };
 
   const guarded = (allowed: boolean, source: string, activeUntil?: number, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => allowed ? runAll(source, activeUntil, false, commitCurrent, finalizeCurrent) : Promise.resolve(false);
+  const replaceCaptureNow = (capture: DerivedSurfaceCapture): void => {
+    abandonActive();
+    current = copyCapture(capture);
+    currentSource = capture.currentExactSource;
+    syncCaptureCounters();
+  };
+  const invalidateNow = (): void => {
+    abandonActive();
+    current = { ...current, parentApplyGeneration: current.parentApplyGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
+    syncCaptureCounters();
+  };
+  const remountNow = (): void => {
+    abandonActive();
+    current = { ...current, hostGeneration: current.hostGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
+    syncCaptureCounters();
+  };
 
   return {
     snapshot,
@@ -447,26 +517,17 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       return runRetry(source, "diff");
     },
     replaceCapture(capture) {
-      if (activeAttempt?.finalizing) {
-        current = copyCapture(capture);
-        currentSource = capture.currentExactSource;
-        syncCaptureCounters();
-        return;
-      }
-      abandonActive();
-      current = copyCapture(capture);
-      currentSource = capture.currentExactSource;
-      syncCaptureCounters();
+      const replacement = copyCapture(capture);
+      if (handOffVoid(() => replaceCaptureNow(replacement))) return;
+      replaceCaptureNow(replacement);
     },
     invalidate() {
-      abandonActive();
-      current = { ...current, parentApplyGeneration: current.parentApplyGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-      syncCaptureCounters();
+      if (handOffVoid(invalidateNow)) return;
+      invalidateNow();
     },
     remount() {
-      abandonActive();
-      current = { ...current, hostGeneration: current.hostGeneration + 1, parentApplyToken: current.parentApplyToken + 1, derivedRetryToken: current.derivedRetryToken + 1 };
-      syncCaptureCounters();
+      if (handOffVoid(remountNow)) return;
+      remountNow();
     },
     settleTerminal(origin, result) {
       if (terminalSettled) return null;

@@ -196,6 +196,218 @@ describe("staged surface application", () => {
     expect(finalizeCurrent).not.toHaveBeenCalled();
   });
 
+  it("defers commit-time invalidation until the committed attempt releases", async () => {
+    const fixture = surfaceFixture();
+    const order: string[] = [];
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      order.push("commit");
+      fixture.apply.invalidate();
+    });
+    const attempt = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => { order.push("finalize"); },
+    });
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(true);
+    expect(order).toEqual(["commit", "finalize"]);
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "two", status: "committed" });
+  });
+
+  it("defers commit-time remount and capture replacement until release", async () => {
+    const fixture = surfaceFixture();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => {
+      fixture.apply.remount();
+      fixture.apply.replaceCapture(capture({
+        localGeneration: 2,
+        currentExactSource: "replacement",
+        currentDisplayGeneration: 2,
+        hostGeneration: 2,
+        parentApplyGeneration: 2,
+        parentApplyToken: 2,
+        derivedRetryToken: 2,
+      }));
+    });
+    const attempt = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+    });
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(true);
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "replacement", capture: { localGeneration: 2, hostGeneration: 2 } });
+  });
+
+  it("hands a nested apply off until its parent finalizer releases", async () => {
+    const fixture = surfaceFixture();
+    let nested: Promise<boolean> | undefined;
+    const parent = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => { nested = fixture.apply.apply("three"); },
+    });
+    await resolveStages(fixture, 0);
+
+    await expect(parent).resolves.toBe(true);
+    expect(nested).toBeDefined();
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    await resolveStages(fixture, 1);
+    await expect(nested).resolves.toBe(true);
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "three", status: "committed" });
+  });
+
+  it("hands a finalizer Preview Retry off until its fallback commits", async () => {
+    const fixture = surfaceFixture();
+    const oldFallback = fixture.apply.apply("two");
+    fixture.previews[0]!.reject(new Error("old fallback"));
+    fixture.visuals[0]!.resolve("old visual");
+    fixture.diffs[0]!.resolve("old diff");
+    await settle();
+    await expect(oldFallback).resolves.toBe(true);
+
+    let retry: Promise<boolean> | undefined;
+    const parent = fixture.apply.applyUseRemote("three", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => { retry = fixture.apply.retryPreview("three"); },
+    });
+    fixture.previews[1]!.reject(new Error("new fallback"));
+    fixture.visuals[1]!.resolve("new visual");
+    fixture.diffs[1]!.resolve("new diff");
+    await settle();
+
+    await expect(parent).resolves.toBe(true);
+    expect(retry).toBeDefined();
+    fixture.previews[2]!.resolve("retried preview");
+    await settle();
+    await expect(retry).resolves.toBe(true);
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "three", status: "committed" });
+  });
+
+  it("drops a stale deferred Retry after an earlier capture replacement", async () => {
+    const fixture = surfaceFixture();
+    let retry: Promise<boolean> | undefined;
+    const parent = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => {
+        fixture.apply.replaceCapture(capture({
+          localGeneration: 2,
+          currentExactSource: "replacement",
+          currentDisplayGeneration: 2,
+          hostGeneration: 2,
+          parentApplyGeneration: 2,
+          parentApplyToken: 2,
+          derivedRetryToken: 2,
+        }));
+        retry = fixture.apply.retryPreview("two");
+      },
+    });
+    await resolveStages(fixture);
+
+    await expect(parent).resolves.toBe(true);
+    await expect(retry).resolves.toBe(false);
+    expect(fixture.ports.stagePreview).toHaveBeenCalledOnce();
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "replacement", capture: { localGeneration: 2 } });
+  });
+
+  it("releases a committed attempt when its finalizer throws", async () => {
+    const fixture = surfaceFixture();
+    const attempt = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => { throw new Error("finalizer failed"); },
+    });
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(true);
+    fixture.apply.invalidate();
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    expect(fixture.apply.snapshot()).toMatchObject({ source: "two", status: "committed" });
+  });
+
   it("keeps current presentation when an edit invalidates a detached stage", async () => {
     const fixture = surfaceFixture();
     const attempt = fixture.apply.apply("two");
