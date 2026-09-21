@@ -188,6 +188,7 @@ type Runtime = {
   reloadController: AbortController | null;
   diff: HistoryDiffState;
   dirtyDraftOwners: Set<LocalWorkOwner>;
+  finalizingRemoteApply: boolean;
 };
 
 function now(): number {
@@ -751,6 +752,19 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     return retired;
   }
 
+  function retryDerivedSurface(runtime: Runtime, surface: DerivedSurface, retry: (source: string) => Promise<boolean>): void {
+    const fallback = runtime.surface.snapshot();
+    if (fallback.status !== "fallback" || fallback.fallback !== surface || fallback.source !== fallback.capture.currentExactSource) return;
+    const source = fallback.source;
+    const exactSource = fallback.capture.currentExactSource;
+    const pending = runtime.pendingRemoteApply !== null;
+    cancelPendingRemoteApply(runtime, "surface");
+    if (pending) publish(runtime);
+    const current = runtime.surface.snapshot();
+    if (current.status !== "fallback" || current.fallback !== surface || current.source !== source || current.capture.currentExactSource !== exactSource) return;
+    void retry(source).then(() => publish(runtime));
+  }
+
   function settleReloadAction(runtime: Runtime, state: "succeeded" | "failed"): void {
     const action = runtime.reloadAction;
     if (action === null) return;
@@ -1192,6 +1206,24 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     return true;
   }
 
+  function finalizeRemoteApply(runtime: Runtime, remote: RemoteSnapshot, attempt: RemoteApplyAttempt): void {
+    const previous = runtime.paste.snapshot() as ActiveSnapshot;
+    runtime.paste.applyRemoteSnapshot(remote);
+    const current = runtime.paste.snapshot() as ActiveSnapshot;
+    replaceHistoryCurrent(runtime, current.draft);
+    runtime.history.retainAfterApply(baseline(previous), baseline(current));
+    runtime.validator = remote.etag;
+    settleUseRemoteAction(runtime, "succeeded");
+    runtime.candidate = null;
+    drainEffects(runtime);
+    runtime.pendingRemoteApply = null;
+    runtime.finalizingRemoteApply = true;
+    runtime.sync.completeRemoteApply(attempt, now());
+    runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, state: "remote-applied", appliedAt: displayTime() } };
+    runtime.finalizingRemoteApply = false;
+    publish(runtime);
+  }
+
   async function applyRemote(runtime: Runtime, remote: RemoteSnapshot, mode: "autosync" | "candidate", attempt?: RemoteApplyAttempt, originCapture?: PasteSyncCapture, candidateOverride?: Candidate | null): Promise<void> {
     const candidate = mode === "candidate" ? candidateOverride ?? runtime.candidate : null;
     const capture = mode === "candidate" ? candidate?.capture : originCapture;
@@ -1222,6 +1254,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         && baselineCurrent
         && localGenerationCurrent
         && snapshot.phase === "ordinary"
+        && snapshot.serverCapabilities
         && activeCurrent
         && !runtime.composing
         && save.dueAt === null
@@ -1256,6 +1289,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         unresolvedMutation: snapshot.reconciliationRequired,
         localSourceWork: save.draft !== save.acceptedSource,
         commitCurrent,
+        finalizeCurrent: () => finalizeRemoteApply(runtime, remote, attempt),
       })
       : await runtime.surface.applyUseRemote(remote.source, {
         candidateCurrent: pendingCurrent() && schedulerCurrent && candidate?.snapshot === remote,
@@ -1274,12 +1308,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         unresolvedMutation: snapshot.reconciliationRequired,
         conflictCausedByCandidate: candidate !== null,
         commitCurrent,
+        finalizeCurrent: () => finalizeRemoteApply(runtime, remote, attempt),
       });
+    if (applied) return;
     if (runtime.disposed || runtimeRef.current !== runtime || !pendingCurrent()) return;
-    if (applied && commitCurrent() && applyRemoteSnapshot(runtime, remote, attempt)) {
-      runtime.pendingRemoteApply = null;
-      return;
-    }
     const latest = runtime.paste.snapshot();
     const invalidated = !active(latest)
       || now() >= capture.activeUntil
@@ -1357,7 +1389,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.paste.enterTerminal("not-found", now());
       drainEffects(runtime);
     }
-    publish(runtime);
+    if (!runtime.finalizingRemoteApply) publish(runtime);
   }
 
   function createRuntime(accepted: AcceptedPasteState, credential: { committed: string | null; pending: string | null }, loadAt: number, api: PasteApi | null = null, carriedRecords: OperationRecords | null = null): Runtime {
@@ -1383,6 +1415,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.previousDerivedResources = null;
     runtime.diff = { state: "idle", lines: [] };
     runtime.dirtyDraftOwners = new Set();
+    runtime.finalizingRemoteApply = false;
     runtime.paste = createPasteController({ accepted, credential });
     runtime.history = createHistoryController();
     runtime.historyDiff = createHistoryDiff({
@@ -1860,21 +1893,18 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     },
     retryPreview() {
       const runtime = runtimeRef.current;
-      const fallback = runtime?.surface.snapshot();
-      if (runtime === null || runtime.disposed || fallback === undefined || fallback.status !== "fallback" || fallback.fallback !== "preview") return;
-      void runtime.surface.retryPreview(fallback.source).then(() => publish(runtime));
+      if (runtime === null || runtime.disposed) return;
+      retryDerivedSurface(runtime, "preview", (source) => runtime.surface.retryPreview(source));
     },
     retryVisual() {
       const runtime = runtimeRef.current;
-      const fallback = runtime?.surface.snapshot();
-      if (runtime === null || runtime.disposed || fallback === undefined || fallback.status !== "fallback" || fallback.fallback !== "visual") return;
-      void runtime.surface.retryVisual(fallback.source).then(() => publish(runtime));
+      if (runtime === null || runtime.disposed) return;
+      retryDerivedSurface(runtime, "visual", (source) => runtime.surface.retryVisual(source));
     },
     retryDiff() {
       const runtime = runtimeRef.current;
-      const fallback = runtime?.surface.snapshot();
-      if (runtime === null || runtime.disposed || fallback === undefined || fallback.status !== "fallback" || fallback.fallback !== "diff") return;
-      void runtime.surface.retryDiff(fallback.source).then(() => publish(runtime));
+      if (runtime === null || runtime.disposed) return;
+      retryDerivedSurface(runtime, "diff", (source) => runtime.surface.retryDiff(source));
     },
     setSurfaceMounted(surface, mounted) {
       const runtime = runtimeRef.current;

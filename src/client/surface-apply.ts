@@ -51,6 +51,7 @@ export interface AutosyncApplyEntry {
   unresolvedMutation: boolean;
   localSourceWork: boolean;
   commitCurrent?(): boolean;
+  finalizeCurrent?(): void;
 }
 export interface UseRemoteApplyEntry {
   candidateCurrent: boolean;
@@ -69,6 +70,7 @@ export interface UseRemoteApplyEntry {
   unresolvedMutation: boolean;
   conflictCausedByCandidate: boolean;
   commitCurrent?(): boolean;
+  finalizeCurrent?(): void;
 }
 export interface ReloadApplyEntry {
   requestCurrent: boolean;
@@ -150,6 +152,8 @@ type Attempt = {
   oldFallback: SurfaceFallback;
   activeUntil?: number;
   commitCurrent?: () => boolean;
+  finalizeCurrent?: () => void;
+  finalizing: boolean;
 };
 
 function copyCapture(capture: DerivedSurfaceCapture): DerivedSurfaceCapture {
@@ -234,7 +238,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     retire(previous);
     restorePresentation(previous);
   };
-  const allocate = (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean): Attempt => {
+  const allocate = (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Attempt => {
     abandonActive();
     const base = copyCapture(current);
     const retryToken = Math.max(current.derivedRetryToken, retryTokens.preview, retryTokens.visual, retryTokens.diff);
@@ -260,12 +264,14 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       owned: new Set(),
       disposed: new Set(),
       touchedHost: false,
+      finalizing: false,
       oldGeneration: current.currentDisplayGeneration,
       oldSource: currentSource,
       oldStatus: status,
       oldFallback: fallback,
       ...(activeUntil === undefined ? {} : { activeUntil }),
       ...(commitCurrent === undefined ? {} : { commitCurrent }),
+      ...(finalizeCurrent === undefined ? {} : { finalizeCurrent }),
     };
     activeAttempt = attempt;
     if (status !== "fallback") {
@@ -293,6 +299,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       owned: new Set(),
       disposed: new Set(),
       touchedHost: false,
+      finalizing: false,
       oldGeneration: current.currentDisplayGeneration,
       oldSource: currentSource,
       oldStatus: status,
@@ -340,19 +347,6 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     try {
       attempt.touchedHost = true;
       options.ports.commit(staged, attempt.generation);
-      mounted = staged;
-      current = copyCapture(attempt.capture);
-      currentSource = attempt.source;
-      syncCaptureCounters();
-      if (attempt.retrySurface === undefined) {
-        status = attempt.failure === null ? "committed" : "fallback";
-        fallback = attempt.failure;
-      } else {
-        fallback = fallback === attempt.retrySurface ? null : fallback;
-        status = fallback === null ? "committed" : "fallback";
-      }
-      activeAttempt = undefined;
-      return true;
     } catch {
       disposeOwned(attempt);
       await restore(attempt);
@@ -360,10 +354,25 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       restorePresentation(attempt);
       return false;
     }
+    mounted = staged;
+    current = copyCapture(attempt.capture);
+    currentSource = attempt.source;
+    syncCaptureCounters();
+    if (attempt.retrySurface === undefined) {
+      status = attempt.failure === null ? "committed" : "fallback";
+      fallback = attempt.failure;
+    } else {
+      fallback = fallback === attempt.retrySurface ? null : fallback;
+      status = fallback === null ? "committed" : "fallback";
+    }
+    attempt.finalizing = true;
+    attempt.finalizeCurrent?.();
+    activeAttempt = undefined;
+    return true;
   };
 
-  const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean): Promise<boolean> => {
-    const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent);
+  const runAll = async (source: string, activeUntil?: number, terminalLocal = false, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => {
+    const attempt = allocate(source, activeUntil, terminalLocal, commitCurrent, finalizeCurrent);
     await Promise.all(options.ports.mounted().map((surface) => stageOne(attempt, surface)));
     return publish(attempt);
   };
@@ -408,16 +417,16 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     return publish(attempt);
   };
 
-  const guarded = (allowed: boolean, source: string, activeUntil?: number, commitCurrent?: () => boolean): Promise<boolean> => allowed ? runAll(source, activeUntil, false, commitCurrent) : Promise.resolve(false);
+  const guarded = (allowed: boolean, source: string, activeUntil?: number, commitCurrent?: () => boolean, finalizeCurrent?: () => void): Promise<boolean> => allowed ? runAll(source, activeUntil, false, commitCurrent, finalizeCurrent) : Promise.resolve(false);
 
   return {
     snapshot,
     apply: runAll,
     applyAutosync(source, entry) {
-      return guarded(autosyncApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent);
+      return guarded(autosyncApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent, entry.finalizeCurrent);
     },
     applyUseRemote(source, entry) {
-      return guarded(useRemoteApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent);
+      return guarded(useRemoteApplyEntryAllowed(entry) && entry.activeUntil > now(), source, entry.activeUntil, entry.commitCurrent, entry.finalizeCurrent);
     },
     applyReload(source, entry) {
       return guarded(reloadApplyEntryAllowed(entry), source, undefined, entry.commitCurrent);
@@ -438,6 +447,12 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
       return runRetry(source, "diff");
     },
     replaceCapture(capture) {
+      if (activeAttempt?.finalizing) {
+        current = copyCapture(capture);
+        currentSource = capture.currentExactSource;
+        syncCaptureCounters();
+        return;
+      }
       abandonActive();
       current = copyCapture(capture);
       currentSource = capture.currentExactSource;

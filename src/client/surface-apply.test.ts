@@ -128,6 +128,74 @@ describe("staged surface application", () => {
     expect(fixture.ports.commit).not.toHaveBeenCalled();
   });
 
+  it("runs the remote finalizer once after surface publication and before resolution", async () => {
+    const fixture = surfaceFixture();
+    const order: string[] = [];
+    vi.mocked(fixture.ports.commit).mockImplementation(() => { order.push("surface"); });
+    const attempt = fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent: () => {
+        order.push("finalize");
+        fixture.apply.replaceCapture(capture({
+          currentExactSource: "two",
+          currentDisplayGeneration: 2,
+          parentApplyGeneration: 2,
+          parentApplyToken: 2,
+        }));
+      },
+    }).then((applied) => {
+      order.push("resolved");
+      return applied;
+    });
+    await resolveStages(fixture);
+
+    await expect(attempt).resolves.toBe(true);
+    expect(order).toEqual(["surface", "finalize", "resolved"]);
+    expect(fixture.ports.disposeAttemptResources).not.toHaveBeenCalled();
+  });
+
+  it("does not run a remote finalizer when surface publication throws", async () => {
+    const fixture = surfaceFixture();
+    fixture.ports.mounted = () => [];
+    const finalizeCurrent = vi.fn();
+    vi.mocked(fixture.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });
+
+    await expect(fixture.apply.applyUseRemote("two", {
+      candidateCurrent: true,
+      acceptedBaselineCurrent: true,
+      localGenerationCurrent: true,
+      ordinary: true,
+      active: true,
+      activeDeadlineCurrent: true,
+      activeUntil: Number.MAX_SAFE_INTEGER,
+      draftMatchesAccepted: true,
+      composing: false,
+      autosaveTimer: false,
+      autosaveInFlight: false,
+      coalescedIntent: false,
+      mutationOccupied: false,
+      unresolvedMutation: false,
+      conflictCausedByCandidate: true,
+      finalizeCurrent,
+    })).resolves.toBe(false);
+
+    expect(finalizeCurrent).not.toHaveBeenCalled();
+  });
+
   it("keeps current presentation when an edit invalidates a detached stage", async () => {
     const fixture = surfaceFixture();
     const attempt = fixture.apply.apply("two");

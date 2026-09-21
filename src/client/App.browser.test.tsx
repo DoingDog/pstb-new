@@ -1159,6 +1159,314 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.records.lastAction).toEqual(action);
   });
 
+  it("settles a pending candidate before retrying its visible Preview fallback", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    let resolveCandidatePreview: ((value: unknown) => void) | undefined;
+    let resolveFallbackRetry: ((value: unknown) => void) | undefined;
+    const candidatePreview = new Promise<unknown>((resolve) => { resolveCandidatePreview = resolve; });
+    const fallbackRetry = new Promise<unknown>((resolve) => { resolveFallbackRetry = resolve; });
+    let fallbackStages = 0;
+    stagedMarkdown.prepareMarkdownPreview.mockImplementation((source) => {
+      if (source === "fallback") {
+        fallbackStages += 1;
+        return fallbackStages === 1
+          ? Promise.reject(new Error("initial fallback"))
+          : fallbackRetry as never;
+      }
+      return candidatePreview as never;
+    });
+    let read = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      read += 1;
+      return read === 1
+        ? resourceResponse("fallback", {
+          version: "generation.2",
+          contentRevision: 2,
+          updatedAt: "2026-09-16T00:00:00.000Z",
+        })
+        : resourceResponse("candidate", {
+          version: "other-generation.1",
+          updatedAt: "2026-09-17T00:00:00.000Z",
+        });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "preview", source: "fallback" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" }));
+
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ key: "use-remote", state: "pending" });
+
+    await act(async () => {
+      page!.actions.retryPreview();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ key: "use-remote", state: "failed" });
+    expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" });
+    expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "preview", source: "fallback" });
+
+    await act(async () => {
+      resolveFallbackRetry!({ source: "fallback", html: "<p>fallback</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.acceptedSource).toBe("fallback");
+    expect(page!.snapshot.derivedFallback).toBeNull();
+    const settled = page!.snapshot;
+
+    await act(async () => {
+      resolveCandidatePreview!({ source: "candidate", html: "<p>candidate</p>" });
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot).toMatchObject({
+      acceptedSource: settled.acceptedSource,
+      candidate: settled.candidate,
+      records: { lastAction: settled.records.lastAction },
+    });
+  });
+
+  it("settles a pending candidate before retrying its visible Visual fallback", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const candidateVisual = new Promise<unknown>(() => undefined);
+    const fallbackRetry = new Promise<unknown>(() => undefined);
+    let fallbackStages = 0;
+    stagedMarkdown.prepareMarkdownVisual.mockImplementation((source) => {
+      if (source === "fallback") {
+        fallbackStages += 1;
+        return fallbackStages === 1
+          ? Promise.reject(new Error("initial fallback"))
+          : fallbackRetry as never;
+      }
+      return candidateVisual as never;
+    });
+    let read = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      read += 1;
+      return read === 1
+        ? resourceResponse("fallback", {
+          version: "generation.2",
+          contentRevision: 2,
+          updatedAt: "2026-09-16T00:00:00.000Z",
+        })
+        : resourceResponse("candidate", {
+          version: "other-generation.1",
+          updatedAt: "2026-09-17T00:00:00.000Z",
+        });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("visual", true);
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "visual", source: "fallback" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" }));
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.retryVisual();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toMatchObject({ key: "use-remote", state: "failed" });
+    expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" });
+    expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "visual", source: "fallback" });
+  });
+
+  it("settles a pending candidate before retrying its visible diff fallback", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const workers: Array<{
+      postMessage: ReturnType<typeof vi.fn>;
+      terminate: ReturnType<typeof vi.fn>;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null;
+      onerror: ((event: ErrorEvent) => void) | null;
+    }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    let resourceRead = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/history/1")) {
+        return jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' });
+      }
+      if (url.endsWith("/history")) {
+        return jsonResponse({ id: "example", currentRevision: 1, currentVersion: "generation.1", revisions: [{ revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4 }] }, 200, { etag: '"generation.1"' });
+      }
+      resourceRead += 1;
+      return resourceRead === 1
+        ? resourceResponse("fallback", {
+          version: "generation.2",
+          contentRevision: 2,
+          updatedAt: "2026-09-16T00:00:00.000Z",
+        })
+        : resourceResponse("candidate", {
+          version: "other-generation.1",
+          updatedAt: "2026-09-17T00:00:00.000Z",
+        });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("diff", true);
+      page!.actions.openHistory();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      page!.actions.selectRevision(1);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(workers).toHaveLength(1);
+    const initialDiff = workers[0]!.postMessage.mock.calls.at(-1)![0] as { id: number };
+    await act(async () => {
+      workers[0]!.onmessage!({ data: { type: "result", id: initialDiff.id, lines: [] } } as MessageEvent<unknown>);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    const fallbackDiff = workers[0]!.postMessage.mock.calls.at(-1)![0] as { id: number };
+    await act(async () => {
+      workers[0]!.onerror!(new ErrorEvent("error"));
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(fallbackDiff.id).toBeGreaterThan(initialDiff.id);
+    await vi.waitFor(() => expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "diff", source: "fallback" }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" }));
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.retryDiff();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.records.lastAction).toMatchObject({ key: "use-remote", state: "failed" });
+    expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" });
+    expect(page!.snapshot.derivedFallback).toMatchObject({ surface: "diff", source: "fallback" });
+  });
+
+  it("commits candidate canonical state when the active deadline crosses during surface publication", async () => {
+    vi.useFakeTimers();
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
+    let page: UsePastePageResult | null = null;
+    let crossDeadline = false;
+    const firstVisualRoot = document.createElement("div");
+    const visual = (source: string, root: HTMLElement) => ({
+      root,
+      source: { value: source },
+      modes: {
+        enterSource: async () => undefined,
+        enterVisual: async () => undefined,
+        enterPreview: async () => undefined,
+        leaveVisual: async () => undefined,
+        destroy: async () => undefined,
+      },
+      bind: () => undefined,
+      dispose: async () => undefined,
+    });
+    const firstVisual = visual("first", firstVisualRoot);
+    firstVisual.dispose = async () => {
+      if (crossDeadline) clock = 300_000;
+    };
+    stagedMarkdown.prepareMarkdownVisual
+      .mockResolvedValueOnce(firstVisual as never)
+      .mockResolvedValueOnce(visual("candidate", document.createElement("div")) as never);
+    let read = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      read += 1;
+      return read === 1
+        ? resourceResponse("first", {
+          version: "generation.2",
+          contentRevision: 2,
+          updatedAt: "2026-09-16T00:00:00.000Z",
+        })
+        : resourceResponse("candidate", {
+          version: "other-generation.1",
+          updatedAt: "2026-09-17T00:00:00.000Z",
+        });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("visual", true);
+      clock = 3_000;
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.acceptedSource).toBe("first"));
+    await act(async () => {
+      clock = 6_000;
+      await vi.advanceTimersByTimeAsync(3_000);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(page!.snapshot.candidate).toEqual({ kind: "remote", source: "candidate" }));
+
+    crossDeadline = true;
+    await act(async () => {
+      page!.actions.useRemote();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot).toMatchObject({
+      acceptedSource: "candidate",
+      autosaveAcceptedSource: "candidate",
+      lastSavedContent: "candidate",
+      records: {
+        autosync: { state: "remote-applied" },
+        lastAction: { key: "use-remote", state: "succeeded" },
+      },
+    });
+  });
+
   it("recovers a candidate after a never-settling Preview host remount and ignores its stale settlement", async () => {
     vi.useFakeTimers();
     let page: UsePastePageResult | null = null;
