@@ -6,8 +6,9 @@ import {
   type ContentReconcileResult,
   type MetadataReconcileResult,
   type PasteController,
-  type ReconcileReadFailure,
   type PasteControllerSnapshot,
+  type ReconcileReadFailure,
+  type RemoteApplyActionClaim,
 } from "./paste-controller";
 
 function summary(overrides: Partial<PasteSummary> = {}): PasteSummary {
@@ -82,6 +83,25 @@ function reloadSnapshot(overrides: Partial<RemoteSnapshot> = {}): RemoteSnapshot
     contentRevision: 2,
     updatedAtMs: Date.parse("2026-09-15T00:00:01.000Z"),
     ...overrides,
+  };
+}
+
+function remoteApplyOptions(controller: PasteController, action: RemoteApplyActionClaim = null) {
+  const current = snapshot(controller);
+  if (current.resource !== "active") throw new Error("expected active controller");
+  return {
+    expectedBaseline: {
+      acceptedApplyGeneration: current.acceptedApplyGeneration,
+      localGeneration: current.localGeneration,
+      generation: "g",
+      version: current.version,
+      contentRevision: current.contentRevision,
+      updatedAt: current.updatedAt,
+      acceptedSource: current.acceptedSource,
+    },
+    expectedDraft: current.draft,
+    targetDisplayGeneration: current.displayGeneration + 1,
+    action,
   };
 }
 
@@ -235,6 +255,131 @@ describe("PasteController mutation slot", () => {
 
     expect(activity.mock.calls).toEqual([[3], [4], [5]]);
     expect(snapshot(controller)).toMatchObject({ draft: "e", localGeneration: 5 });
+  });
+});
+
+describe("PasteController prepared remote snapshots", () => {
+  it("rejects stale preparation without changing controller state", () => {
+    const { controller } = pasteControllerFixture();
+    const options = remoteApplyOptions(controller);
+    options.expectedBaseline.localGeneration += 1;
+    const before = snapshot(controller);
+    const effects = controller.effects();
+
+    expect(controller.prepareRemoteSnapshot(reloadSnapshot(), options)).toBeNull();
+
+    expect(snapshot(controller)).toEqual(before);
+    expect(controller.effects()).toEqual(effects);
+  });
+
+  it("commits a prepared remote snapshot without a second authority check", () => {
+    const { controller } = pasteControllerFixture();
+    const action = { key: "use-remote" as const, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
+    controller.recordLocalAction({ ...action, state: "pending" });
+    const options = remoteApplyOptions(controller, action);
+    const before = snapshot(controller);
+    const prepared = controller.prepareRemoteSnapshot(reloadSnapshot(), options);
+    if (prepared === null) throw new Error("expected prepared remote snapshot");
+
+    expect(snapshot(controller)).toEqual(before);
+    expect(prepared.previousBaseline).toEqual(options.expectedBaseline);
+    expect(prepared.nextBaseline).toMatchObject({ acceptedSource: "remote", version: "g.2", contentRevision: 2 });
+    expect(prepared.nextDisplayGeneration).toBe(options.targetDisplayGeneration);
+
+    controller.recordLocalActivity();
+    prepared.commit("2026-09-20T00:00:01.000Z");
+
+    expect(snapshot(controller)).toMatchObject({
+      acceptedSource: "remote",
+      draft: "remote",
+      lastSavedContent: "remote",
+      version: "g.2",
+      contentRevision: 2,
+      responseEtag: '"sha256-remote"',
+      acceptedApplyGeneration: before.acceptedApplyGeneration! + 1,
+      displayGeneration: options.targetDisplayGeneration,
+      mutation: { state: "idle" },
+      lastAction: {
+        state: "succeeded",
+        key: "use-remote",
+        attempt: 7,
+        startedAt: action.startedAt,
+        settledAt: "2026-09-20T00:00:01.000Z",
+        outcomeKey: null,
+      },
+    });
+    expect(controller.effects()).toEqual([{ type: "apply-authoritative", kind: "remote", acceptedSource: "remote", version: "g.2" }]);
+  });
+
+  it.each(["use-remote", "reload-server"] as const)("settles only the claimed %s action", (key) => {
+    const action = { key, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
+    const success = pasteControllerFixture().controller;
+    success.recordLocalAction({ ...action, state: "pending" });
+    const committed = success.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(success, action));
+    if (committed === null) throw new Error("expected prepared remote snapshot");
+
+    committed.commit("2026-09-20T00:00:01.000Z");
+    expect(snapshot(success).lastAction).toEqual({
+      state: "succeeded",
+      key,
+      attempt: 7,
+      startedAt: action.startedAt,
+      settledAt: "2026-09-20T00:00:01.000Z",
+      outcomeKey: null,
+    });
+
+    const failure = pasteControllerFixture().controller;
+    failure.recordLocalAction({ ...action, state: "pending" });
+    const before = snapshot(failure);
+    const rejected = failure.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(failure, action));
+    if (rejected === null) throw new Error("expected prepared remote snapshot");
+
+    failure.sourceEvent({ type: "input", content: "local draft", eventAt: 1 });
+    rejected.fail("2026-09-20T00:00:02.000Z");
+    expect(snapshot(failure)).toMatchObject({
+      acceptedSource: before.acceptedSource,
+      draft: "local draft",
+      version: before.version,
+      contentRevision: before.contentRevision,
+      lastAction: {
+        state: "failed",
+        key,
+        attempt: 7,
+        startedAt: action.startedAt,
+        settledAt: "2026-09-20T00:00:02.000Z",
+        outcomeKey: null,
+      },
+    });
+    expect(failure.effects()).toEqual([]);
+  });
+
+  it("rejects a stale claimed action without changing state", () => {
+    const { controller } = pasteControllerFixture();
+    controller.recordLocalAction({ key: "reload-server", state: "pending", attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" });
+    const before = snapshot(controller);
+    const action = { key: "reload-server" as const, attempt: 7, startedAt: "2026-09-20T00:00:01.000Z" };
+
+    expect(controller.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(controller, action))).toBeNull();
+
+    expect(snapshot(controller)).toEqual(before);
+    expect(controller.effects()).toEqual([]);
+  });
+
+  it("settles a prepared remote snapshot at most once", () => {
+    const { controller } = pasteControllerFixture();
+    const action = { key: "use-remote" as const, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
+    controller.recordLocalAction({ ...action, state: "pending" });
+    const prepared = controller.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(controller, action));
+    if (prepared === null) throw new Error("expected prepared remote snapshot");
+
+    prepared.commit("2026-09-20T00:00:01.000Z");
+    const after = snapshot(controller);
+    const effects = controller.effects();
+    prepared.fail("2026-09-20T00:00:02.000Z");
+    prepared.commit("2026-09-20T00:00:03.000Z");
+
+    expect(snapshot(controller)).toEqual(after);
+    expect(controller.effects()).toEqual(effects);
   });
 });
 

@@ -136,6 +136,27 @@ export interface PasteControllerOptions {
   wallNow?(): string;
 }
 
+export type RemoteApplyActionClaim = {
+  readonly key: "use-remote" | "reload-server";
+  readonly attempt: number;
+  readonly startedAt: string;
+} | null;
+
+export interface PrepareRemoteSnapshotOptions {
+  readonly expectedBaseline: BaselineCapture;
+  readonly expectedDraft: string;
+  readonly targetDisplayGeneration: number;
+  readonly action: RemoteApplyActionClaim;
+}
+
+export interface PreparedPasteRemoteCommit {
+  readonly previousBaseline: BaselineCapture;
+  readonly nextBaseline: BaselineCapture;
+  readonly nextDisplayGeneration: number;
+  commit(settledAt: string): void;
+  fail(settledAt: string): void;
+}
+
 export interface PasteController {
   snapshot(): Readonly<PasteControllerSnapshot>;
   effects(): readonly MutationEffect[];
@@ -154,6 +175,7 @@ export interface PasteController {
   acceptDeleteMutation(token: number, result: DeleteResult, at?: number): boolean;
   setPendingCredential(value: string | null): void;
   commitProvenCredential(value: string): boolean;
+  prepareRemoteSnapshot(remote: RemoteSnapshot, options: PrepareRemoteSnapshotOptions): PreparedPasteRemoteCommit | null;
   applyRemoteSnapshot(remote: RemoteSnapshot): boolean;
   retireForRemoteApply(): void;
   enterTerminal(phase: Extract<PastePhase, "consumed" | "not-found" | "delete-uncertain">, at?: number, origin?: TerminalOriginSettleContext): void;
@@ -196,6 +218,10 @@ function sameAcceptedBaseline(left: BaselineCapture, state: InternalState): bool
     && left.contentRevision === state.contentRevision
     && left.updatedAt === state.updatedAt
     && left.acceptedSource === state.acceptedSource;
+}
+
+function sameRemoteApplyBaseline(left: BaselineCapture, state: InternalState): boolean {
+  return left.localGeneration === state.localGeneration && sameAcceptedBaseline(left, state);
 }
 
 function sameMetadataMarkers(baseline: BaselineCapture, summary: PasteSummary): boolean {
@@ -865,6 +891,93 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     return true;
   };
 
+  const prepareRemoteSnapshot = (remote: RemoteSnapshot, options: PrepareRemoteSnapshotOptions): PreparedPasteRemoteCommit | null => {
+    const action = options.action;
+    const actionMatches = action === null || (
+      state.lastAction.state === "pending"
+      && state.lastAction.key === action.key
+      && state.lastAction.attempt === action.attempt
+      && state.lastAction.startedAt === action.startedAt
+    );
+    if (
+      state.phase !== "ordinary"
+      || !state.serverCapabilities
+      || slot.state !== "idle"
+      || metadataRequest !== undefined
+      || !sameRemoteApplyBaseline(options.expectedBaseline, state)
+      || options.expectedDraft !== state.draft
+      || options.targetDisplayGeneration !== state.displayGeneration + 1
+      || !actionMatches
+    ) return null;
+
+    const previousBaseline = capture(state);
+    const nextBaseline: BaselineCapture = {
+      acceptedApplyGeneration: state.acceptedApplyGeneration + 1,
+      localGeneration: state.localGeneration,
+      generation: generationOf(remote.summary.version),
+      version: remote.summary.version,
+      contentRevision: remote.contentRevision,
+      updatedAt: remote.summary.updatedAt,
+      acceptedSource: remote.source,
+    };
+    const nextTokenAfterCommit = nextToken + 1;
+    const committedSlot: MutationSlot = { state: "idle", nextToken: nextTokenAfterCommit };
+    const committedState: InternalState = {
+      ...state,
+      acceptedSource: remote.source,
+      draft: remote.source,
+      summary: remote.summary,
+      version: remote.summary.version,
+      versionUsable: true,
+      contentRevision: remote.contentRevision,
+      updatedAt: remote.summary.updatedAt,
+      responseEtag: remote.etag,
+      acceptedApplyGeneration: nextBaseline.acceptedApplyGeneration,
+      displayGeneration: options.targetDisplayGeneration,
+      lastSavedContent: remote.source,
+      coalescedSource: null,
+      conflictCandidate: null,
+      originalMutationFailure: null,
+      reconciliationRequired: false,
+      autosave: { state: "clean", confirmedAt: state.autosave.confirmedAt, failedAt: null },
+    };
+    const settle = (preparedState: InternalState, outcome: "succeeded" | "failed", settledAt: string): InternalState => {
+      if (action === null) return preparedState;
+      return {
+        ...preparedState,
+        lastAction: {
+          state: outcome,
+          key: action.key,
+          attempt: action.attempt,
+          startedAt: action.startedAt,
+          settledAt,
+          outcomeKey: null,
+        },
+      };
+    };
+    let settled = false;
+
+    return {
+      previousBaseline,
+      nextBaseline,
+      nextDisplayGeneration: options.targetDisplayGeneration,
+      commit(settledAt: string): void {
+        if (settled) return;
+        settled = true;
+        nextToken = nextTokenAfterCommit;
+        slot = committedSlot;
+        clearRequestOwnership();
+        state = settle(committedState, "succeeded", settledAt);
+        effects.push({ type: "apply-authoritative", kind: "remote", acceptedSource: remote.source, version: remote.summary.version });
+      },
+      fail(settledAt: string): void {
+        if (settled) return;
+        settled = true;
+        state = settle(state, "failed", settledAt);
+      },
+    };
+  };
+
   const applyRemoteSnapshot = (remote: RemoteSnapshot): boolean => {
     if (state.phase !== "ordinary" || !state.serverCapabilities) return false;
     nextToken += 1;
@@ -976,6 +1089,7 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     acceptDeleteMutation,
     setPendingCredential,
     commitProvenCredential,
+    prepareRemoteSnapshot,
     applyRemoteSnapshot,
     retireForRemoteApply,
     enterTerminal,
