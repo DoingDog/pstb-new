@@ -181,6 +181,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     const next = { ...selectedCurrent, current };
     return () => {
       selected = next;
+      if (activeRequest !== undefined) retireRequest();
     };
   };
   const prepareAdoptStaged = (stage: StagedHistoryDiff): (() => void) | null => {

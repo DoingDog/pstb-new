@@ -342,6 +342,44 @@ describe("history diff", () => {
     expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 3, previous: "old\n", current: "remote\n" });
   });
 
+  it("retires a selected automatic result when a prepared remote source commits", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines });
+    history.selectRevision("A", "a before\n", "old current\n");
+    history.setMounted(true);
+    void history.stageCurrent("remote\n");
+    history.selectRevision("B", "b before\n", "old current\n");
+
+    const replace = history.prepareReplaceCurrent("remote\n");
+    expect(replace).not.toBeNull();
+    replace!();
+
+    worker.onmessage?.({ data: { type: "result", id: 3, lines: [{ kind: "same", text: "stale\n" }] } } as MessageEvent<unknown>);
+    expect(onLines).not.toHaveBeenCalled();
+    expect(history.computeDiff()).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: expect.any(Number), previous: "b before\n", current: "remote\n" });
+  });
+
+  it("retires a selected automatic error when a prepared remote source commits", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onError = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines: vi.fn(), onError });
+    history.selectRevision("A", "a before\n", "old current\n");
+    history.setMounted(true);
+    void history.stageCurrent("remote\n");
+    history.selectRevision("B", "b before\n", "old current\n");
+
+    const replace = history.prepareReplaceCurrent("remote\n");
+    expect(replace).not.toBeNull();
+    replace!();
+
+    worker.onerror?.({} as ErrorEvent);
+    expect(onError).not.toHaveBeenCalled();
+    expect(history.computeDiff()).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: expect.any(Number), previous: "b before\n", current: "remote\n" });
+  });
+
   it("defers a selected diff current replacement until its host mounts", () => {
     const createWorker = vi.fn(() => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }));
     const history = createHistoryDiff({ createWorker, onLines: vi.fn() });
