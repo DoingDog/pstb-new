@@ -1423,17 +1423,18 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         },
         stageDiff: (source) => runtime.historyDiff.stageCurrent(source),
         mounted: () => Array.from(runtime.mountedSurfaces),
-        prepareCommit: ({ staged }) => {
+        prepareCommit: ({ source, staged }) => {
           const stagedDiff = isStagedHistoryDiff(staged.diff) ? staged.diff : null;
           const adopt = stagedDiff === null ? null : runtime.historyDiff.prepareAdoptStaged(stagedDiff);
+          const replace = adopt === null ? runtime.historyDiff.prepareReplaceCurrent(source) : null;
           return () => {
             if (stagedDiff !== null && adopt !== null) {
               adopt();
               runtime.diff = { state: "ready", lines: stagedDiff.lines };
-            } else if (staged.diff === null) {
-              runtime.diff = { state: "manual", lines: [] };
-            } else if (staged.diff !== undefined) {
-              runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
+            } else {
+              replace?.();
+              if (staged.diff === null) runtime.diff = { state: "manual", lines: [] };
+              else if (staged.diff !== undefined) runtime.diff = { state: "failed", lines: [], error: "Unable to calculate diff" };
             }
           };
         },
@@ -1755,7 +1756,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
                 return () => {
                   autosaveRelease();
                   retention.release();
-                  if (locallyClean(runtime)) runtime.sync.localWorkSettled(now());
+                  settleLocalWork(runtime, "content");
                   queuePublish();
                 };
               },

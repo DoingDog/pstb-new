@@ -547,6 +547,231 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.history.diff).toEqual({ state: "ready", lines: [{ kind: "add", text: "remote" }] });
   });
 
+  it("uses the Reload source when an unmounted History diff later mounts", async () => {
+    let page: UsePastePageResult | null = null;
+    const workers: Array<{ postMessage: ReturnType<typeof vi.fn>; terminate: ReturnType<typeof vi.fn>; onmessage: ((event: MessageEvent<unknown>) => void) | null; onerror: ((event: ErrorEvent) => void) | null }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/history/1")) return jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' });
+      if (url.endsWith("/history")) return jsonResponse({ id: "example", currentRevision: 1, currentVersion: "generation.1", revisions: [{ revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4 }] }, 200, { etag: '"generation.1"' });
+      return resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.openHistory();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.selectRevision(1);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.source).toBe("remote");
+    expect(workers).toHaveLength(0);
+
+    await act(async () => {
+      page!.actions.setSurfaceMounted("diff", true);
+      await Promise.resolve();
+    });
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 1, previous: "past", current: "remote" });
+  });
+
+  it("uses the Reload source when manually computing an oversized History diff", async () => {
+    let page: UsePastePageResult | null = null;
+    const remote = "x".repeat(1_048_577);
+    const workers: Array<{ postMessage: ReturnType<typeof vi.fn>; terminate: ReturnType<typeof vi.fn>; onmessage: ((event: MessageEvent<unknown>) => void) | null; onerror: ((event: ErrorEvent) => void) | null }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/history/1")) return jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' });
+      if (url.endsWith("/history")) return jsonResponse({ id: "example", currentRevision: 1, currentVersion: "generation.1", revisions: [{ revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4 }] }, 200, { etag: '"generation.1"' });
+      return resourceResponse(remote, { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("diff", true);
+      page!.actions.openHistory();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.selectRevision(1);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.history.diff).toEqual({ state: "manual", lines: [] });
+
+    await act(async () => {
+      page!.actions.computeDiff();
+      await Promise.resolve();
+    });
+    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 2, previous: "past", current: remote });
+  });
+
+  it("keeps the Reload source through a failed staged History diff and Retry", async () => {
+    let page: UsePastePageResult | null = null;
+    const workers: Array<{ postMessage: ReturnType<typeof vi.fn>; terminate: ReturnType<typeof vi.fn>; onmessage: ((event: MessageEvent<unknown>) => void) | null; onerror: ((event: ErrorEvent) => void) | null }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/history/1")) return jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' });
+      if (url.endsWith("/history")) return jsonResponse({ id: "example", currentRevision: 1, currentVersion: "generation.1", revisions: [{ revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4 }] }, 200, { etag: '"generation.1"' });
+      return resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("diff", true);
+      page!.actions.openHistory();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.selectRevision(1);
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    const staged = workers[0]!.postMessage.mock.calls.at(-1)![0] as { id: number; current: string };
+    expect(staged.current).toBe("remote");
+
+    await act(async () => {
+      workers[0]!.onerror?.(new ErrorEvent("error"));
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+
+    await act(async () => {
+      page!.actions.retryDiff();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    const retry = workers[0]!.postMessage.mock.calls.at(-1)![0] as { id: number; current: string };
+    expect(retry.current).toBe("remote");
+    await act(async () => {
+      workers[0]!.onmessage?.({ data: { type: "result", id: retry.id, lines: [{ kind: "add", text: "remote" }] } } as MessageEvent<unknown>);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(page!.snapshot.history.diff).toEqual({ state: "ready", lines: [{ kind: "add", text: "remote" }] });
+  });
+
+  it("resumes active Autosync three seconds after a dirty Reload commits content", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "draft", eventAt: 0 });
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_999); });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(2);
+  });
+
+  it("does not restart inactive Autosync after a dirty Reload commits content", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "draft", eventAt: 0 });
+      await vi.advanceTimersByTimeAsync(300_001);
+    });
+    expect(page!.snapshot.records.autosync.state).toBe("inactive");
+
+    await act(async () => {
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+  });
+
+  it("keeps Settings and Password dirty after Reload until both owners settle", async () => {
+    vi.useFakeTimers();
+    let page: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.sourceEvent({ type: "input", content: "draft", eventAt: 0 });
+      page!.actions.draftState("settings", true, 0);
+      page!.actions.draftState("password", true, 0);
+      page!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+
+    await act(async () => {
+      page!.actions.draftState("settings", false);
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+
+    await act(async () => {
+      page!.actions.draftState("password", false);
+      await vi.advanceTimersByTimeAsync(2_999);
+    });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "GET")).toHaveLength(2);
+  });
+
   it("keeps Autosync paused until Settings and Password drafts both exactly revert", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async () => resourceResponse("initial"));
