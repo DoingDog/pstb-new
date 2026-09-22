@@ -441,7 +441,7 @@ describe("build contract", () => {
       const sourceText = new TextDecoder().decode(source);
       const record = integrity.files.find((file) => file.localPath === localPath);
       expect(sourceText.startsWith(sourceComment(upstreamPath))).toBe(true);
-      expect(record).toEqual({ localPath, upstreamPath, sha256: sha256(source) });
+      expect(record).toEqual({ localPath, upstreamPath, sha256: sha256(Buffer.from(sourceText.replaceAll("\r\n", "\n"))) });
       expect(sourceText).not.toContain("SidebarMenuSkeleton");
     }
   });
@@ -646,7 +646,7 @@ describe("build contract", () => {
     try {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("Local smoke helper endpoint did not bind to a TCP port");
-      const smoke = await readFile("scripts/smoke.ps1", "utf8");
+      const smoke = (await readFile("scripts/smoke.ps1", "utf8")).replaceAll("\r\n", "\n");
       const helperEnd = smoke.indexOf("\nnpm run build\n");
       expect(helperEnd).toBeGreaterThan(0);
       temporaryDirectory = await mkdtemp(join(tmpdir(), "cf-pastebin-smoke-helper-"));
