@@ -287,6 +287,61 @@ describe("history diff", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("prepares an unmounted selected current replacement without worker work or callbacks", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const onError = vi.fn();
+    const createWorker = vi.fn(() => worker);
+    const history = createHistoryDiff({ createWorker, onLines, onError });
+    history.selectRevision("1", "old\n", "current\n");
+
+    const prepared = history.prepareReplaceCurrent("remote\n");
+
+    expect(prepared).not.toBeNull();
+    prepared!();
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(onLines).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(history.setMounted(true)).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 1, previous: "old\n", current: "remote\n" });
+  });
+
+  it("keeps an oversized prepared current side manual until explicit calculation", () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const createWorker = vi.fn(() => worker);
+    const history = createHistoryDiff({ createWorker, onLines: vi.fn(), onError: vi.fn() });
+    const oversized = "x".repeat(1_048_577);
+    history.selectRevision("1", "old\n", "current\n");
+
+    history.prepareReplaceCurrent(oversized)!();
+
+    expect(history.setMounted(true)).toBe("manual");
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(history.computeDiff()).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 1, previous: "old\n", current: oversized });
+  });
+
+  it("uses an assignment-only prepared current side after staged diff failure before retry", async () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null as ((event: MessageEvent<unknown>) => void) | null, onerror: null as ((event: ErrorEvent) => void) | null };
+    const onLines = vi.fn();
+    const onError = vi.fn();
+    const history = createHistoryDiff({ createWorker: () => worker, onLines, onError });
+    history.selectRevision("1", "old\n", "current\n");
+    history.setMounted(true);
+
+    const staged = history.stageCurrent("remote\n");
+    worker.onerror?.({} as ErrorEvent);
+    await expect(staged).rejects.toThrow("Unable to calculate diff");
+
+    history.prepareReplaceCurrent("remote\n")!();
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(onLines).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(history.computeDiff()).toBe("computing");
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 3, previous: "old\n", current: "remote\n" });
+  });
+
   it("defers a selected diff current replacement until its host mounts", () => {
     const createWorker = vi.fn(() => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }));
     const history = createHistoryDiff({ createWorker, onLines: vi.fn() });

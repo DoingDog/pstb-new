@@ -55,6 +55,7 @@ export interface HistoryDiffController {
   selectRevision(revision: DiffId, previous: string, current: string): "automatic" | "manual";
   replaceCurrent(current: string): HistoryDiffMode;
   stageCurrent(current: string): Promise<StagedHistoryDiff | null>;
+  prepareReplaceCurrent(current: string): (() => void) | null;
   prepareAdoptStaged(stage: StagedHistoryDiff): (() => void) | null;
   adoptStaged(stage: StagedHistoryDiff): boolean;
   setMounted(mounted: boolean): HistoryDiffMode;
@@ -174,6 +175,14 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     requestDiff(activeWorker, selected.previous, selected.current);
     return "computing";
   };
+  const prepareReplaceCurrent = (current: string): (() => void) | null => {
+    const selectedCurrent = selected;
+    if (selectedCurrent === undefined || selectedCurrent.current === current) return null;
+    const next = { ...selectedCurrent, current };
+    return () => {
+      selected = next;
+    };
+  };
   const prepareAdoptStaged = (stage: StagedHistoryDiff): (() => void) | null => {
     const current = selected;
     if (current === undefined || latestId !== stage.id || current.previous !== stage.previous) return null;
@@ -216,6 +225,7 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
         requestDiff(activeWorker, previous, current);
       });
     },
+    prepareReplaceCurrent,
     prepareAdoptStaged,
     adoptStaged(stage) {
       const adopt = prepareAdoptStaged(stage);
