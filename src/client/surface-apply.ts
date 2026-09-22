@@ -48,8 +48,8 @@ export interface StagedSurfacePorts {
   mounted(): readonly DerivedSurface[];
   prepareCommit?(context: SurfaceCommitContext): () => void;
   commit(staged: Readonly<StagedSurfaces>, generation: number): SurfaceReleaseWork | void;
-  restoreOld: (...args: any[]) => Promise<boolean>;
-  showOldGenerationFailure: (...args: any[]) => SurfaceReleaseWork | void;
+  restoreOld(rollback: SurfaceRollback): Promise<boolean>;
+  showOldGenerationFailure(rollback: SurfaceRollback): SurfaceReleaseWork | void;
   disposeAttemptResources(attempt: unknown): void;
 }
 
@@ -318,21 +318,16 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     parentApplyToken: attempt.target.parentApplyToken,
     hostGeneration: attempt.base.hostGeneration,
   });
-  const restore = async (attempt: Attempt): Promise<SurfaceReleaseWork | void> => {
-    if (!attempt.touchedHost) return;
+  const restore = async (attempt: Attempt): Promise<{ restored: boolean; release: SurfaceReleaseWork | void }> => {
+    if (!attempt.touchedHost) return { restored: true, release: undefined };
     const rollbackState = rollback(attempt);
-    let restored = false;
     try {
-      restored = options.ports.showOldGenerationFailure.length >= 2
-        ? await (options.ports.restoreOld as (generation: number, source: string, parentToken: number) => Promise<boolean>)(rollbackState.oldGeneration, rollbackState.oldSource, rollbackState.parentApplyToken)
-        : await (options.ports.restoreOld as (rollback: SurfaceRollback) => Promise<boolean>)(rollbackState);
+      if (await options.ports.restoreOld(rollbackState)) return { restored: true, release: undefined };
     } catch {}
-    if (!restored) {
-      try {
-        return options.ports.showOldGenerationFailure.length >= 2
-          ? (options.ports.showOldGenerationFailure as (generation: number, source: string, parentToken: number) => SurfaceReleaseWork | void)(rollbackState.oldGeneration, rollbackState.oldSource, rollbackState.parentApplyToken)
-          : (options.ports.showOldGenerationFailure as (rollback: SurfaceRollback) => SurfaceReleaseWork | void)(rollbackState);
-      } catch {}
+    try {
+      return { restored: false, release: options.ports.showOldGenerationFailure(rollbackState) };
+    } catch {
+      return { restored: false, release: undefined };
     }
   };
 
@@ -356,14 +351,24 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
     }
 
     const attempt = allocate(source, retrySurface);
-    if (retrySurface !== undefined) {
-      attempt.staged = mounted ?? {
-        preview: fallbackResource("preview", source, attempt.generation),
-        visual: fallbackResource("visual", source, attempt.generation),
-        diff: fallbackResource("diff", source, attempt.generation),
+    if (retrySurface === undefined) {
+      await stageAll(attempt);
+    } else {
+      attempt.staged = {
+        ...(mounted ?? {
+          preview: fallbackResource("preview", source, attempt.generation),
+          visual: fallbackResource("visual", source, attempt.generation),
+          diff: fallbackResource("diff", source, attempt.generation),
+        }),
       };
+      await stageOne(attempt, retrySurface);
+      if (attempt.failure !== null) {
+        retire(attempt);
+        restorePresentation(attempt);
+        reject(operation);
+        return false;
+      }
     }
-    await stageAll(attempt);
     if (attempt.retired || activeAttempt !== attempt || stale(attempt)) {
       retire(attempt);
       restorePresentation(attempt);
@@ -408,10 +413,16 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
           poison(error);
           throw error;
         }
+        const restored = await restore(attempt);
+        if (restored.restored) restorePresentation(attempt);
+        else {
+          status = "fallback";
+          fallback = "preview";
+          activeAttempt = undefined;
+        }
         retire(attempt);
-        const restoreRelease = await restore(attempt);
         release(failureRelease);
-        release(restoreRelease);
+        release(restored.release);
         return false;
       }
 

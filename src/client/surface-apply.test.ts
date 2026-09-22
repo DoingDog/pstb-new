@@ -9,12 +9,17 @@ import {
 interface Deferred<T> {
   promise: Promise<T>;
   resolve(value: T): void;
+  reject(reason: unknown): void;
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
-  return { promise, resolve };
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 async function settle(): Promise<void> {
@@ -61,6 +66,40 @@ function operation(overrides: Partial<GuardedSurfaceOperation> = {}): GuardedSur
     reject: vi.fn(),
     ...overrides,
   };
+}
+
+function rollbackFixture() {
+  const restoration = deferred<boolean>();
+  const order: string[] = [];
+  const ports: StagedSurfacePorts = {
+    stagePreview: vi.fn(async (source) => {
+      order.push(`stage-preview-${source}`);
+      return `preview-${source}`;
+    }),
+    stageVisual: vi.fn(async (source) => {
+      order.push(`stage-visual-${source}`);
+      return `visual-${source}`;
+    }),
+    stageDiff: vi.fn(async (source) => {
+      order.push(`stage-diff-${source}`);
+      return `diff-${source}`;
+    }),
+    mounted: () => ["preview", "visual", "diff"],
+    commit: vi.fn(() => undefined),
+    restoreOld: vi.fn(() => {
+      order.push("restore");
+      return restoration.promise;
+    }),
+    showOldGenerationFailure: vi.fn(() => {
+      order.push("show-old-fallback");
+      return () => { order.push("fallback-release"); };
+    }),
+    disposeAttemptResources: vi.fn((attempt) => {
+      const staged = (attempt as { staged: Record<string, unknown> }).staged;
+      order.push(`dispose-${Object.keys(staged).join(",")}`);
+    }),
+  };
+  return { restoration, order, ports, apply: createStagedSurfaceApply({ ports, capture: capture() }) };
 }
 
 describe("serial prepared surface apply", () => {
@@ -126,6 +165,161 @@ describe("serial prepared surface apply", () => {
   });
 
 
+  it("restores the exact old presentation before releasing staged targets or newer FIFO work", async () => {
+    const test = rollbackFixture();
+    const commitFailure = new Error("commit failed");
+    vi.mocked(test.ports.commit)
+      .mockImplementationOnce(() => {
+        test.order.push("commit-failed");
+        throw commitFailure;
+      })
+      .mockImplementation(() => {
+        test.order.push("commit-succeeded");
+      });
+    const first = test.apply.apply("two", operation({
+      prepare: () => ({
+        commit: () => undefined,
+        fail: () => {
+          test.order.push("prepared-fail");
+          return () => { test.order.push("failure-release"); };
+        },
+      }),
+    }));
+    const second = test.apply.apply("three", operation());
+
+    await settle();
+    expect(test.ports.restoreOld).toHaveBeenCalledWith({
+      failedGeneration: 2,
+      oldGeneration: 1,
+      oldSource: "one",
+      parentApplyToken: 2,
+      hostGeneration: 1,
+    });
+    expect(test.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    expect(test.ports.stagePreview).toHaveBeenCalledTimes(1);
+
+    test.restoration.resolve(true);
+    await expect(first).resolves.toBe(false);
+    expect(test.ports.disposeAttemptResources).toHaveBeenCalledTimes(3);
+    expect(test.order.indexOf("dispose-preview")).toBeGreaterThan(test.order.indexOf("restore"));
+    expect(test.order.indexOf("failure-release")).toBeGreaterThan(test.order.indexOf("dispose-diff"));
+
+    await settle();
+    expect(test.ports.stagePreview).toHaveBeenCalledTimes(2);
+    await expect(second).resolves.toBe(true);
+    expect(test.apply.snapshot()).toMatchObject({ source: "three", status: "committed" });
+  });
+
+  it.each([
+    ["returns false", () => Promise.resolve(false)],
+    ["rejects", () => Promise.reject(new Error("restore failed"))],
+  ] as const)("installs an old-bound fallback when restoreOld %s", async (_result, restoreOld) => {
+    const test = rollbackFixture();
+    vi.mocked(test.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });
+    vi.mocked(test.ports.restoreOld).mockImplementation(restoreOld);
+
+    await expect(test.apply.apply("two", operation())).resolves.toBe(false);
+
+    expect(test.ports.restoreOld).toHaveBeenCalledWith({
+      failedGeneration: 2,
+      oldGeneration: 1,
+      oldSource: "one",
+      parentApplyToken: 2,
+      hostGeneration: 1,
+    });
+    expect(test.ports.showOldGenerationFailure).toHaveBeenCalledWith({
+      failedGeneration: 2,
+      oldGeneration: 1,
+      oldSource: "one",
+      parentApplyToken: 2,
+      hostGeneration: 1,
+    });
+    expect(test.apply.snapshot()).toEqual({
+      capture: capture(),
+      source: "one",
+      status: "fallback",
+      fallback: "preview",
+      complete: false,
+    });
+  });
+
+  it("contains target-disposal throws after restoring the old generation", async () => {
+    const test = rollbackFixture();
+    vi.mocked(test.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });
+    vi.mocked(test.ports.disposeAttemptResources).mockImplementation((attempt) => {
+      const staged = (attempt as { staged: Record<string, unknown> }).staged;
+      test.order.push(`dispose-${Object.keys(staged).join(",")}`);
+      throw new Error("dispose failed");
+    });
+    const attempt = test.apply.apply("two", operation());
+
+    await settle();
+    expect(test.ports.disposeAttemptResources).not.toHaveBeenCalled();
+    test.restoration.resolve(true);
+    await expect(attempt).resolves.toBe(false);
+
+    expect(test.ports.disposeAttemptResources).toHaveBeenCalledTimes(3);
+    expect(test.apply.snapshot()).toEqual({
+      capture: capture(),
+      source: "one",
+      status: "idle",
+      fallback: null,
+      complete: false,
+    });
+  });
+
+  it("uses the failed host identity before a queued remount advances it", async () => {
+    const test = rollbackFixture();
+    vi.mocked(test.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });
+    const attempt = test.apply.apply("two", operation());
+
+    await settle();
+    test.apply.remount();
+    test.restoration.resolve(true);
+    await expect(attempt).resolves.toBe(false);
+    await settle();
+
+    expect(test.ports.restoreOld).toHaveBeenCalledWith(expect.objectContaining({
+      failedGeneration: 2,
+      oldGeneration: 1,
+      hostGeneration: 1,
+      parentApplyToken: 2,
+    }));
+    expect(test.apply.snapshot()).toEqual({
+      capture: capture({ hostGeneration: 2, parentApplyToken: 2, derivedRetryToken: 2 }),
+      source: "one",
+      status: "idle",
+      fallback: null,
+      complete: false,
+    });
+  });
+
+  it("does not let a queued newer operation overwrite restored rollback presentation", async () => {
+    const test = rollbackFixture();
+    vi.mocked(test.ports.commit)
+      .mockImplementationOnce(() => { throw new Error("commit failed"); })
+      .mockImplementation(() => undefined);
+    const first = test.apply.apply("two", operation());
+    const second = test.apply.apply("three", operation());
+
+    await settle();
+    test.restoration.resolve(true);
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(true);
+
+    expect(test.ports.restoreOld).toHaveBeenCalledWith(expect.objectContaining({
+      failedGeneration: 2,
+      oldGeneration: 1,
+      parentApplyToken: 2,
+      hostGeneration: 1,
+    }));
+    expect(test.apply.snapshot()).toMatchObject({
+      source: "three",
+      status: "committed",
+      capture: { currentDisplayGeneration: 2, parentApplyToken: 2 },
+    });
+  });
+
   it("rejects and poisons only the local scheduler when a prepared commit throws", async () => {
     const test = fixture();
     const failure = new Error("prepared commit failed");
@@ -184,6 +378,88 @@ describe("serial prepared surface apply", () => {
     expect(test.ports.commit).not.toHaveBeenCalled();
     expect(rejected.reject).toHaveBeenCalledOnce();
     expect(test.apply.snapshot()).toMatchObject({ source: "one", status: "idle" });
+  });
+
+  for (const surface of ["preview", "visual", "diff"] as const) {
+    it(`rejects a failed ${surface} Retry without replacing siblings`, async () => {
+      const fail = new Error(`${surface} stage failed`);
+      const stagePreview = vi.fn(async () => {
+        if (surface === "preview") throw fail;
+        return "preview-resource";
+      });
+      const stageVisual = vi.fn(async () => {
+        if (surface === "visual") throw fail;
+        return "visual-resource";
+      });
+      const stageDiff = vi.fn(async () => {
+        if (surface === "diff") throw fail;
+        return "diff-resource";
+      });
+      const ports: StagedSurfacePorts = {
+        stagePreview,
+        stageVisual,
+        stageDiff,
+        mounted: () => ["preview", "visual", "diff"],
+        commit: vi.fn(() => undefined),
+        restoreOld: vi.fn(async () => true),
+        showOldGenerationFailure: vi.fn(() => undefined),
+        disposeAttemptResources: vi.fn(),
+      };
+      const apply = createStagedSurfaceApply({ ports, capture: capture() });
+
+      await expect(apply.apply("two", operation())).resolves.toBe(true);
+      const prior = apply.snapshot();
+      const priorDisposals = vi.mocked(ports.disposeAttemptResources).mock.calls.length;
+
+      await expect(
+        surface === "preview" ? apply.retryPreview("two") : surface === "visual" ? apply.retryVisual("two") : apply.retryDiff("two"),
+      ).resolves.toBe(false);
+
+      expect(ports.commit).toHaveBeenCalledTimes(1);
+      expect(stagePreview).toHaveBeenCalledTimes(surface === "preview" ? 2 : 1);
+      expect(stageVisual).toHaveBeenCalledTimes(surface === "visual" ? 2 : 1);
+      expect(stageDiff).toHaveBeenCalledTimes(surface === "diff" ? 2 : 1);
+      expect(apply.snapshot()).toEqual(prior);
+      expect(ports.disposeAttemptResources).toHaveBeenCalledTimes(priorDisposals + 1);
+      expect(ports.disposeAttemptResources).toHaveBeenLastCalledWith(expect.objectContaining({
+        staged: expect.objectContaining({ [surface]: expect.anything() }),
+      }));
+    });
+  }
+
+  it("rejects a failed terminal Preview Retry without replacing its fallback", async () => {
+    const failure = new Error("preview stage failed");
+    const ports: StagedSurfacePorts = {
+      stagePreview: vi.fn(async () => { throw failure; }),
+      stageVisual: vi.fn(async () => "visual-resource"),
+      stageDiff: vi.fn(async () => "diff-resource"),
+      mounted: () => ["preview"],
+      commit: vi.fn(() => undefined),
+      restoreOld: vi.fn(async () => true),
+      showOldGenerationFailure: vi.fn(() => undefined),
+      disposeAttemptResources: vi.fn(),
+    };
+    const apply = createStagedSurfaceApply({ ports, capture: capture() });
+
+    await expect(apply.applyTerminalLocal("two", {
+      terminalEpochCurrent: true,
+      displayGenerationCurrent: true,
+      selectedSourceCurrent: true,
+    })).resolves.toMatchObject({ outcome: "fallback", fallback: "preview" });
+    const prior = apply.snapshot();
+    const priorDisposals = vi.mocked(ports.disposeAttemptResources).mock.calls.length;
+
+    await expect(apply.retryPreview("two")).resolves.toBe(false);
+
+    expect(ports.commit).toHaveBeenCalledTimes(1);
+    expect(ports.stagePreview).toHaveBeenCalledTimes(2);
+    expect(ports.stageVisual).not.toHaveBeenCalled();
+    expect(ports.stageDiff).not.toHaveBeenCalled();
+    expect(apply.snapshot()).toEqual(prior);
+    expect(ports.disposeAttemptResources).toHaveBeenCalledTimes(priorDisposals + 1);
+    expect(ports.disposeAttemptResources).toHaveBeenLastCalledWith(expect.objectContaining({
+      staged: expect.objectContaining({ preview: expect.anything() }),
+    }));
   });
 
   it("serializes terminal-local work behind an ordinary operation", async () => {

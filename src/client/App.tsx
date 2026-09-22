@@ -6,7 +6,7 @@ import { createPasteApi } from "./api";
 import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
 import type { AppBootstrap, OperationRecords, PasteSummary } from "./contracts";
 import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, type PreparedMarkdownVisual } from "./markdown";
-import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply } from "./surface-apply";
+import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply, type SurfaceRollback } from "./surface-apply";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
 import { OperationStatus } from "./components/OperationStatus";
 import type { LocalActionState } from "./components/LocalActions";
@@ -52,6 +52,16 @@ function isMarkdownPreview(value: unknown): value is MarkdownPreview {
 function disposeTerminalResources(resources: TerminalLocalRuntime["resources"], previous: TerminalLocalRuntime["previousResources"] = null): void {
   if (isPreparedMarkdownVisual(resources?.visual)) void resources.visual.dispose();
   if (previous !== resources && isPreparedMarkdownVisual(previous?.visual)) void previous.visual.dispose();
+}
+
+function terminalResourcesForRollback(local: TerminalLocalRuntime, rollback: SurfaceRollback) {
+  const current = local.resources?.generation === rollback.failedGeneration
+    ? local.resources
+    : null;
+  const previous = local.previousResources?.generation === rollback.oldGeneration
+    ? local.previousResources
+    : null;
+  return { current, previous };
 }
 
 type SourceInitialPage = {
@@ -386,32 +396,26 @@ export function App({ initialPage }: AppProps) {
           const previous = local.resources;
           local.previousResources = previous;
           local.resources = { ...staged, generation };
-          if (isPreparedMarkdownVisual(previous?.visual) && previous.visual !== staged.visual && !previous.visual.root.isConnected) {
-            void previous.visual.dispose();
-          }
+          return () => {
+            if (isPreparedMarkdownVisual(previous?.visual) && previous.visual !== staged.visual && !previous.visual.root.isConnected) {
+              void previous.visual.dispose();
+            }
+          };
         },
-        restoreOld: async (generation) => {
-          const previous = local.resources?.generation === generation
-            ? local.resources
-            : local.previousResources?.generation === generation
-              ? local.previousResources
-              : null;
-          if (previous === null) return false;
+        restoreOld: async (rollback) => {
+          const { current, previous } = terminalResourcesForRollback(local, rollback);
+          if (current === null || previous === null) return false;
           local.resources = previous;
           return true;
         },
-        showOldGenerationFailure: (generation, source) => {
-          const previous = local.resources?.generation === generation
-            ? local.resources
-            : local.previousResources?.generation === generation
-              ? local.previousResources
-              : null;
-          if (previous === null) return;
+        showOldGenerationFailure: (rollback) => {
+          const { current } = terminalResourcesForRollback(local, rollback);
+          if (current === null) return;
           local.resources = {
-            preview: { kind: "fallback", surface: "preview", source, generation },
-            visual: { kind: "fallback", surface: "visual", source, generation },
-            diff: { kind: "fallback", surface: "diff", source, generation },
-            generation,
+            preview: { kind: "fallback", surface: "preview", source: rollback.oldSource, generation: rollback.oldGeneration },
+            visual: { kind: "fallback", surface: "visual", source: rollback.oldSource, generation: rollback.oldGeneration },
+            diff: { kind: "fallback", surface: "diff", source: rollback.oldSource, generation: rollback.oldGeneration },
+            generation: rollback.oldGeneration,
           };
         },
         disposeAttemptResources: (attempt) => {
