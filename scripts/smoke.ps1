@@ -90,19 +90,24 @@ try {
   $createdResponse = Invoke-HttpResponse "$base/api/pastes" -Method POST -ContentType "application/json" -Body '{"content":"smoke source","title":"smoke.txt","expiration":60}'
   if ($createdResponse.StatusCode -ne 201) { throw "JSON create smoke failed" }
   $created = $createdResponse.Content | ConvertFrom-Json
-  if ([string]::IsNullOrEmpty($created.id) -or $created.content -ne "smoke source") { throw "JSON create response smoke failed" }
+  if (
+    [string]::IsNullOrEmpty($created.id) -or
+    [string]::IsNullOrEmpty($created.version) -or
+    $created.title -ne "smoke.txt" -or
+    $created.format -ne "text"
+  ) { throw "JSON create response smoke failed" }
 
   $raw = curl.exe -sS "$base/raw/$($created.id)"
   if ($raw -cne "smoke source") { throw "Raw representation smoke failed" }
 
   $resource = Invoke-HttpResponse "$base/api/pastes/$($created.id)"
-  $etag = [string]$resource.Headers.ETag
+  $etag = [string]$resource.Headers["ETag"]
   if ($resource.StatusCode -ne 200 -or $etag -notmatch '^"sha256-[A-Za-z0-9_-]{43}"$') { throw "Strong ETag smoke failed" }
   $notModified = Invoke-HttpResponse "$base/api/pastes/$($created.id)" -Headers @{ "If-None-Match" = $etag }
   if (
     $notModified.StatusCode -ne 304 -or
-    $notModified.Headers.ETag -ne $etag -or
-    $notModified.Headers.'Cache-Control' -ne "no-store" -or
+    $notModified.Headers["ETag"] -ne $etag -or
+    $notModified.Headers["Cache-Control"] -ne "no-store" -or
     $null -ne $notModified.Headers["Content-Length"] -or
     $null -ne $notModified.Headers["Content-Type"] -or
     $null -ne $notModified.Headers["Trailer"] -or
@@ -140,7 +145,7 @@ try {
   $htmlResponse = Invoke-HttpResponse "$base/api/pastes" -Method POST -ContentType "application/json" -Body (ConvertTo-Json @{ content = $htmlContent; format = "markdown"; expiration = 60 } -Compress)
   $html = $htmlResponse.Content | ConvertFrom-Json
   $htmlRepresentation = Invoke-HttpResponse "$base/html/$($html.id)"
-  if ($htmlRepresentation.Content -cne $htmlContent -or $htmlRepresentation.Headers.'Content-Security-Policy') { throw "HTML representation smoke failed" }
+  if ($htmlRepresentation.Content -cne $htmlContent -or $htmlRepresentation.Headers["Content-Security-Policy"]) { throw "HTML representation smoke failed" }
 
   $trace = curl.exe -sS -X POST "$base/ip-trace" -H "X-Smoke: yes" --data-binary "trace" | ConvertFrom-Json
   if ($trace.data -ne "trace" -or $trace.headers.'x-smoke' -ne "yes") { throw "ip-trace smoke failed" }
