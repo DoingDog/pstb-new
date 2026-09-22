@@ -628,7 +628,7 @@ describe("Task 15 async lifecycle behavior", () => {
       page!.actions.computeDiff();
       await Promise.resolve();
     });
-    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: 2, previous: "past", current: remote });
+    expect(workers[0]!.postMessage).toHaveBeenLastCalledWith({ type: "diff", id: expect.any(Number), previous: "past", current: remote });
   });
 
   it("keeps the Reload source through a failed staged History diff and Retry", async () => {

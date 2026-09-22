@@ -180,8 +180,8 @@ export function createHistoryDiff(options: HistoryDiffOptions): HistoryDiffContr
     if (selectedCurrent === undefined || selectedCurrent.current === current) return null;
     const next = { ...selectedCurrent, current };
     return () => {
-      selected = next;
       if (activeRequest !== undefined) retireRequest();
+      selected = next;
     };
   };
   const prepareAdoptStaged = (stage: StagedHistoryDiff): (() => void) | null => {
