@@ -243,6 +243,23 @@ describe("serial prepared surface apply", () => {
     });
   });
 
+  it("uses the mounted old surface for a rollback fallback", async () => {
+    const test = rollbackFixture();
+    test.ports.mounted = () => ["visual"];
+    vi.mocked(test.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });
+    vi.mocked(test.ports.restoreOld).mockResolvedValue(false);
+
+    await expect(test.apply.apply("two", operation())).resolves.toBe(false);
+
+    expect(test.apply.snapshot()).toEqual({
+      capture: capture(),
+      source: "one",
+      status: "fallback",
+      fallback: "visual",
+      complete: false,
+    });
+  });
+
   it("contains target-disposal throws after restoring the old generation", async () => {
     const test = rollbackFixture();
     vi.mocked(test.ports.commit).mockImplementation(() => { throw new Error("commit failed"); });

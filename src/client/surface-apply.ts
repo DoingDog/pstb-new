@@ -417,7 +417,7 @@ export function createStagedSurfaceApply(options: StagedSurfaceApplyOptions): St
         if (restored.restored) restorePresentation(attempt);
         else {
           status = "fallback";
-          fallback = "preview";
+          fallback = options.ports.mounted()[0] ?? attempt.oldFallback ?? "preview";
           activeAttempt = undefined;
         }
         retire(attempt);
