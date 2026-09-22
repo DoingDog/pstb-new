@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-09-22",
+  "product": "Edge",
+  "channel": "stable",
+  "source": {
+    "id": "microsoft-edge-enterprise-win-x64-stable",
+    "url": "https://edgeupdates.microsoft.com/api/products?view=enterprise",
+    "responseCount": 1,
+    "responseSha256": "49cca8dbc0bf2f038503cddd338b6af710c6400022cc7fae25b3734a5da715cd"
+  },
+  "retrievedAt": "2026-09-22T10:28:27.511Z",
+  "releases": [
+    {
+      "sourceReleaseIds": [
+        "129950"
+      ],
+      "exactVersion": "153.0.4234.48",
+      "major": 153,
+      "releasedAt": "2026-09-18T18:22:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "129766"
+      ],
+      "exactVersion": "153.0.4234.46",
+      "major": 153,
+      "releasedAt": "2026-09-17T18:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "129350"
+      ],
+      "exactVersion": "153.0.4234.32",
+      "major": 153,
+      "releasedAt": "2026-09-11T00:36:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "130101"
+      ],
+      "exactVersion": "152.0.4191.96",
+      "major": 152,
+      "releasedAt": "2026-09-21T18:41:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "129843"
+      ],
+      "exactVersion": "152.0.4191.88",
+      "major": 152,
+      "releasedAt": "2026-09-17T19:48:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "129357"
+      ],
+      "exactVersion": "152.0.4191.77",
+      "major": 152,
+      "releasedAt": "2026-09-11T00:50:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "128954"
+      ],
+      "exactVersion": "152.0.4191.66",
+      "major": 152,
+      "releasedAt": "2026-09-04T22:35:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "128742"
+      ],
+      "exactVersion": "152.0.4191.62",
+      "major": 152,
+      "releasedAt": "2026-09-02T18:28:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "128278"
+      ],
+      "exactVersion": "152.0.4191.53",
+      "major": 152,
+      "releasedAt": "2026-08-28T03:03:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127911"
+      ],
+      "exactVersion": "151.0.4129.107",
+      "major": 151,
+      "releasedAt": "2026-08-24T07:56:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127670"
+      ],
+      "exactVersion": "151.0.4129.101",
+      "major": 151,
+      "releasedAt": "2026-08-20T21:36:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127292"
+      ],
+      "exactVersion": "151.0.4129.93",
+      "major": 151,
+      "releasedAt": "2026-08-17T21:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127105"
+      ],
+      "exactVersion": "151.0.4129.86",
+      "major": 151,
+      "releasedAt": "2026-08-14T17:09:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "126637"
+      ],
+      "exactVersion": "151.0.4129.78",
+      "major": 151,
+      "releasedAt": "2026-08-10T15:04:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "126427"
+      ],
+      "exactVersion": "151.0.4129.72",
+      "major": 151,
+      "releasedAt": "2026-08-06T20:30:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "125971"
+      ],
+      "exactVersion": "151.0.4129.59",
+      "major": 151,
+      "releasedAt": "2026-07-31T21:02:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127715"
+      ],
+      "exactVersion": "150.0.4078.144",
+      "major": 150,
+      "releasedAt": "2026-08-21T06:21:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "127025"
+      ],
+      "exactVersion": "150.0.4078.132",
+      "major": 150,
+      "releasedAt": "2026-08-14T00:31:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "126766"
+      ],
+      "exactVersion": "150.0.4078.125",
+      "major": 150,
+      "releasedAt": "2026-08-11T19:56:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "125977"
+      ],
+      "exactVersion": "150.0.4078.110",
+      "major": 150,
+      "releasedAt": "2026-07-31T21:26:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "125506"
+      ],
+      "exactVersion": "150.0.4078.105",
+      "major": 150,
+      "releasedAt": "2026-07-27T18:24:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "125321"
+      ],
+      "exactVersion": "150.0.4078.99",
+      "major": 150,
+      "releasedAt": "2026-07-24T20:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "125204"
+      ],
+      "exactVersion": "150.0.4078.96",
+      "major": 150,
+      "releasedAt": "2026-07-23T21:20:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "124738"
+      ],
+      "exactVersion": "150.0.4078.83",
+      "major": 150,
+      "releasedAt": "2026-07-17T20:01:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "124121"
+      ],
+      "exactVersion": "150.0.4078.65",
+      "major": 150,
+      "releasedAt": "2026-07-09T21:14:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "123649"
+      ],
+      "exactVersion": "150.0.4078.48",
+      "major": 150,
+      "releasedAt": "2026-07-02T21:25:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "123101"
+      ],
+      "exactVersion": "149.0.4022.98",
+      "major": 149,
+      "releasedAt": "2026-06-26T18:15:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122928"
+      ],
+      "exactVersion": "149.0.4022.96",
+      "major": 149,
+      "releasedAt": "2026-06-25T20:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122435"
+      ],
+      "exactVersion": "149.0.4022.80",
+      "major": 149,
+      "releasedAt": "2026-06-18T18:39:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122025"
+      ],
+      "exactVersion": "149.0.4022.69",
+      "major": 149,
+      "releasedAt": "2026-06-12T17:57:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "121671"
+      ],
+      "exactVersion": "149.0.4022.62",
+      "major": 149,
+      "releasedAt": "2026-06-09T17:02:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "121337"
+      ],
+      "exactVersion": "149.0.4022.52",
+      "major": 149,
+      "releasedAt": "2026-06-04T19:37:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122985"
+      ],
+      "exactVersion": "148.0.3967.137",
+      "major": 148,
+      "releasedAt": "2026-06-25T21:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122455"
+      ],
+      "exactVersion": "148.0.3967.128",
+      "major": 148,
+      "releasedAt": "2026-06-18T19:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "122037"
+      ],
+      "exactVersion": "148.0.3967.118",
+      "major": 148,
+      "releasedAt": "2026-06-12T18:06:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "121688"
+      ],
+      "exactVersion": "148.0.3967.116",
+      "major": 148,
+      "releasedAt": "2026-06-09T17:48:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "121343"
+      ],
+      "exactVersion": "148.0.3967.109",
+      "major": 148,
+      "releasedAt": "2026-06-04T20:05:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "120779"
+      ],
+      "exactVersion": "148.0.3967.96",
+      "major": 148,
+      "releasedAt": "2026-05-28T21:32:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "120321"
+      ],
+      "exactVersion": "148.0.3967.83",
+      "major": 148,
+      "releasedAt": "2026-05-21T22:14:00.000Z"
+    }
+  ]
+}

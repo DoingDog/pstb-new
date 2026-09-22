@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-09-22",
+  "product": "Safari",
+  "channel": "stable",
+  "source": {
+    "id": "apple-security-releases-safari",
+    "url": "https://support.apple.com/en-us/100100",
+    "responseCount": 1,
+    "responseSha256": "fbb272781ac27cc7a615b542b5c1bec4b4e6605f11876193e41cb320c1851a2c"
+  },
+  "retrievedAt": "2026-09-22T10:28:27.511Z",
+  "releases": [
+    {
+      "sourceReleaseIds": [
+        "safari:27@2026-09-14T00:00:00.000Z"
+      ],
+      "exactVersion": "27",
+      "major": 27,
+      "releasedAt": "2026-09-14T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.6.1@2026-08-18T00:00:00.000Z"
+      ],
+      "exactVersion": "26.6.1",
+      "major": 26,
+      "releasedAt": "2026-08-18T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.6@2026-07-27T00:00:00.000Z"
+      ],
+      "exactVersion": "26.6",
+      "major": 26,
+      "releasedAt": "2026-07-27T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.5.2@2026-06-29T00:00:00.000Z"
+      ],
+      "exactVersion": "26.5.2",
+      "major": 26,
+      "releasedAt": "2026-06-29T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.5@2026-05-13T00:00:00.000Z"
+      ],
+      "exactVersion": "26.5",
+      "major": 26,
+      "releasedAt": "2026-05-13T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.4@2026-03-24T00:00:00.000Z"
+      ],
+      "exactVersion": "26.4",
+      "major": 26,
+      "releasedAt": "2026-03-24T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.3@2026-02-11T00:00:00.000Z"
+      ],
+      "exactVersion": "26.3",
+      "major": 26,
+      "releasedAt": "2026-02-11T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.2@2025-12-12T00:00:00.000Z"
+      ],
+      "exactVersion": "26.2",
+      "major": 26,
+      "releasedAt": "2025-12-12T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26.1@2025-11-03T00:00:00.000Z"
+      ],
+      "exactVersion": "26.1",
+      "major": 26,
+      "releasedAt": "2025-11-03T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:26@2025-09-15T00:00:00.000Z"
+      ],
+      "exactVersion": "26",
+      "major": 26,
+      "releasedAt": "2025-09-15T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.6@2025-07-30T00:00:00.000Z"
+      ],
+      "exactVersion": "18.6",
+      "major": 18,
+      "releasedAt": "2025-07-30T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.5@2025-05-12T00:00:00.000Z"
+      ],
+      "exactVersion": "18.5",
+      "major": 18,
+      "releasedAt": "2025-05-12T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.4@2025-03-31T00:00:00.000Z"
+      ],
+      "exactVersion": "18.4",
+      "major": 18,
+      "releasedAt": "2025-03-31T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.3.1@2025-03-11T00:00:00.000Z"
+      ],
+      "exactVersion": "18.3.1",
+      "major": 18,
+      "releasedAt": "2025-03-11T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.3@2025-01-27T00:00:00.000Z"
+      ],
+      "exactVersion": "18.3",
+      "major": 18,
+      "releasedAt": "2025-01-27T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.2@2024-12-11T00:00:00.000Z"
+      ],
+      "exactVersion": "18.2",
+      "major": 18,
+      "releasedAt": "2024-12-11T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.1.1@2024-11-19T00:00:00.000Z"
+      ],
+      "exactVersion": "18.1.1",
+      "major": 18,
+      "releasedAt": "2024-11-19T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18.1@2024-10-29T00:00:00.000Z"
+      ],
+      "exactVersion": "18.1",
+      "major": 18,
+      "releasedAt": "2024-10-29T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:18@2024-09-16T00:00:00.000Z"
+      ],
+      "exactVersion": "18",
+      "major": 18,
+      "releasedAt": "2024-09-16T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:17.6@2024-07-29T00:00:00.000Z"
+      ],
+      "exactVersion": "17.6",
+      "major": 17,
+      "releasedAt": "2024-07-29T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:17.5@2024-05-13T00:00:00.000Z"
+      ],
+      "exactVersion": "17.5",
+      "major": 17,
+      "releasedAt": "2024-05-13T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:17.4.1@2024-03-25T00:00:00.000Z"
+      ],
+      "exactVersion": "17.4.1",
+      "major": 17,
+      "releasedAt": "2024-03-25T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:17.4@2024-03-07T00:00:00.000Z"
+      ],
+      "exactVersion": "17.4",
+      "major": 17,
+      "releasedAt": "2024-03-07T00:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "safari:17.3@2024-01-22T00:00:00.000Z"
+      ],
+      "exactVersion": "17.3",
+      "major": 17,
+      "releasedAt": "2024-01-22T00:00:00.000Z"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const datePattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
 const timestampPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$/u;
+const chromeSourceTimestampPattern = /^(\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))T((?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d{3}|\d{6}|\d{9}))?Z$/u;
 const versionPattern = /^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$/u;
 const hashPattern = /^[0-9a-f]{64}$/u;
 const productNames = Object.freeze(["Chrome", "Edge", "Firefox", "Safari"]);
@@ -200,6 +201,17 @@ export function canonicalTimestamp(value, name = "timestamp") {
   const instant = Date.parse(value);
   if (!Number.isFinite(instant) || new Date(instant).toISOString() !== value) fail(`${name} is not a canonical instant`);
   return { value, instant };
+}
+
+function chromeSourceTimestamp(value, name) {
+  string(value, name);
+  const match = chromeSourceTimestampPattern.exec(value);
+  if (match === null) fail(`${name} must be a UTC Google Timestamp with 0, 3, 6, or 9 fractional digits`);
+  const [, date, time, fraction] = match;
+  const base = canonicalTimestamp(`${date}T${time}.000Z`, name);
+  const milliseconds = (fraction ?? "").slice(0, 3).padEnd(3, "0");
+  const sourceInstant = BigInt(base.instant) * 1_000_000n + BigInt((fraction ?? "").padEnd(9, "0") || "0");
+  return { value: `${date}T${time}.${milliseconds}Z`, sourceInstant };
 }
 
 function timestampFromClock(value, name) {
@@ -405,15 +417,15 @@ export function normalizeChromePayloads(payloads, retrievedAt) {
       const exactVersion = version(release.version, "Chrome release.version");
       const sourceId = string(release.name, "Chrome release.name", true);
       if (!isObject(release.serving)) fail("Chrome release.serving must be object");
-      const releasedAt = canonicalTimestamp(release.serving.startTime, "Chrome release.serving.startTime").value;
+      const timestamp = chromeSourceTimestamp(release.serving.startTime, "Chrome release.serving.startTime");
       const existingIdentity = releaseIdentity.get(sourceId);
-      if (existingIdentity !== undefined && (existingIdentity.exactVersion !== exactVersion || existingIdentity.releasedAt !== releasedAt)) {
+      if (existingIdentity !== undefined && (existingIdentity.exactVersion !== exactVersion || existingIdentity.sourceInstant !== timestamp.sourceInstant)) {
         fail("Chrome repeated release ID conflicts");
       }
-      releaseIdentity.set(sourceId, { exactVersion, releasedAt });
-      const group = byVersion.get(exactVersion) ?? { ids: new Set(), dates: [] };
+      releaseIdentity.set(sourceId, { exactVersion, sourceInstant: timestamp.sourceInstant });
+      const group = byVersion.get(exactVersion) ?? { ids: new Set(), timestamps: [] };
       group.ids.add(sourceId);
-      group.dates.push(releasedAt);
+      group.timestamps.push(timestamp);
       byVersion.set(exactVersion, group);
     }
   }
@@ -422,7 +434,7 @@ export function normalizeChromePayloads(payloads, retrievedAt) {
     records.push({
       sourceReleaseIds: [...group.ids],
       exactVersion,
-      releasedAt: [...group.dates].sort()[0],
+      releasedAt: group.timestamps.reduce((earliest, timestamp) => timestamp.sourceInstant < earliest.sourceInstant ? timestamp : earliest).value,
     });
   }
   return normalizeRecords(records, retrievedAt);
@@ -687,10 +699,10 @@ async function fetchResponse(fetchImpl, url, signal) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function acquireVendor(product, context, fetchImpl, options) {
+async function acquireVendor(product, context, fetchImpl, signal) {
   const config = sourceConfigurations[product];
   if (product !== "Chrome") {
-    const body = await deadlineOperation(context, (signal) => fetchResponse(fetchImpl, config.url, signal), options);
+    const body = await fetchResponse(fetchImpl, config.url, signal);
     const payload = product === "Safari" ? undefined : json(body.toString("utf8"), `${product} response`);
     const releases = product === "Edge"
       ? normalizeEdgePayload(payload, context.commandNow)
@@ -707,10 +719,8 @@ async function acquireVendor(product, context, fetchImpl, options) {
     let body;
     let staleTerminalToken = false;
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      const result = await deadlineOperation(context, async (signal) => {
-        const response = await fetchImpl(url, { redirect: "error", signal });
-        return { status: response?.status, body: response?.status === 200 || response?.status === 400 ? Buffer.from(await response.arrayBuffer()) : undefined };
-      }, options);
+      const response = await fetchImpl(url, { redirect: "error", signal });
+      const result = { status: response?.status, body: response?.status === 200 || response?.status === 400 ? Buffer.from(await response.arrayBuffer()) : undefined };
       if (result.status === 200) {
         body = result.body;
         break;
@@ -1177,8 +1187,11 @@ function removeCampaignOutputs(repoRoot) {
 
 export async function acquireTargets({ repoRoot = root, releaseDate, clock = Date.now, fetchImpl = fetch, deadlineMilliseconds } = {}) {
   const context = captureContext(releaseDate, clock);
-  const vendors = {};
-  for (const product of productNames) vendors[product] = await acquireVendor(product, context, fetchImpl, { deadlineMilliseconds });
+  const vendors = await deadlineOperation(context, async (signal) => {
+    const acquired = {};
+    for (const product of productNames) acquired[product] = await acquireVendor(product, context, fetchImpl, signal);
+    return acquired;
+  }, { deadlineMilliseconds });
   const sources = {};
   const sourceStage = [];
   const hashes = {};
@@ -1680,6 +1693,28 @@ async function browserSelfTest() {
   };
   try {
     const retrievedAt = "2026-09-13T12:00:00.000Z";
+    const chromeGoogleTimestampCases = [
+      { source: "2026-09-10T01:02:03Z", canonical: "2026-09-10T01:02:03.000Z" },
+      { source: "2026-09-10T01:02:04.123Z", canonical: "2026-09-10T01:02:04.123Z" },
+      { source: "2026-09-10T01:02:05.662121Z", canonical: "2026-09-10T01:02:05.662Z" },
+      { source: "2026-09-10T01:02:06.987654321Z", canonical: "2026-09-10T01:02:06.987Z" },
+    ];
+    for (const { source, canonical } of chromeGoogleTimestampCases) {
+      equal(chromeSourceTimestamp(source, "Chrome Google Timestamp").value, canonical, `Chrome Google Timestamp canonicalizes ${source}`);
+    }
+    const earlierChromeSource = chromeSourceTimestamp("2026-09-10T01:02:07.123001Z", "Chrome earlier source timestamp");
+    const laterChromeSource = chromeSourceTimestamp("2026-09-10T01:02:07.123999999Z", "Chrome later source timestamp");
+    equal(earlierChromeSource.value, laterChromeSource.value, "Chrome source timestamps truncate to the same artifact millisecond");
+    if (earlierChromeSource.sourceInstant >= laterChromeSource.sourceInstant) fail("Chrome source timestamps retain precision for earliest selection");
+    for (const timestamp of ["2026-09-10T01:02:03.12Z", "2026-09-10T01:02:03.1234Z", "2026-09-10T01:02:03.123+00:00", "2026-02-29T01:02:03Z"]) {
+      await expectThrows(() => Promise.resolve(chromeSourceTimestamp(timestamp, "Chrome invalid Google Timestamp")), `Chrome rejects invalid Google Timestamp ${timestamp}`);
+    }
+    await expectThrows(() => Promise.resolve(normalizeChromePayloads([{ releases: [
+      { fraction: 1, name: "chrome-duplicate-precision", version: "120.0", serving: { startTime: "2026-09-10T01:02:05.662121Z" } },
+      { fraction: 1, name: "chrome-duplicate-precision", version: "120.0", serving: { startTime: "2026-09-10T01:02:05.662122Z" } },
+      { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00Z" } },
+      { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00Z" } },
+    ] }], retrievedAt)), "Chrome repeated release ID conflicts at source precision");
     const chromeContinuationUrl = `${sourceConfigurations.Chrome.url}&page_token=continuation%20token`;
     const chromeTerminalUrl = `${sourceConfigurations.Chrome.url}&page_token=terminal%20token`;
     const chromeFirstBody = JSON.stringify({ releases: [
@@ -1689,6 +1724,11 @@ async function browserSelfTest() {
       { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
       { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
     ] });
+    const chromeDeadlineFirstBody = JSON.stringify({ releases: [
+      { fraction: 1, name: "chrome-120", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
+      { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
+      { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
+    ], nextPageToken: "continuation token" });
     const chromeFullReleases = Array.from({ length: 1000 }, (_, index) => {
       const major = [120, 117, 111][index % 3];
       return { fraction: 1, name: `chrome-full-${index}`, version: `${major}.${Math.floor(index / 3)}.0`, serving: { startTime: "2026-09-10T00:00:00.000Z" } };
@@ -1739,6 +1779,63 @@ async function browserSelfTest() {
     equal(staleTerminalCalls.filter((url) => url === chromeTerminalUrl).length, 6, "Chrome stale terminal token has six physical attempts");
     equal(staleTerminalChrome.source.responseCount, 2, "Chrome stale terminal token preserves successful pages once");
     equal(staleTerminalChrome.source.responseSha256, sha256(Buffer.concat([Buffer.from(chromeFullFirstBody), Buffer.from("\n"), Buffer.from(chromeTerminalBody)])), "Chrome stale terminal token preserves successful page hash");
+
+    const expiredChromeRoot = resolve(dir, "chrome-pagination-deadline");
+    const expiredChromeCalls = [];
+    await expectThrows(() => acquireTargets({
+      repoRoot: expiredChromeRoot,
+      releaseDate: "2026-09-13",
+      clock: oneCallClock(),
+      deadlineMilliseconds: 25,
+      fetchImpl: async (url, { signal }) => {
+        expiredChromeCalls.push(url);
+        if (url === sourceConfigurations.Chrome.url) return { status: 200, arrayBuffer: async () => Buffer.from(chromeDeadlineFirstBody) };
+        if (url === chromeContinuationUrl) {
+          return new Promise((resolvePromise, reject) => {
+            const timeout = setTimeout(() => resolvePromise({ status: 400, arrayBuffer: async () => Buffer.from(retryableChromeError) }), 20);
+            signal.addEventListener("abort", () => {
+              clearTimeout(timeout);
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            }, { once: true });
+          });
+        }
+        const vendorResponse = vendorResponses.find(([candidate]) => candidate === url);
+        if (vendorResponse !== undefined) return { status: 200, arrayBuffer: async () => Buffer.from(vendorResponse[1]) };
+        return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      },
+    }), "Chrome pagination deadline spans retries");
+    equal(existsSync(expiredChromeRoot), false, "Chrome pagination deadline performs no writes");
+
+    const expiredLaterVendorRoot = resolve(dir, "later-vendor-deadline");
+    const delayedVendorResponse = (body, signal) => new Promise((resolvePromise, reject) => {
+      const timeout = setTimeout(() => resolvePromise({ status: 200, arrayBuffer: async () => Buffer.from(body) }), 200);
+      signal.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }, { once: true });
+    });
+    let expiredLaterVendorFailure;
+    try {
+      await acquireTargets({
+        repoRoot: expiredLaterVendorRoot,
+        releaseDate: "2026-09-13",
+        clock: oneCallClock(),
+        deadlineMilliseconds: 300,
+        fetchImpl: async (url, { signal }) => {
+          if (url === sourceConfigurations.Chrome.url) return delayedVendorResponse(chromeFirstBody, signal);
+          if (url === chromeContinuationUrl) return { status: 200, arrayBuffer: async () => Buffer.from(chromeContinuationBody) };
+          if (url === sourceConfigurations.Edge.url) return delayedVendorResponse(vendorResponses[0][1], signal);
+          const vendorResponse = vendorResponses.find(([candidate]) => candidate === url);
+          if (vendorResponse !== undefined) return { status: 200, arrayBuffer: async () => Buffer.from(vendorResponse[1]) };
+          return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+        },
+      });
+    } catch (error) {
+      expiredLaterVendorFailure = error;
+    }
+    if (expiredLaterVendorFailure === undefined) fail("Self-test expected rejection: Acquire targets deadline spans later vendors");
+    equal(expiredLaterVendorFailure instanceof Error ? expiredLaterVendorFailure.message : String(expiredLaterVendorFailure), "Evidence operation deadline expired", "Acquire targets deadline spans later vendors");
+    equal(existsSync(expiredLaterVendorRoot), false, "Acquire targets deadline across vendors performs no writes");
 
     const acquisitionRoot = resolve(dir, "acquisition");
     const acquisitionCalls = [];

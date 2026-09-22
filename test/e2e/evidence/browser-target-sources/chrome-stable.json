@@ -1,0 +1,4038 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-09-22",
+  "product": "Chrome",
+  "channel": "stable",
+  "source": {
+    "id": "google-chrome-versionhistory-win-stable",
+    "url": "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction%3D1&order_by=starttime%20desc&page_size=1000",
+    "responseCount": 2,
+    "responseSha256": "c1559b78c050059b35b45cf0e6ccc1d9285c9e9d9d1ff534b6320c0f21bfd768"
+  },
+  "retrievedAt": "2026-09-22T10:28:27.511Z",
+  "releases": [
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/153.0.8010.53/releases/1789670979"
+      ],
+      "exactVersion": "153.0.8010.53",
+      "major": 153,
+      "releasedAt": "2026-09-17T18:49:39.662Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/153.0.8010.48/releases/1789502351"
+      ],
+      "exactVersion": "153.0.8010.48",
+      "major": 153,
+      "releasedAt": "2026-09-15T19:59:11.185Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/153.0.8010.37/releases/1788902339"
+      ],
+      "exactVersion": "153.0.8010.37",
+      "major": 153,
+      "releasedAt": "2026-09-08T21:18:59.382Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/152.0.7977.83/releases/1788461345",
+        "chrome/platforms/win/channels/stable/versions/152.0.7977.83/releases/1788899218"
+      ],
+      "exactVersion": "152.0.7977.83",
+      "major": 152,
+      "releasedAt": "2026-09-03T18:49:05.300Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/152.0.7977.76/releases/1788295855"
+      ],
+      "exactVersion": "152.0.7977.76",
+      "major": 152,
+      "releasedAt": "2026-09-01T20:50:55.230Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/152.0.7977.65/releases/1787682769"
+      ],
+      "exactVersion": "152.0.7977.65",
+      "major": 152,
+      "releasedAt": "2026-08-25T18:32:49.171Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.174/releases/1787256546"
+      ],
+      "exactVersion": "151.0.7922.174",
+      "major": 151,
+      "releasedAt": "2026-08-20T20:09:06.766Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.170/releases/1787078945"
+      ],
+      "exactVersion": "151.0.7922.170",
+      "major": 151,
+      "releasedAt": "2026-08-18T18:49:05.614Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.138/releases/1786483140"
+      ],
+      "exactVersion": "151.0.7922.138",
+      "major": 151,
+      "releasedAt": "2026-08-11T21:19:00.793Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.109/releases/1786046665",
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.109/releases/1786482604"
+      ],
+      "exactVersion": "151.0.7922.109",
+      "major": 151,
+      "releasedAt": "2026-08-06T20:04:25.299Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.76/releases/1785874025",
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.76/releases/1786045838"
+      ],
+      "exactVersion": "151.0.7922.76",
+      "major": 151,
+      "releasedAt": "2026-08-04T20:07:05.072Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/151.0.7922.72/releases/1785357317"
+      ],
+      "exactVersion": "151.0.7922.72",
+      "major": 151,
+      "releasedAt": "2026-07-29T20:35:17.764Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.187/releases/1784838198",
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.187/releases/1785356199",
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.187/releases/1785863269"
+      ],
+      "exactVersion": "150.0.7871.187",
+      "major": 150,
+      "releasedAt": "2026-07-23T20:23:18.393Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.182/releases/1784666561"
+      ],
+      "exactVersion": "150.0.7871.182",
+      "major": 150,
+      "releasedAt": "2026-07-21T20:42:41.457Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.129/releases/1784235238"
+      ],
+      "exactVersion": "150.0.7871.129",
+      "major": 150,
+      "releasedAt": "2026-07-16T20:53:58.390Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.125/releases/1784046131"
+      ],
+      "exactVersion": "150.0.7871.125",
+      "major": 150,
+      "releasedAt": "2026-07-14T16:22:11.905Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.115/releases/1783549688",
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.115/releases/1783974887"
+      ],
+      "exactVersion": "150.0.7871.115",
+      "major": 150,
+      "releasedAt": "2026-07-08T22:28:08.587Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.101/releases/1783445886",
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.101/releases/1783548213"
+      ],
+      "exactVersion": "150.0.7871.101",
+      "major": 150,
+      "releasedAt": "2026-07-07T17:38:06.878Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/150.0.7871.47/releases/1782851938"
+      ],
+      "exactVersion": "150.0.7871.47",
+      "major": 150,
+      "releasedAt": "2026-06-30T20:38:58.662Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.201/releases/1782420591"
+      ],
+      "exactVersion": "149.0.7827.201",
+      "major": 149,
+      "releasedAt": "2026-06-25T20:49:51.556Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.197/releases/1782239709"
+      ],
+      "exactVersion": "149.0.7827.197",
+      "major": 149,
+      "releasedAt": "2026-06-23T18:35:09.958Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.156/releases/1781646874"
+      ],
+      "exactVersion": "149.0.7827.156",
+      "major": 149,
+      "releasedAt": "2026-06-16T21:54:34.039Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.115/releases/1781203842",
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.115/releases/1781645940"
+      ],
+      "exactVersion": "149.0.7827.115",
+      "major": 149,
+      "releasedAt": "2026-06-11T18:50:42.654Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.103/releases/1780950464",
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.103/releases/1781116959"
+      ],
+      "exactVersion": "149.0.7827.103",
+      "major": 149,
+      "releasedAt": "2026-06-08T20:27:44.756Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.54/releases/1780430891",
+        "chrome/platforms/win/channels/stable/versions/149.0.7827.54/releases/1780947999"
+      ],
+      "exactVersion": "149.0.7827.54",
+      "major": 149,
+      "releasedAt": "2026-06-02T20:08:11.717Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.217/releases/1779903844"
+      ],
+      "exactVersion": "148.0.7778.217",
+      "major": 148,
+      "releasedAt": "2026-05-27T17:44:04.133Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.179/releases/1779220305"
+      ],
+      "exactVersion": "148.0.7778.179",
+      "major": 148,
+      "releasedAt": "2026-05-19T19:51:45.317Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.168/releases/1778612024",
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.168/releases/1778791058"
+      ],
+      "exactVersion": "148.0.7778.168",
+      "major": 148,
+      "releasedAt": "2026-05-12T18:53:44.755Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.97/releases/1778013078",
+        "chrome/platforms/win/channels/stable/versions/148.0.7778.97/releases/1778532055"
+      ],
+      "exactVersion": "148.0.7778.97",
+      "major": 148,
+      "releasedAt": "2026-05-05T20:31:18.039Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.138/releases/1777405907"
+      ],
+      "exactVersion": "147.0.7727.138",
+      "major": 147,
+      "releasedAt": "2026-04-28T19:51:47.601Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.117/releases/1776878325"
+      ],
+      "exactVersion": "147.0.7727.117",
+      "major": 147,
+      "releasedAt": "2026-04-22T17:18:45.880Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.102/releases/1776274854",
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.102/releases/1776712972"
+      ],
+      "exactVersion": "147.0.7727.102",
+      "major": 147,
+      "releasedAt": "2026-04-15T17:40:54.574Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.56/releases/1775585190",
+        "chrome/platforms/win/channels/stable/versions/147.0.7727.56/releases/1776112085"
+      ],
+      "exactVersion": "147.0.7727.56",
+      "major": 147,
+      "releasedAt": "2026-04-07T18:06:30.273Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.178/releases/1774985016"
+      ],
+      "exactVersion": "146.0.7680.178",
+      "major": 146,
+      "releasedAt": "2026-03-31T19:23:36.008Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.165/releases/1774293611"
+      ],
+      "exactVersion": "146.0.7680.165",
+      "major": 146,
+      "releasedAt": "2026-03-23T19:20:11.461Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.154/releases/1773853109",
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.154/releases/1774293059"
+      ],
+      "exactVersion": "146.0.7680.154",
+      "major": 146,
+      "releasedAt": "2026-03-18T16:58:29.244Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.80/releases/1773450536",
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.80/releases/1773773960"
+      ],
+      "exactVersion": "146.0.7680.80",
+      "major": 146,
+      "releasedAt": "2026-03-14T01:08:56.972Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.76/releases/1773349726"
+      ],
+      "exactVersion": "146.0.7680.76",
+      "major": 146,
+      "releasedAt": "2026-03-12T21:08:46.676Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/146.0.7680.72/releases/1773167981"
+      ],
+      "exactVersion": "146.0.7680.72",
+      "major": 146,
+      "releasedAt": "2026-03-10T18:39:41.853Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.160/releases/1772564120"
+      ],
+      "exactVersion": "145.0.7632.160",
+      "major": 145,
+      "releasedAt": "2026-03-03T18:55:20.864Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.117/releases/1771880682",
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.117/releases/1772052161"
+      ],
+      "exactVersion": "145.0.7632.117",
+      "major": 145,
+      "releasedAt": "2026-02-23T21:04:42.541Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.110/releases/1771448917",
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.110/releases/1771876723"
+      ],
+      "exactVersion": "145.0.7632.110",
+      "major": 145,
+      "releasedAt": "2026-02-18T21:08:37.061Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.76/releases/1771006853",
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.76/releases/1771447412"
+      ],
+      "exactVersion": "145.0.7632.76",
+      "major": 145,
+      "releasedAt": "2026-02-13T18:20:53.312Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.68/releases/1770926100"
+      ],
+      "exactVersion": "145.0.7632.68",
+      "major": 145,
+      "releasedAt": "2026-02-12T19:55:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/145.0.7632.46/releases/1770759188"
+      ],
+      "exactVersion": "145.0.7632.46",
+      "major": 145,
+      "releasedAt": "2026-02-10T21:33:08.305Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.133/releases/1770147093"
+      ],
+      "exactVersion": "144.0.7559.133",
+      "major": 144,
+      "releasedAt": "2026-02-03T19:31:33.620Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.110/releases/1769546093"
+      ],
+      "exactVersion": "144.0.7559.110",
+      "major": 144,
+      "releasedAt": "2026-01-27T20:34:53.254Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.97/releases/1768946911",
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.97/releases/1769111657"
+      ],
+      "exactVersion": "144.0.7559.97",
+      "major": 144,
+      "releasedAt": "2026-01-20T22:08:31.254Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.60/releases/1768339322",
+        "chrome/platforms/win/channels/stable/versions/144.0.7559.60/releases/1768945979"
+      ],
+      "exactVersion": "144.0.7559.60",
+      "major": 144,
+      "releasedAt": "2026-01-13T21:22:02.246Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.193/releases/1767728306"
+      ],
+      "exactVersion": "143.0.7499.193",
+      "major": 143,
+      "releasedAt": "2026-01-06T19:38:26.994Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.170/releases/1766088624",
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.170/releases/1766431967"
+      ],
+      "exactVersion": "143.0.7499.170",
+      "major": 143,
+      "releasedAt": "2025-12-18T20:10:24.494Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.147/releases/1765913049",
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.147/releases/1766087404"
+      ],
+      "exactVersion": "143.0.7499.147",
+      "major": 143,
+      "releasedAt": "2025-12-16T19:24:09.285Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.110/releases/1765390268",
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.110/releases/1765830882"
+      ],
+      "exactVersion": "143.0.7499.110",
+      "major": 143,
+      "releasedAt": "2025-12-10T18:11:08.780Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.41/releases/1764699419",
+        "chrome/platforms/win/channels/stable/versions/143.0.7499.41/releases/1765230094"
+      ],
+      "exactVersion": "143.0.7499.41",
+      "major": 143,
+      "releasedAt": "2025-12-02T18:16:59.609Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.176/releases/1763412419",
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.176/releases/1763584814"
+      ],
+      "exactVersion": "142.0.7444.176",
+      "major": 142,
+      "releasedAt": "2025-11-17T20:46:59.004Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.163/releases/1762886055",
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.163/releases/1763074912"
+      ],
+      "exactVersion": "142.0.7444.163",
+      "major": 142,
+      "releasedAt": "2025-11-11T18:34:15.701Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.135/releases/1762372701",
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.135/releases/1762810291"
+      ],
+      "exactVersion": "142.0.7444.135",
+      "major": 142,
+      "releasedAt": "2025-11-05T19:58:21.697Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.60/releases/1761686698",
+        "chrome/platforms/win/channels/stable/versions/142.0.7444.60/releases/1762204683"
+      ],
+      "exactVersion": "142.0.7444.60",
+      "major": 142,
+      "releasedAt": "2025-10-28T21:24:58.587Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.123/releases/1761073947"
+      ],
+      "exactVersion": "141.0.7390.123",
+      "major": 141,
+      "releasedAt": "2025-10-21T19:12:27.189Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.108/releases/1760472130",
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.108/releases/1760641082"
+      ],
+      "exactVersion": "141.0.7390.108",
+      "major": 141,
+      "releasedAt": "2025-10-14T20:02:10.400Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.77/releases/1760041188",
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.77/releases/1760387092"
+      ],
+      "exactVersion": "141.0.7390.77",
+      "major": 141,
+      "releasedAt": "2025-10-09T20:19:48.300Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.66/releases/1759865444",
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.66/releases/1760038783"
+      ],
+      "exactVersion": "141.0.7390.66",
+      "major": 141,
+      "releasedAt": "2025-10-07T19:30:44.796Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.55/releases/1759263167",
+        "chrome/platforms/win/channels/stable/versions/141.0.7390.55/releases/1759782209"
+      ],
+      "exactVersion": "141.0.7390.55",
+      "major": 141,
+      "releasedAt": "2025-09-30T20:12:47.023Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.208/releases/1758653297"
+      ],
+      "exactVersion": "140.0.7339.208",
+      "major": 140,
+      "releasedAt": "2025-09-23T18:48:17.983Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.186/releases/1758150781",
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.186/releases/1758650763"
+      ],
+      "exactVersion": "140.0.7339.186",
+      "major": 140,
+      "releasedAt": "2025-09-17T23:13:01.360Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.128/releases/1757450969",
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.128/releases/1757619923"
+      ],
+      "exactVersion": "140.0.7339.128",
+      "major": 140,
+      "releasedAt": "2025-09-09T20:49:29.998Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.81/releases/1756846849",
+        "chrome/platforms/win/channels/stable/versions/140.0.7339.81/releases/1757364967"
+      ],
+      "exactVersion": "140.0.7339.81",
+      "major": 140,
+      "releasedAt": "2025-09-02T21:00:49.191Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.155/releases/1756230234"
+      ],
+      "exactVersion": "139.0.7258.155",
+      "major": 139,
+      "releasedAt": "2025-08-26T17:43:54.362Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.139/releases/1755634042",
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.139/releases/1755808443"
+      ],
+      "exactVersion": "139.0.7258.139",
+      "major": 139,
+      "releasedAt": "2025-08-19T20:07:22.274Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.128/releases/1755029010",
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.128/releases/1755209105"
+      ],
+      "exactVersion": "139.0.7258.128",
+      "major": 139,
+      "releasedAt": "2025-08-12T20:03:30.303Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.67/releases/1754417980",
+        "chrome/platforms/win/channels/stable/versions/139.0.7258.67/releases/1754944264"
+      ],
+      "exactVersion": "139.0.7258.67",
+      "major": 139,
+      "releasedAt": "2025-08-05T18:19:40.080Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.184/releases/1753820750"
+      ],
+      "exactVersion": "138.0.7204.184",
+      "major": 138,
+      "releasedAt": "2025-07-29T20:25:50.534Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.169/releases/1753214806",
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.169/releases/1753295880",
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.169/releases/1753384132"
+      ],
+      "exactVersion": "138.0.7204.169",
+      "major": 138,
+      "releasedAt": "2025-07-22T20:06:46.016Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.158/releases/1752599214",
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.158/releases/1752785335"
+      ],
+      "exactVersion": "138.0.7204.158",
+      "major": 138,
+      "releasedAt": "2025-07-15T17:06:54.661Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.101/releases/1751993584",
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.101/releases/1752171762"
+      ],
+      "exactVersion": "138.0.7204.101",
+      "major": 138,
+      "releasedAt": "2025-07-08T16:53:04.944Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.97/releases/1751316762",
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.97/releases/1751913322"
+      ],
+      "exactVersion": "138.0.7204.97",
+      "major": 138,
+      "releasedAt": "2025-06-30T20:52:42.505Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/138.0.7204.50/releases/1750788047"
+      ],
+      "exactVersion": "138.0.7204.50",
+      "major": 138,
+      "releasedAt": "2025-06-24T18:00:47.439Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.120/releases/1750179996"
+      ],
+      "exactVersion": "137.0.7151.120",
+      "major": 137,
+      "releasedAt": "2025-06-17T17:06:36.483Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.104/releases/1749578288",
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.104/releases/1749755534"
+      ],
+      "exactVersion": "137.0.7151.104",
+      "major": 137,
+      "releasedAt": "2025-06-10T17:58:08.177Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.69/releases/1748904601",
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.69/releases/1749165818"
+      ],
+      "exactVersion": "137.0.7151.69",
+      "major": 137,
+      "releasedAt": "2025-06-02T22:50:01.415Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.56/releases/1748366256",
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.56/releases/1748896299"
+      ],
+      "exactVersion": "137.0.7151.56",
+      "major": 137,
+      "releasedAt": "2025-05-27T17:17:36.489Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/137.0.7151.41/releases/1747839882"
+      ],
+      "exactVersion": "137.0.7151.41",
+      "major": 137,
+      "releasedAt": "2025-05-21T15:04:42.540Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/136.0.7103.114/releases/1747240830",
+        "chrome/platforms/win/channels/stable/versions/136.0.7103.114/releases/1747335618"
+      ],
+      "exactVersion": "136.0.7103.114",
+      "major": 136,
+      "releasedAt": "2025-05-14T16:40:30.835Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/136.0.7103.93/releases/1746553846",
+        "chrome/platforms/win/channels/stable/versions/136.0.7103.93/releases/1746732427"
+      ],
+      "exactVersion": "136.0.7103.93",
+      "major": 136,
+      "releasedAt": "2025-05-06T17:50:46.597Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/136.0.7103.49/releases/1745950880"
+      ],
+      "exactVersion": "136.0.7103.49",
+      "major": 136,
+      "releasedAt": "2025-04-29T18:21:20.248Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.115/releases/1745350183"
+      ],
+      "exactVersion": "135.0.7049.115",
+      "major": 135,
+      "releasedAt": "2025-04-22T19:29:43.892Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.96/releases/1744748247",
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.96/releases/1744927565"
+      ],
+      "exactVersion": "135.0.7049.96",
+      "major": 135,
+      "releasedAt": "2025-04-15T20:17:27.180Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.85/releases/1744132503",
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.85/releases/1744314334"
+      ],
+      "exactVersion": "135.0.7049.85",
+      "major": 135,
+      "releasedAt": "2025-04-08T17:15:03.124Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.42/releases/1743527617",
+        "chrome/platforms/win/channels/stable/versions/135.0.7049.42/releases/1744056232"
+      ],
+      "exactVersion": "135.0.7049.42",
+      "major": 135,
+      "releasedAt": "2025-04-01T17:13:37.471Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.178/releases/1742936207"
+      ],
+      "exactVersion": "134.0.6998.178",
+      "major": 134,
+      "releasedAt": "2025-03-25T20:56:47.007Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.166/releases/1742575341",
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.166/releases/1742935607"
+      ],
+      "exactVersion": "134.0.6998.166",
+      "major": 134,
+      "releasedAt": "2025-03-21T16:42:21.865Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.118/releases/1742407444",
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.118/releases/1742498713"
+      ],
+      "exactVersion": "134.0.6998.118",
+      "major": 134,
+      "releasedAt": "2025-03-19T18:04:04.320Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.89/releases/1741636776",
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.89/releases/1741808888"
+      ],
+      "exactVersion": "134.0.6998.89",
+      "major": 134,
+      "releasedAt": "2025-03-10T19:59:36.653Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.36/releases/1741121668",
+        "chrome/platforms/win/channels/stable/versions/134.0.6998.36/releases/1741634823"
+      ],
+      "exactVersion": "134.0.6998.36",
+      "major": 134,
+      "releasedAt": "2025-03-04T20:54:28.133Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.142/releases/1740509434"
+      ],
+      "exactVersion": "133.0.6943.142",
+      "major": 133,
+      "releasedAt": "2025-02-25T18:50:34.765Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.127/releases/1739920577",
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.127/releases/1740084842"
+      ],
+      "exactVersion": "133.0.6943.127",
+      "major": 133,
+      "releasedAt": "2025-02-18T23:16:17.500Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.99/releases/1739384833",
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.99/releases/1739913720"
+      ],
+      "exactVersion": "133.0.6943.99",
+      "major": 133,
+      "releasedAt": "2025-02-12T18:27:13.172Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.60/releases/1738884903"
+      ],
+      "exactVersion": "133.0.6943.60",
+      "major": 133,
+      "releasedAt": "2025-02-06T23:35:03.872Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/133.0.6943.54/releases/1738690817"
+      ],
+      "exactVersion": "133.0.6943.54",
+      "major": 133,
+      "releasedAt": "2025-02-04T17:40:17.552Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/132.0.6834.160/releases/1738093814"
+      ],
+      "exactVersion": "132.0.6834.160",
+      "major": 132,
+      "releasedAt": "2025-01-28T19:50:14.067Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/132.0.6834.111/releases/1737569405",
+        "chrome/platforms/win/channels/stable/versions/132.0.6834.111/releases/1738011334"
+      ],
+      "exactVersion": "132.0.6834.111",
+      "major": 132,
+      "releasedAt": "2025-01-22T18:10:05.619Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/132.0.6834.84/releases/1736890758"
+      ],
+      "exactVersion": "132.0.6834.84",
+      "major": 132,
+      "releasedAt": "2025-01-14T21:39:18.915Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.265/releases/1736275060"
+      ],
+      "exactVersion": "131.0.6778.265",
+      "major": 131,
+      "releasedAt": "2025-01-07T18:37:40.801Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.205/releases/1734556329",
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.205/releases/1734637335"
+      ],
+      "exactVersion": "131.0.6778.205",
+      "major": 131,
+      "releasedAt": "2024-12-18T21:12:09.525Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.140/releases/1733867480",
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.140/releases/1734036468"
+      ],
+      "exactVersion": "131.0.6778.140",
+      "major": 131,
+      "releasedAt": "2024-12-10T21:51:20.716Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.109/releases/1733248290",
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.109/releases/1733439844"
+      ],
+      "exactVersion": "131.0.6778.109",
+      "major": 131,
+      "releasedAt": "2024-12-03T17:51:30.155Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.86/releases/1732038907",
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.86/releases/1732222932"
+      ],
+      "exactVersion": "131.0.6778.86",
+      "major": 131,
+      "releasedAt": "2024-11-19T17:55:07.169Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.70/releases/1731435498",
+        "chrome/platforms/win/channels/stable/versions/131.0.6778.70/releases/1731971454"
+      ],
+      "exactVersion": "131.0.6778.70",
+      "major": 131,
+      "releasedAt": "2024-11-12T18:18:18.602Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.117/releases/1730830086"
+      ],
+      "exactVersion": "130.0.6723.117",
+      "major": 130,
+      "releasedAt": "2024-11-05T18:08:06.684Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.92/releases/1730227111",
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.92/releases/1730404474"
+      ],
+      "exactVersion": "130.0.6723.92",
+      "major": 130,
+      "releasedAt": "2024-10-29T18:38:31.776Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.70/releases/1729629085",
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.70/releases/1729801366"
+      ],
+      "exactVersion": "130.0.6723.70",
+      "major": 130,
+      "releasedAt": "2024-10-22T20:31:25.323Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.59/releases/1729015402",
+        "chrome/platforms/win/channels/stable/versions/130.0.6723.59/releases/1729628450"
+      ],
+      "exactVersion": "130.0.6723.59",
+      "major": 130,
+      "releasedAt": "2024-10-15T18:03:22.398Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.101/releases/1728417199"
+      ],
+      "exactVersion": "129.0.6668.101",
+      "major": 129,
+      "releasedAt": "2024-10-08T19:53:19.884Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.90/releases/1727824511",
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.90/releases/1727985307"
+      ],
+      "exactVersion": "129.0.6668.90",
+      "major": 129,
+      "releasedAt": "2024-10-01T23:15:11.154Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.71/releases/1727198836",
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.71/releases/1727381290"
+      ],
+      "exactVersion": "129.0.6668.71",
+      "major": 129,
+      "releasedAt": "2024-09-24T17:27:16.102Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.59/releases/1726602417",
+        "chrome/platforms/win/channels/stable/versions/129.0.6668.59/releases/1727120478"
+      ],
+      "exactVersion": "129.0.6668.59",
+      "major": 129,
+      "releasedAt": "2024-09-17T19:46:57.192Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.138/releases/1726005300"
+      ],
+      "exactVersion": "128.0.6613.138",
+      "major": 128,
+      "releasedAt": "2024-09-10T21:55:00.792Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.120/releases/1725294935",
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.120/releases/1725580576"
+      ],
+      "exactVersion": "128.0.6613.120",
+      "major": 128,
+      "releasedAt": "2024-09-02T16:35:35.068Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.114/releases/1724870287",
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.114/releases/1725293517"
+      ],
+      "exactVersion": "128.0.6613.114",
+      "major": 128,
+      "releasedAt": "2024-08-28T18:38:07.384Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.85/releases/1724267311",
+        "chrome/platforms/win/channels/stable/versions/128.0.6613.85/releases/1724786564"
+      ],
+      "exactVersion": "128.0.6613.85",
+      "major": 128,
+      "releasedAt": "2024-08-21T19:08:31.878Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.120/releases/1723577052"
+      ],
+      "exactVersion": "127.0.6533.120",
+      "major": 127,
+      "releasedAt": "2024-08-13T19:24:12.214Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.100/releases/1722967837",
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.100/releases/1723143613"
+      ],
+      "exactVersion": "127.0.6533.100",
+      "major": 127,
+      "releasedAt": "2024-08-06T18:10:37.150Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.89/releases/1722369660",
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.89/releases/1722537143"
+      ],
+      "exactVersion": "127.0.6533.89",
+      "major": 127,
+      "releasedAt": "2024-07-30T20:01:00.264Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.73/releases/1721764541",
+        "chrome/platforms/win/channels/stable/versions/127.0.6533.73/releases/1722285342"
+      ],
+      "exactVersion": "127.0.6533.73",
+      "major": 127,
+      "releasedAt": "2024-07-23T19:55:41.723Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.183/releases/1721169013"
+      ],
+      "exactVersion": "126.0.6478.183",
+      "major": 126,
+      "releasedAt": "2024-07-16T22:30:13.373Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.127/releases/1719259889",
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.127/releases/1719426430"
+      ],
+      "exactVersion": "126.0.6478.127",
+      "major": 126,
+      "releasedAt": "2024-06-24T20:11:29.966Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.115/releases/1718737569",
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.115/releases/1719253987"
+      ],
+      "exactVersion": "126.0.6478.115",
+      "major": 126,
+      "releasedAt": "2024-06-18T19:06:09.739Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.62/releases/1718305763",
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.62/releases/1718736818"
+      ],
+      "exactVersion": "126.0.6478.62",
+      "major": 126,
+      "releasedAt": "2024-06-13T19:09:23.624Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/126.0.6478.57/releases/1718133076"
+      ],
+      "exactVersion": "126.0.6478.57",
+      "major": 126,
+      "releasedAt": "2024-06-11T19:11:16.819Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.142/releases/1717102595",
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.142/releases/1717527467"
+      ],
+      "exactVersion": "125.0.6422.142",
+      "major": 125,
+      "releasedAt": "2024-05-30T20:56:35.643Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.113/releases/1716505209",
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.113/releases/1717013496"
+      ],
+      "exactVersion": "125.0.6422.113",
+      "major": 125,
+      "releasedAt": "2024-05-23T23:00:09.580Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.77/releases/1716318039",
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.77/releases/1716496730"
+      ],
+      "exactVersion": "125.0.6422.77",
+      "major": 125,
+      "releasedAt": "2024-05-21T19:00:39.892Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/125.0.6422.61/releases/1715804252"
+      ],
+      "exactVersion": "125.0.6422.61",
+      "major": 125,
+      "releasedAt": "2024-05-15T20:17:32.885Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.208/releases/1715633369"
+      ],
+      "exactVersion": "124.0.6367.208",
+      "major": 124,
+      "releasedAt": "2024-05-13T20:49:29.140Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.202/releases/1715287503"
+      ],
+      "exactVersion": "124.0.6367.202",
+      "major": 124,
+      "releasedAt": "2024-05-09T20:45:03.734Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.156/releases/1715104935"
+      ],
+      "exactVersion": "124.0.6367.156",
+      "major": 124,
+      "releasedAt": "2024-05-07T18:02:15.305Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.119/releases/1714509668",
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.119/releases/1714674272"
+      ],
+      "exactVersion": "124.0.6367.119",
+      "major": 124,
+      "releasedAt": "2024-04-30T20:41:08.304Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.92/releases/1714072857",
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.92/releases/1714505934"
+      ],
+      "exactVersion": "124.0.6367.92",
+      "major": 124,
+      "releasedAt": "2024-04-25T19:20:57.754Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.79/releases/1713910768"
+      ],
+      "exactVersion": "124.0.6367.79",
+      "major": 124,
+      "releasedAt": "2024-04-23T22:19:28.402Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.61/releases/1713302734",
+        "chrome/platforms/win/channels/stable/versions/124.0.6367.61/releases/1713813623"
+      ],
+      "exactVersion": "124.0.6367.61",
+      "major": 124,
+      "releasedAt": "2024-04-16T21:25:34.055Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.123/releases/1712771660"
+      ],
+      "exactVersion": "123.0.6312.123",
+      "major": 123,
+      "releasedAt": "2024-04-10T17:54:20.869Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.106/releases/1712089036",
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.106/releases/1712254655"
+      ],
+      "exactVersion": "123.0.6312.106",
+      "major": 123,
+      "releasedAt": "2024-04-02T20:17:16.975Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.87/releases/1711475441"
+      ],
+      "exactVersion": "123.0.6312.87",
+      "major": 123,
+      "releasedAt": "2024-03-26T17:50:41.435Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.86/releases/1711477680",
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.86/releases/1711660500"
+      ],
+      "exactVersion": "123.0.6312.86",
+      "major": 123,
+      "releasedAt": "2024-03-26T18:28:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.59/releases/1710880853",
+        "chrome/platforms/win/channels/stable/versions/123.0.6312.59/releases/1711398623"
+      ],
+      "exactVersion": "123.0.6312.59",
+      "major": 123,
+      "releasedAt": "2024-03-19T20:40:53.183Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.129/releases/1710278389"
+      ],
+      "exactVersion": "122.0.6261.129",
+      "major": 122,
+      "releasedAt": "2024-03-12T21:19:49.988Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.112/releases/1709672912",
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.112/releases/1709839843"
+      ],
+      "exactVersion": "122.0.6261.112",
+      "major": 122,
+      "releasedAt": "2024-03-05T21:08:32.761Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.95/releases/1709060373",
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.95/releases/1709239646"
+      ],
+      "exactVersion": "122.0.6261.95",
+      "major": 122,
+      "releasedAt": "2024-02-27T18:59:33.589Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.70/releases/1708635248",
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.70/releases/1708981860"
+      ],
+      "exactVersion": "122.0.6261.70",
+      "major": 122,
+      "releasedAt": "2024-02-22T20:54:08.729Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/122.0.6261.58/releases/1708469436"
+      ],
+      "exactVersion": "122.0.6261.58",
+      "major": 122,
+      "releasedAt": "2024-02-20T22:50:36.426Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.185/releases/1707851092"
+      ],
+      "exactVersion": "121.0.6167.185",
+      "major": 121,
+      "releasedAt": "2024-02-13T19:04:52.073Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.161/releases/1707252577",
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.161/releases/1707419681"
+      ],
+      "exactVersion": "121.0.6167.161",
+      "major": 121,
+      "releasedAt": "2024-02-06T20:49:37.892Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.140/releases/1706638913",
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.140/releases/1706823989",
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.140/releases/1707337412"
+      ],
+      "exactVersion": "121.0.6167.140",
+      "major": 121,
+      "releasedAt": "2024-01-30T18:21:53.170Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.86/releases/1706029250",
+        "chrome/platforms/win/channels/stable/versions/121.0.6167.86/releases/1706566560"
+      ],
+      "exactVersion": "121.0.6167.86",
+      "major": 121,
+      "releasedAt": "2024-01-23T17:00:50.225Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.225/releases/1705428071"
+      ],
+      "exactVersion": "120.0.6099.225",
+      "major": 120,
+      "releasedAt": "2024-01-16T18:01:11.288Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.217/releases/1704825679",
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.217/releases/1704999753"
+      ],
+      "exactVersion": "120.0.6099.217",
+      "major": 120,
+      "releasedAt": "2024-01-09T18:41:19.786Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.200/releases/1704308708",
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.200/releases/1704743741"
+      ],
+      "exactVersion": "120.0.6099.200",
+      "major": 120,
+      "releasedAt": "2024-01-03T19:05:08.163Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.130/releases/1703095380",
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.130/releases/1703618225"
+      ],
+      "exactVersion": "120.0.6099.130",
+      "major": 120,
+      "releasedAt": "2023-12-20T18:03:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.110/releases/1702497947",
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.110/releases/1702927649"
+      ],
+      "exactVersion": "120.0.6099.110",
+      "major": 120,
+      "releasedAt": "2023-12-13T20:05:47.058Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.71/releases/1701896460",
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.71/releases/1702329900"
+      ],
+      "exactVersion": "120.0.6099.71",
+      "major": 120,
+      "releasedAt": "2023-12-06T21:01:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/120.0.6099.63/releases/1701812880"
+      ],
+      "exactVersion": "120.0.6099.63",
+      "major": 120,
+      "releasedAt": "2023-12-05T21:48:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.200/releases/1701199744"
+      ],
+      "exactVersion": "119.0.6045.200",
+      "major": 119,
+      "releasedAt": "2023-11-28T19:29:04.302Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.160/releases/1699989603",
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.160/releases/1700167779"
+      ],
+      "exactVersion": "119.0.6045.160",
+      "major": 119,
+      "releasedAt": "2023-11-14T19:20:03.448Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.124/releases/1699395638",
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.124/releases/1699572715"
+      ],
+      "exactVersion": "119.0.6045.124",
+      "major": 119,
+      "releasedAt": "2023-11-07T22:20:38.663Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.106/releases/1698784239",
+        "chrome/platforms/win/channels/stable/versions/119.0.6045.106/releases/1699305074"
+      ],
+      "exactVersion": "119.0.6045.106",
+      "major": 119,
+      "releasedAt": "2023-10-31T20:30:39.347Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.118/releases/1698181099",
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.118/releases/1698351780"
+      ],
+      "exactVersion": "118.0.5993.118",
+      "major": 118,
+      "releasedAt": "2023-10-24T20:58:19.318Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.89/releases/1697578773",
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.89/releases/1697739181"
+      ],
+      "exactVersion": "118.0.5993.89",
+      "major": 118,
+      "releasedAt": "2023-10-17T21:39:33.107Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.71/releases/1696971664",
+        "chrome/platforms/win/channels/stable/versions/118.0.5993.71/releases/1697485412"
+      ],
+      "exactVersion": "118.0.5993.71",
+      "major": 118,
+      "releasedAt": "2023-10-10T21:01:04.837Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.150/releases/1696359121"
+      ],
+      "exactVersion": "117.0.5938.150",
+      "major": 117,
+      "releasedAt": "2023-10-03T18:52:01.997Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.132/releases/1695846420",
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.132/releases/1696281180"
+      ],
+      "exactVersion": "117.0.5938.132",
+      "major": 117,
+      "releasedAt": "2023-09-27T20:27:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.92/releases/1695320400",
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.92/releases/1695764580"
+      ],
+      "exactVersion": "117.0.5938.92",
+      "major": 117,
+      "releasedAt": "2023-09-21T18:20:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.89/releases/1694822063"
+      ],
+      "exactVersion": "117.0.5938.89",
+      "major": 117,
+      "releasedAt": "2023-09-15T23:54:23.306Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/117.0.5938.63/releases/1694550540"
+      ],
+      "exactVersion": "117.0.5938.63",
+      "major": 117,
+      "releasedAt": "2023-09-12T20:29:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.188/releases/1694454420",
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.188/releases/1694626620"
+      ],
+      "exactVersion": "116.0.5845.188",
+      "major": 116,
+      "releasedAt": "2023-09-11T17:47:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.180/releases/1693934164"
+      ],
+      "exactVersion": "116.0.5845.180",
+      "major": 116,
+      "releasedAt": "2023-09-05T17:16:04.155Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.141/releases/1693330080",
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.141/releases/1693516680"
+      ],
+      "exactVersion": "116.0.5845.141",
+      "major": 116,
+      "releasedAt": "2023-08-29T17:28:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.111/releases/1692741421",
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.111/releases/1692904931"
+      ],
+      "exactVersion": "116.0.5845.111",
+      "major": 116,
+      "releasedAt": "2023-08-22T21:57:01.179Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.97/releases/1692142320",
+        "chrome/platforms/win/channels/stable/versions/116.0.5845.97/releases/1692651660"
+      ],
+      "exactVersion": "116.0.5845.97",
+      "major": 116,
+      "releasedAt": "2023-08-15T23:32:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.171/releases/1690997220",
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.171/releases/1691439301"
+      ],
+      "exactVersion": "115.0.5790.171",
+      "major": 115,
+      "releasedAt": "2023-08-02T17:27:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.110/releases/1690326060",
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.110/releases/1690483380"
+      ],
+      "exactVersion": "115.0.5790.110",
+      "major": 115,
+      "releasedAt": "2023-07-25T23:01:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.102/releases/1689910440"
+      ],
+      "exactVersion": "115.0.5790.102",
+      "major": 115,
+      "releasedAt": "2023-07-21T03:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/115.0.5790.99/releases/1689706080"
+      ],
+      "exactVersion": "115.0.5790.99",
+      "major": 115,
+      "releasedAt": "2023-07-18T18:48:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.199/releases/1687810620",
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.199/releases/1687987500"
+      ],
+      "exactVersion": "114.0.5735.199",
+      "major": 114,
+      "releasedAt": "2023-06-26T20:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.134/releases/1686674580",
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.134/releases/1686861180"
+      ],
+      "exactVersion": "114.0.5735.134",
+      "major": 114,
+      "releasedAt": "2023-06-13T16:43:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.110/releases/1685995560",
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.110/releases/1686162900"
+      ],
+      "exactVersion": "114.0.5735.110",
+      "major": 114,
+      "releasedAt": "2023-06-05T20:06:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/114.0.5735.91/releases/1685477413"
+      ],
+      "exactVersion": "114.0.5735.91",
+      "major": 114,
+      "releasedAt": "2023-05-30T20:10:13.221Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/113.0.5672.127/releases/1684260600",
+        "chrome/platforms/win/channels/stable/versions/113.0.5672.127/releases/1684442640"
+      ],
+      "exactVersion": "113.0.5672.127",
+      "major": 113,
+      "releasedAt": "2023-05-16T18:10:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/113.0.5672.93/releases/1683578403",
+        "chrome/platforms/win/channels/stable/versions/113.0.5672.93/releases/1683749103"
+      ],
+      "exactVersion": "113.0.5672.93",
+      "major": 113,
+      "releasedAt": "2023-05-08T20:40:03.731Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/113.0.5672.64/releases/1683056700"
+      ],
+      "exactVersion": "113.0.5672.64",
+      "major": 113,
+      "releasedAt": "2023-05-02T19:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.138/releases/1681857240",
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.138/releases/1682016120"
+      ],
+      "exactVersion": "112.0.5615.138",
+      "major": 112,
+      "releasedAt": "2023-04-18T22:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.121/releases/1681491120",
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.121/releases/1681848360"
+      ],
+      "exactVersion": "112.0.5615.121",
+      "major": 112,
+      "releasedAt": "2023-04-14T16:52:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.87/releases/1681326960"
+      ],
+      "exactVersion": "112.0.5615.87",
+      "major": 112,
+      "releasedAt": "2023-04-12T19:16:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/112.0.5615.50/releases/1680641040"
+      ],
+      "exactVersion": "112.0.5615.50",
+      "major": 112,
+      "releasedAt": "2023-04-04T20:44:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.147/releases/1679938380",
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.147/releases/1680115140"
+      ],
+      "exactVersion": "111.0.5563.147",
+      "major": 111,
+      "releasedAt": "2023-03-27T17:33:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.111/releases/1679427507",
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.111/releases/1679600220"
+      ],
+      "exactVersion": "111.0.5563.111",
+      "major": 111,
+      "releasedAt": "2023-03-21T19:38:27.569Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.65/releases/1678217100",
+        "chrome/platforms/win/channels/stable/versions/111.0.5563.65/releases/1678731720"
+      ],
+      "exactVersion": "111.0.5563.65",
+      "major": 111,
+      "releasedAt": "2023-03-07T19:25:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.178/releases/1677093568",
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.178/releases/1677533880"
+      ],
+      "exactVersion": "110.0.5481.178",
+      "major": 110,
+      "releasedAt": "2023-02-22T19:19:28.925Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.104/releases/1676574840",
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.104/releases/1677011460"
+      ],
+      "exactVersion": "110.0.5481.104",
+      "major": 110,
+      "releasedAt": "2023-02-16T19:14:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.100/releases/1676395920"
+      ],
+      "exactVersion": "110.0.5481.100",
+      "major": 110,
+      "releasedAt": "2023-02-14T17:32:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.97/releases/1676320380"
+      ],
+      "exactVersion": "110.0.5481.97",
+      "major": 110,
+      "releasedAt": "2023-02-13T20:33:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.78/releases/1675797840",
+        "chrome/platforms/win/channels/stable/versions/110.0.5481.78/releases/1675880880"
+      ],
+      "exactVersion": "110.0.5481.78",
+      "major": 110,
+      "releasedAt": "2023-02-07T19:24:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.120/releases/1674589140",
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.120/releases/1674768300",
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.120/releases/1675295460",
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.120/releases/1675296780"
+      ],
+      "exactVersion": "109.0.5414.120",
+      "major": 109,
+      "releasedAt": "2023-01-24T19:39:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.75/releases/1673377200",
+        "chrome/platforms/win/channels/stable/versions/109.0.5414.75/releases/1673992860"
+      ],
+      "exactVersion": "109.0.5414.75",
+      "major": 109,
+      "releasedAt": "2023-01-10T19:00:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.125/releases/1670971860",
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.125/releases/1671133260"
+      ],
+      "exactVersion": "108.0.5359.125",
+      "major": 108,
+      "releasedAt": "2022-12-13T22:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.99/releases/1670433000",
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.99/releases/1670528100"
+      ],
+      "exactVersion": "108.0.5359.99",
+      "major": 108,
+      "releasedAt": "2022-12-07T17:10:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.95/releases/1670010300",
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.95/releases/1670367360"
+      ],
+      "exactVersion": "108.0.5359.95",
+      "major": 108,
+      "releasedAt": "2022-12-02T19:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/108.0.5359.72/releases/1669759260"
+      ],
+      "exactVersion": "108.0.5359.72",
+      "major": 108,
+      "releasedAt": "2022-11-29T22:01:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.122/releases/1669311840",
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.122/releases/1669751880"
+      ],
+      "exactVersion": "107.0.5304.122",
+      "major": 107,
+      "releasedAt": "2022-11-24T17:44:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.107/releases/1667946480",
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.107/releases/1668114420"
+      ],
+      "exactVersion": "107.0.5304.107",
+      "major": 107,
+      "releasedAt": "2022-11-08T22:28:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.88/releases/1666902120",
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.88/releases/1667331900"
+      ],
+      "exactVersion": "107.0.5304.88",
+      "major": 107,
+      "releasedAt": "2022-10-27T20:22:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/107.0.5304.63/releases/1666721220"
+      ],
+      "exactVersion": "107.0.5304.63",
+      "major": 107,
+      "releasedAt": "2022-10-25T18:07:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.119/releases/1665529560",
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.119/releases/1665696900"
+      ],
+      "exactVersion": "106.0.5249.119",
+      "major": 106,
+      "releasedAt": "2022-10-11T23:06:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.103/releases/1665014880",
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.103/releases/1665514620"
+      ],
+      "exactVersion": "106.0.5249.103",
+      "major": 106,
+      "releasedAt": "2022-10-06T00:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.91/releases/1664554440"
+      ],
+      "exactVersion": "106.0.5249.91",
+      "major": 106,
+      "releasedAt": "2022-09-30T16:14:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/106.0.5249.62/releases/1664300400"
+      ],
+      "exactVersion": "106.0.5249.62",
+      "major": 106,
+      "releasedAt": "2022-09-27T17:40:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.127/releases/1663087920",
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.127/releases/1663265880",
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.127/releases/1664487120",
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.127/releases/1664859660"
+      ],
+      "exactVersion": "105.0.5195.127",
+      "major": 105,
+      "releasedAt": "2022-09-13T16:52:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.102/releases/1662137880",
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.102/releases/1662667560"
+      ],
+      "exactVersion": "105.0.5195.102",
+      "major": 105,
+      "releasedAt": "2022-09-02T16:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/105.0.5195.54/releases/1661882880"
+      ],
+      "exactVersion": "105.0.5195.54",
+      "major": 105,
+      "releasedAt": "2022-08-30T18:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/104.0.5112.102/releases/1660681020",
+        "chrome/platforms/win/channels/stable/versions/104.0.5112.102/releases/1661194680"
+      ],
+      "exactVersion": "104.0.5112.102",
+      "major": 104,
+      "releasedAt": "2022-08-16T20:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/104.0.5112.81/releases/1659461820",
+        "chrome/platforms/win/channels/stable/versions/104.0.5112.81/releases/1659994020"
+      ],
+      "exactVersion": "104.0.5112.81",
+      "major": 104,
+      "releasedAt": "2022-08-02T17:37:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.134/releases/1658260680",
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.134/releases/1658437740"
+      ],
+      "exactVersion": "103.0.5060.134",
+      "major": 103,
+      "releasedAt": "2022-07-19T19:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.114/releases/1656952141",
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.114/releases/1657138920"
+      ],
+      "exactVersion": "103.0.5060.114",
+      "major": 103,
+      "releasedAt": "2022-07-04T16:29:01.233Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.66/releases/1656357900",
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.66/releases/1656532140"
+      ],
+      "exactVersion": "103.0.5060.66",
+      "major": 103,
+      "releasedAt": "2022-06-27T19:25:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/103.0.5060.53/releases/1655839560"
+      ],
+      "exactVersion": "103.0.5060.53",
+      "major": 103,
+      "releasedAt": "2022-06-21T19:26:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/102.0.5005.115/releases/1654800120",
+        "chrome/platforms/win/channels/stable/versions/102.0.5005.115/releases/1655233140"
+      ],
+      "exactVersion": "102.0.5005.115",
+      "major": 102,
+      "releasedAt": "2022-06-09T18:42:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/102.0.5005.63/releases/1653418620",
+        "chrome/platforms/win/channels/stable/versions/102.0.5005.63/releases/1654026240"
+      ],
+      "exactVersion": "102.0.5005.63",
+      "major": 102,
+      "releasedAt": "2022-05-24T18:57:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.67/releases/1652379480",
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.67/releases/1652811000"
+      ],
+      "exactVersion": "101.0.4951.67",
+      "major": 101,
+      "releasedAt": "2022-05-12T18:18:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.64/releases/1652207760"
+      ],
+      "exactVersion": "101.0.4951.64",
+      "major": 101,
+      "releasedAt": "2022-05-10T18:36:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.54/releases/1651507680",
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.54/releases/1651786740",
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.54/releases/1651843440",
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.54/releases/1651879560"
+      ],
+      "exactVersion": "101.0.4951.54",
+      "major": 101,
+      "releasedAt": "2022-05-02T16:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/101.0.4951.41/releases/1651002660"
+      ],
+      "exactVersion": "101.0.4951.41",
+      "major": 101,
+      "releasedAt": "2022-04-26T19:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.127/releases/1649969880",
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.127/releases/1650402060",
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.127/releases/1651087560",
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.127/releases/1651830000"
+      ],
+      "exactVersion": "100.0.4896.127",
+      "major": 100,
+      "releasedAt": "2022-04-14T20:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.88/releases/1649703360",
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.88/releases/1649883240"
+      ],
+      "exactVersion": "100.0.4896.88",
+      "major": 100,
+      "releasedAt": "2022-04-11T18:56:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.75/releases/1649101440",
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.75/releases/1649270340"
+      ],
+      "exactVersion": "100.0.4896.75",
+      "major": 100,
+      "releasedAt": "2022-04-04T19:44:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/100.0.4896.60/releases/1648577460"
+      ],
+      "exactVersion": "100.0.4896.60",
+      "major": 100,
+      "releasedAt": "2022-03-29T18:11:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.84/releases/1648232700",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.84/releases/1648574820"
+      ],
+      "exactVersion": "99.0.4844.84",
+      "major": 99,
+      "releasedAt": "2022-03-25T18:25:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.82/releases/1647790620",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.82/releases/1647977760"
+      ],
+      "exactVersion": "99.0.4844.82",
+      "major": 99,
+      "releasedAt": "2022-03-20T15:37:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.74/releases/1647370680",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.74/releases/1647373020",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.74/releases/1647553920"
+      ],
+      "exactVersion": "99.0.4844.74",
+      "major": 99,
+      "releasedAt": "2022-03-15T18:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1646164620",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1646230802",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1646254320",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1646338800",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1646694960",
+        "chrome/platforms/win/channels/stable/versions/99.0.4844.51/releases/1647370680"
+      ],
+      "exactVersion": "99.0.4844.51",
+      "major": 99,
+      "releasedAt": "2022-03-01T19:57:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1644871440",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1644949860",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1645039740",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1646164620",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1646228940",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1646230802",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1646254320",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.102/releases/1646338800"
+      ],
+      "exactVersion": "98.0.4758.102",
+      "major": 98,
+      "releasedAt": "2022-02-14T20:44:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1643754840",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1643924400",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1644267120",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1644358200",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1644871440",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.82/releases/1644949860"
+      ],
+      "exactVersion": "98.0.4758.82",
+      "major": 98,
+      "releasedAt": "2022-02-01T22:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.81/releases/1643754840",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.81/releases/1643924400",
+        "chrome/platforms/win/channels/stable/versions/98.0.4758.81/releases/1644267120"
+      ],
+      "exactVersion": "98.0.4758.81",
+      "major": 98,
+      "releasedAt": "2022-02-01T22:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1642630320",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1642720920",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1643077560",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1643754840",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1643924400",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.99/releases/1644267120"
+      ],
+      "exactVersion": "97.0.4692.99",
+      "major": 97,
+      "releasedAt": "2022-01-19T22:12:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1641331020",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1641418920",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1641505920",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1641852180",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1642630320",
+        "chrome/platforms/win/channels/stable/versions/97.0.4692.71/releases/1642720920"
+      ],
+      "exactVersion": "97.0.4692.71",
+      "major": 97,
+      "releasedAt": "2022-01-04T21:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1639423620",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1639518840",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1639600560",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1641331020",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1641418920",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.110/releases/1641505920"
+      ],
+      "exactVersion": "96.0.4664.110",
+      "major": 96,
+      "releasedAt": "2021-12-13T19:27:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.93/releases/1638826020",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.93/releases/1638913320",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.93/releases/1638998220",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.93/releases/1639423620",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.93/releases/1639518840"
+      ],
+      "exactVersion": "96.0.4664.93",
+      "major": 96,
+      "releasedAt": "2021-12-06T21:27:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1636966260",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1637000940",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1637094720",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1637262540",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1638224040",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1638826020",
+        "chrome/platforms/win/channels/stable/versions/96.0.4664.45/releases/1638913320"
+      ],
+      "exactVersion": "96.0.4664.45",
+      "major": 96,
+      "releasedAt": "2021-11-15T08:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1635454260",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1635799500",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1635885301",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1636966260",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1637000940",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1637094720",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.69/releases/1637262540"
+      ],
+      "exactVersion": "95.0.4638.69",
+      "major": 95,
+      "releasedAt": "2021-10-28T20:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1634667660",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1634759340",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1634844540",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1635191580",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1635454260",
+        "chrome/platforms/win/channels/stable/versions/95.0.4638.54/releases/1635799500"
+      ],
+      "exactVersion": "95.0.4638.54",
+      "major": 95,
+      "releasedAt": "2021-10-19T18:21:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1633628820",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1633979940",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1634063280",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1634667660",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1634759340",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.81/releases/1634844540"
+      ],
+      "exactVersion": "94.0.4606.81",
+      "major": 94,
+      "releasedAt": "2021-10-07T17:47:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.71/releases/1633027500",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.71/releases/1633380120",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.71/releases/1633483260",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.71/releases/1633628820",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.71/releases/1633979940"
+      ],
+      "exactVersion": "94.0.4606.71",
+      "major": 94,
+      "releasedAt": "2021-09-30T18:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.61/releases/1632453960",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.61/releases/1632770941",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.61/releases/1632855660",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.61/releases/1633027500",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.61/releases/1633380120"
+      ],
+      "exactVersion": "94.0.4606.61",
+      "major": 94,
+      "releasedAt": "2021-09-24T03:26:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.54/releases/1632245280",
+        "chrome/platforms/win/channels/stable/versions/94.0.4606.54/releases/1632339480"
+      ],
+      "exactVersion": "94.0.4606.54",
+      "major": 94,
+      "releasedAt": "2021-09-21T17:28:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1631564340",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1631652060",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1631741520",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1632245280",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1632339480",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.82/releases/1632770941"
+      ],
+      "exactVersion": "93.0.4577.82",
+      "major": 93,
+      "releasedAt": "2021-09-13T20:19:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1630438140",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1630531982",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1630614900",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1631046120",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1631564340",
+        "chrome/platforms/win/channels/stable/versions/93.0.4577.63/releases/1631652060"
+      ],
+      "exactVersion": "93.0.4577.63",
+      "major": 93,
+      "releasedAt": "2021-08-31T19:29:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1629143520",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1629227400",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1629318540",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1630438140",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1630531982",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.159/releases/1630614900"
+      ],
+      "exactVersion": "92.0.4515.159",
+      "major": 92,
+      "releasedAt": "2021-08-16T19:52:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.131/releases/1627933020",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.131/releases/1628020020",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.131/releases/1628109120",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.131/releases/1629143520",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.131/releases/1629227400"
+      ],
+      "exactVersion": "92.0.4515.131",
+      "major": 92,
+      "releasedAt": "2021-08-02T19:37:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1626813928",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1626896100",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1626991800",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1627330860",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1627933020",
+        "chrome/platforms/win/channels/stable/versions/92.0.4515.107/releases/1628020020"
+      ],
+      "exactVersion": "92.0.4515.107",
+      "major": 92,
+      "releasedAt": "2021-07-20T20:45:28.387Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626373980",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626723420",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626806760",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626813928",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626896100",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.164/releases/1626991800"
+      ],
+      "exactVersion": "91.0.4472.164",
+      "major": 91,
+      "releasedAt": "2021-07-15T18:33:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.124/releases/1624557900",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.124/releases/1624915260",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.124/releases/1625004780",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.124/releases/1626373980",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.124/releases/1626723420"
+      ],
+      "exactVersion": "91.0.4472.124",
+      "major": 91,
+      "releasedAt": "2021-06-24T18:05:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.123/releases/1624557900",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.123/releases/1624915260",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.123/releases/1625004780"
+      ],
+      "exactVersion": "91.0.4472.123",
+      "major": 91,
+      "releasedAt": "2021-06-24T18:05:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.114/releases/1623955680",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.114/releases/1624302840",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.114/releases/1624389840",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.114/releases/1624557900",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.114/releases/1624915260"
+      ],
+      "exactVersion": "91.0.4472.114",
+      "major": 91,
+      "releasedAt": "2021-06-17T18:48:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.106/releases/1623709020",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.106/releases/1623789000",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.106/releases/1623879060",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.106/releases/1623955680",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.106/releases/1624302840"
+      ],
+      "exactVersion": "91.0.4472.106",
+      "major": 91,
+      "releasedAt": "2021-06-14T22:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.101/releases/1623263641",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.101/releases/1623355920",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.101/releases/1623697500",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.101/releases/1623709020",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.101/releases/1623789000"
+      ],
+      "exactVersion": "91.0.4472.101",
+      "major": 91,
+      "releasedAt": "2021-06-09T18:34:01.949Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1621969560",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1622066220",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1622576340",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1622755980",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1623263641",
+        "chrome/platforms/win/channels/stable/versions/91.0.4472.77/releases/1623355920"
+      ],
+      "exactVersion": "91.0.4472.77",
+      "major": 91,
+      "releasedAt": "2021-05-25T19:06:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1620668640",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1620673140",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1620759780",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1620846900",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1621969560",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1622066220",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.212/releases/1622576340"
+      ],
+      "exactVersion": "90.0.4430.212",
+      "major": 90,
+      "releasedAt": "2021-05-10T17:44:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1619462100",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1619466240",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1619552640",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1619635440",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1620668640",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1620673140",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.93/releases/1620759780"
+      ],
+      "exactVersion": "90.0.4430.93",
+      "major": 90,
+      "releasedAt": "2021-04-26T18:35:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1618944120",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1619032080",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1619115360",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1619462100",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1619466240",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.85/releases/1619552640"
+      ],
+      "exactVersion": "90.0.4430.85",
+      "major": 90,
+      "releasedAt": "2021-04-20T18:42:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.72/releases/1618433340",
+        "chrome/platforms/win/channels/stable/versions/90.0.4430.72/releases/1618515120"
+      ],
+      "exactVersion": "90.0.4430.72",
+      "major": 90,
+      "releasedAt": "2021-04-14T20:49:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1618349640",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1618426860",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1618433340",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1618515120",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1619032080",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.128/releases/1619114811"
+      ],
+      "exactVersion": "89.0.4389.128",
+      "major": 89,
+      "releasedAt": "2021-04-13T21:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.114/releases/1617129060",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.114/releases/1617220320",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.114/releases/1617321600",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.114/releases/1618349640",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.114/releases/1618426232"
+      ],
+      "exactVersion": "89.0.4389.114",
+      "major": 89,
+      "releasedAt": "2021-03-30T18:31:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1615580340",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1615836780",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1615928520",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1616008873",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1616018760",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1617129060",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1617220320",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.90/releases/1617321034"
+      ],
+      "exactVersion": "89.0.4389.90",
+      "major": 89,
+      "releasedAt": "2021-03-12T20:19:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1614978480",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615205280",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615242660",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615314499",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615321980",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615410060",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615493760",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615580340",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615836780",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1615928520",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1616008873",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.82/releases/1616017693"
+      ],
+      "exactVersion": "89.0.4389.82",
+      "major": 89,
+      "releasedAt": "2021-03-05T21:08:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.72/releases/1614716280",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.72/releases/1614717720",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.72/releases/1614719280",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.72/releases/1614804120",
+        "chrome/platforms/win/channels/stable/versions/89.0.4389.72/releases/1614878700"
+      ],
+      "exactVersion": "89.0.4389.72",
+      "major": 89,
+      "releasedAt": "2021-03-02T20:18:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614019500",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614023860",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614110507",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614111300",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614608811",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614608831",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614716280",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614717720",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614719280",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614804120",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614878700",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1614978480",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615205280",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615242660",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615314499",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615321980",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615410060",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.190/releases/1615493129"
+      ],
+      "exactVersion": "88.0.4324.190",
+      "major": 88,
+      "releasedAt": "2021-02-22T18:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1613501640",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1613589180",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1613675520",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1614006165",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1614007647",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1614019500",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1614023860",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.182/releases/1614110507"
+      ],
+      "exactVersion": "88.0.4324.182",
+      "major": 88,
+      "releasedAt": "2021-02-16T18:54:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.150/releases/1612465860",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.150/releases/1612812300",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.150/releases/1612899420",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.150/releases/1613501640",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.150/releases/1613589180"
+      ],
+      "exactVersion": "88.0.4324.150",
+      "major": 88,
+      "releasedAt": "2021-02-04T19:11:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612293420",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612376400",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612463100",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612465800",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612812300",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.146/releases/1612898805"
+      ],
+      "exactVersion": "88.0.4324.146",
+      "major": 88,
+      "releasedAt": "2021-02-02T19:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1611256860",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1611605940",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1611689340",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1611774000",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1612293360",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1612376400",
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.104/releases/1612462530"
+      ],
+      "exactVersion": "88.0.4324.104",
+      "major": 88,
+      "releasedAt": "2021-01-21T19:21:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/88.0.4324.96/releases/1611084300"
+      ],
+      "exactVersion": "88.0.4324.96",
+      "major": 88,
+      "releasedAt": "2021-01-19T19:25:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1609964400",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1610050980",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1610393700",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1611084240",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1611605940",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1611689340",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.141/releases/1611773445"
+      ],
+      "exactVersion": "87.0.4280.141",
+      "major": 87,
+      "releasedAt": "2021-01-06T20:20:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1606937940",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1607022720",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1607369100",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1609964400",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1610050980",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.88/releases/1610393096"
+      ],
+      "exactVersion": "87.0.4280.88",
+      "major": 87,
+      "releasedAt": "2020-12-02T19:39:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.66/releases/1605637140",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.66/releases/1605727260",
+        "chrome/platforms/win/channels/stable/versions/87.0.4280.66/releases/1605817581"
+      ],
+      "exactVersion": "87.0.4280.66",
+      "major": 87,
+      "releasedAt": "2020-11-17T18:19:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605125880",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605212220",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605552540",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605637140",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605727260",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1605817581",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1606937940",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1607022720",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.198/releases/1607368540"
+      ],
+      "exactVersion": "86.0.4240.198",
+      "major": 86,
+      "releasedAt": "2020-11-11T20:18:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1604947860",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1605040440",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1605121800",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1605125880",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1605212220",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.193/releases/1605551361"
+      ],
+      "exactVersion": "86.0.4240.193",
+      "major": 86,
+      "releasedAt": "2020-11-09T18:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1604341260",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1604430720",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1604518560",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1604947860",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1605040440",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.183/releases/1605121635"
+      ],
+      "exactVersion": "86.0.4240.183",
+      "major": 86,
+      "releasedAt": "2020-11-02T18:21:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1603220280",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1603307940",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1603393200",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1604341260",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1604430720",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.111/releases/1604518005"
+      ],
+      "exactVersion": "86.0.4240.111",
+      "major": 86,
+      "releasedAt": "2020-10-20T18:58:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1602022200",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1602101340",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1602184140",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1602531300",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1603220280",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1603307940",
+        "chrome/platforms/win/channels/stable/versions/86.0.4240.75/releases/1603392771"
+      ],
+      "exactVersion": "86.0.4240.75",
+      "major": 86,
+      "releasedAt": "2020-10-06T22:10:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1600711740",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1600801080",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1600881120",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1602022200",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1602101340",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1602184140",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.121/releases/1602529641"
+      ],
+      "exactVersion": "85.0.4183.121",
+      "major": 85,
+      "releasedAt": "2020-09-21T18:09:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1599583200",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1599676020",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1599762360",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1600711680",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1600801080",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.102/releases/1600880511"
+      ],
+      "exactVersion": "85.0.4183.102",
+      "major": 85,
+      "releasedAt": "2020-09-08T16:40:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1598379480",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1598466900",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1598558280",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1598897760",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1598984340",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1599583140",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1599676020",
+        "chrome/platforms/win/channels/stable/versions/85.0.4183.83/releases/1599761740"
+      ],
+      "exactVersion": "85.0.4183.83",
+      "major": 85,
+      "releasedAt": "2020-08-25T18:18:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1597774680",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1597861080",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1597955160",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1598379420",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1598466900",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1598558280",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1598897760",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.135/releases/1598983743"
+      ],
+      "exactVersion": "84.0.4147.135",
+      "major": 84,
+      "releasedAt": "2020-08-18T18:18:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597083300",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597173060",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597259460",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597774680",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597861080",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.125/releases/1597953532"
+      ],
+      "exactVersion": "84.0.4147.125",
+      "major": 84,
+      "releasedAt": "2020-08-10T18:15:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1595879460",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1595961780",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1596048900",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1597083300",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1597173060",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.105/releases/1597258221"
+      ],
+      "exactVersion": "84.0.4147.105",
+      "major": 84,
+      "releasedAt": "2020-07-27T19:51:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1594748700",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1594840800",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1594924560",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1595272980",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1595273010",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1595878764",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1595961780",
+        "chrome/platforms/win/channels/stable/versions/84.0.4147.89/releases/1596048235"
+      ],
+      "exactVersion": "84.0.4147.89",
+      "major": 84,
+      "releasedAt": "2020-07-14T17:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1592846460",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1592934240",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1593019080",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1594748700",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1594840800",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.116/releases/1594924560"
+      ],
+      "exactVersion": "83.0.4103.116",
+      "major": 83,
+      "releasedAt": "2020-06-22T17:21:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1592242260",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1592328540",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1592416140",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1592845880",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1592934240",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.106/releases/1593018510"
+      ],
+      "exactVersion": "83.0.4103.106",
+      "major": 83,
+      "releasedAt": "2020-06-15T17:31:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1591205640",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1591301460",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1591651200",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1592242200",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1592328540",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.97/releases/1592415584"
+      ],
+      "exactVersion": "83.0.4103.97",
+      "major": 83,
+      "releasedAt": "2020-06-03T17:34:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1589910420",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1590094800",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1590519600",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1590602400",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1591205580",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1591301460",
+        "chrome/platforms/win/channels/stable/versions/83.0.4103.61/releases/1591650494"
+      ],
+      "exactVersion": "83.0.4103.61",
+      "major": 83,
+      "releasedAt": "2020-05-19T17:47:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1588704180",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1588793040",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1588891380",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1589910360",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1590094800",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1590519600",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.138/releases/1590601815"
+      ],
+      "exactVersion": "81.0.4044.138",
+      "major": 81,
+      "releasedAt": "2020-05-05T18:43:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588025700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588105260",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588189320",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588704180",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588793040",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.129/releases/1588891111"
+      ],
+      "exactVersion": "81.0.4044.129",
+      "major": 81,
+      "releasedAt": "2020-04-27T22:15:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1587497700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1587590700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1587679260",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1588025700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1588105260",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.122/releases/1588189042"
+      ],
+      "exactVersion": "81.0.4044.122",
+      "major": 81,
+      "releasedAt": "2020-04-21T19:35:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1586976300",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587066300",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587408600",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587492900",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587497700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587590700",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.113/releases/1587679103"
+      ],
+      "exactVersion": "81.0.4044.113",
+      "major": 81,
+      "releasedAt": "2020-04-15T18:45:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.92/releases/1586285340",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.92/releases/1586375400",
+        "chrome/platforms/win/channels/stable/versions/81.0.4044.92/releases/1586464800"
+      ],
+      "exactVersion": "81.0.4044.92",
+      "major": 81,
+      "releasedAt": "2020-04-07T18:49:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1585856100",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1586197260",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1586281380",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1586285340",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1586375400",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1586464800",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1587066300",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1587408600",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.163/releases/1587492821"
+      ],
+      "exactVersion": "80.0.3987.163",
+      "major": 80,
+      "releasedAt": "2020-04-02T19:35:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.162/releases/1585690860"
+      ],
+      "exactVersion": "80.0.3987.162",
+      "major": 80,
+      "releasedAt": "2020-03-31T21:41:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.149/releases/1584553200",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.149/releases/1584638220",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.149/releases/1585687837",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.149/releases/1586197260",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.149/releases/1586280805"
+      ],
+      "exactVersion": "80.0.3987.149",
+      "major": 80,
+      "releasedAt": "2020-03-18T17:40:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1583258820",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1583349420",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1583438460",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1584478140",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1584553200",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.132/releases/1584637646"
+      ],
+      "exactVersion": "80.0.3987.132",
+      "major": 80,
+      "releasedAt": "2020-03-03T18:07:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1582566900",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1582652580",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1582743960",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1583258820",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1583349420",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.122/releases/1583437759"
+      ],
+      "exactVersion": "80.0.3987.122",
+      "major": 80,
+      "releasedAt": "2020-02-24T17:55:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.116/releases/1582048500",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.116/releases/1582138560"
+      ],
+      "exactVersion": "80.0.3987.116",
+      "major": 80,
+      "releasedAt": "2020-02-18T17:55:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.106/releases/1581621540"
+      ],
+      "exactVersion": "80.0.3987.106",
+      "major": 80,
+      "releasedAt": "2020-02-13T19:19:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.100/releases/1581444660"
+      ],
+      "exactVersion": "80.0.3987.100",
+      "major": 80,
+      "releasedAt": "2020-02-11T18:11:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.87/releases/1580851020",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.87/releases/1580937120",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.87/releases/1581021068",
+        "chrome/platforms/win/channels/stable/versions/80.0.3987.87/releases/1581444180"
+      ],
+      "exactVersion": "80.0.3987.87",
+      "major": 80,
+      "releasedAt": "2020-02-04T21:17:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1579204860",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1579635180",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1579720140",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1580850960",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1580937120",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1581021068",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1581444180",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1582048500",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1582138560",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1582652580",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.130/releases/1582743835"
+      ],
+      "exactVersion": "79.0.3945.130",
+      "major": 79,
+      "releasedAt": "2020-01-16T20:01:00.000Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1578424217",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1578514605",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1578605700",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1579204860",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1579635180",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.117/releases/1579719536"
+      ],
+      "exactVersion": "79.0.3945.117",
+      "major": 79,
+      "releasedAt": "2020-01-07T19:10:17.611Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1576606280",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1576691953",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1576779018",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1578424217",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1578514605",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.88/releases/1578604405"
+      ],
+      "exactVersion": "79.0.3945.88",
+      "major": 79,
+      "releasedAt": "2019-12-17T18:11:20.878Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576005761",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576087387",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576178894",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576524233",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576606280",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576691953",
+        "chrome/platforms/win/channels/stable/versions/79.0.3945.79/releases/1576778919"
+      ],
+      "exactVersion": "79.0.3945.79",
+      "major": 79,
+      "releasedAt": "2019-12-10T19:22:41.443Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1574108601",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1574277967",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1574367438",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1576005761",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1576087387",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1576178894",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.108/releases/1576523968"
+      ],
+      "exactVersion": "78.0.3904.108",
+      "major": 78,
+      "releasedAt": "2019-11-18T20:23:21.842Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1573068760",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1573155491",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1573502658",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1574108601",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1574277967",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.97/releases/1574366856"
+      ],
+      "exactVersion": "78.0.3904.97",
+      "major": 78,
+      "releasedAt": "2019-11-06T19:32:40.003Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1572549873",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1572897664",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1572986180",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1573068760",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1573155491",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.87/releases/1573502067"
+      ],
+      "exactVersion": "78.0.3904.87",
+      "major": 78,
+      "releasedAt": "2019-10-31T19:24:33.196Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.70/releases/1571770473",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.70/releases/1571859790",
+        "chrome/platforms/win/channels/stable/versions/78.0.3904.70/releases/1572301511"
+      ],
+      "exactVersion": "78.0.3904.70",
+      "major": 78,
+      "releasedAt": "2019-10-22T18:54:33.719Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1570727721",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1571077111",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1571163931",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1571770473",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1571859790",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1572301511",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1572549873",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1572897664",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.120/releases/1572985631"
+      ],
+      "exactVersion": "77.0.3865.120",
+      "major": 77,
+      "releasedAt": "2019-10-10T17:15:21.325Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1568826015",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1568914212",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1569265335",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1569350860",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1570727721",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1571077111",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.90/releases/1571163242"
+      ],
+      "exactVersion": "77.0.3865.90",
+      "major": 77,
+      "releasedAt": "2019-09-18T17:00:15.134Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.75/releases/1568139794",
+        "chrome/platforms/win/channels/stable/versions/77.0.3865.75/releases/1568229615"
+      ],
+      "exactVersion": "77.0.3865.75",
+      "major": 77,
+      "releasedAt": "2019-09-10T18:23:14.645Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1566843270",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1566939553",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1567110030",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1568139794",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1568229615",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1568914212",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1569265335",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.132/releases/1569350138"
+      ],
+      "exactVersion": "76.0.3809.132",
+      "major": 76,
+      "releasedAt": "2019-08-26T18:14:30.067Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1565125171",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1565203749",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1565292670",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1566843270",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1566939553",
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.100/releases/1567109449"
+      ],
+      "exactVersion": "76.0.3809.100",
+      "major": 76,
+      "releasedAt": "2019-08-06T20:59:31.823Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/76.0.3809.87/releases/1564509491"
+      ],
+      "exactVersion": "76.0.3809.87",
+      "major": 76,
+      "releasedAt": "2019-07-30T17:58:11.878Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1563223633",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1563303463",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1564509491",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1565125171",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1565203749",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.142/releases/1565292131"
+      ],
+      "exactVersion": "75.0.3770.142",
+      "major": 75,
+      "releasedAt": "2019-07-15T20:47:13.903Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.100/releases/1560871006",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.100/releases/1560977833",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.100/releases/1561059404",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.100/releases/1563223633",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.100/releases/1563302879"
+      ],
+      "exactVersion": "75.0.3770.100",
+      "major": 75,
+      "releasedAt": "2019-06-18T15:16:46.283Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.90/releases/1560439523"
+      ],
+      "exactVersion": "75.0.3770.90",
+      "major": 75,
+      "releasedAt": "2019-06-13T15:25:23.564Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.80/releases/1559676312",
+        "chrome/platforms/win/channels/stable/versions/75.0.3770.80/releases/1559772981"
+      ],
+      "exactVersion": "75.0.3770.80",
+      "major": 75,
+      "releasedAt": "2019-06-04T19:25:12.595Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1558464100",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1558552461",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1559676312",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1559772981",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1560977833",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.169/releases/1561057775"
+      ],
+      "exactVersion": "74.0.3729.169",
+      "major": 74,
+      "releasedAt": "2019-05-21T18:41:40.965Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.157/releases/1557855339",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.157/releases/1558035379",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.157/releases/1558464100",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.157/releases/1558551861"
+      ],
+      "exactVersion": "74.0.3729.157",
+      "major": 74,
+      "releasedAt": "2019-05-14T17:35:39.125Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1556653218",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1556749029",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1556833630",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1557177040",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1557855339",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.131/releases/1558034782"
+      ],
+      "exactVersion": "74.0.3729.131",
+      "major": 74,
+      "releasedAt": "2019-04-30T19:40:18.558Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.108/releases/1556052850",
+        "chrome/platforms/win/channels/stable/versions/74.0.3729.108/releases/1556140382"
+      ],
+      "exactVersion": "74.0.3729.108",
+      "major": 74,
+      "releasedAt": "2019-04-23T20:54:10.720Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1554419235",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1554776778",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1554856666",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1554944234",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1556052850",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1556140382",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1556653218",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1556749029",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1556833630",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.103/releases/1557176192"
+      ],
+      "exactVersion": "73.0.3683.103",
+      "major": 73,
+      "releasedAt": "2019-04-04T23:07:15.534Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1553111357",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1553199517",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1553276957",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1553549358",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1554419235",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1554776778",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1554856666",
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.86/releases/1554943617"
+      ],
+      "exactVersion": "73.0.3683.86",
+      "major": 73,
+      "releasedAt": "2019-03-20T19:49:17.732Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/73.0.3683.75/releases/1552414697"
+      ],
+      "exactVersion": "73.0.3683.75",
+      "major": 73,
+      "releasedAt": "2019-03-12T18:18:17.114Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1551476057",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1551725953",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1551811750",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1551896530",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1552414697",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1553111357",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1553199517",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1553276957",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.121/releases/1553548797"
+      ],
+      "exactVersion": "72.0.3626.121",
+      "major": 72,
+      "releasedAt": "2019-03-01T21:34:17.903Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1550781017",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1551118035",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1551476057",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1551725953",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1551811750",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.119/releases/1551895886"
+      ],
+      "exactVersion": "72.0.3626.119",
+      "major": 72,
+      "releasedAt": "2019-02-21T20:30:17.404Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.109/releases/1550094354",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.109/releases/1550182836",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.109/releases/1550781017",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.109/releases/1551117430"
+      ],
+      "exactVersion": "72.0.3626.109",
+      "major": 72,
+      "releasedAt": "2019-02-13T21:45:54.224Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.96/releases/1549483508",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.96/releases/1549581093",
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.96/releases/1549931118"
+      ],
+      "exactVersion": "72.0.3626.96",
+      "major": 72,
+      "releasedAt": "2019-02-06T20:05:08.088Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/72.0.3626.81/releases/1548791831"
+      ],
+      "exactVersion": "72.0.3626.81",
+      "major": 72,
+      "releasedAt": "2019-01-29T19:57:11.432Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1544641130",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1544741416",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1545093397",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1548791831",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1549581093",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1549931118",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.98/releases/1550182092"
+      ],
+      "exactVersion": "71.0.3578.98",
+      "major": 71,
+      "releasedAt": "2018-12-12T18:58:50.407Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.80/releases/1543947758",
+        "chrome/platforms/win/channels/stable/versions/71.0.3578.80/releases/1544136375"
+      ],
+      "exactVersion": "71.0.3578.80",
+      "major": 71,
+      "releasedAt": "2018-12-04T18:22:38.083Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1542649120",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1543258327",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1543352917",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1543947758",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1544136375",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1544741416",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.110/releases/1545093290"
+      ],
+      "exactVersion": "70.0.3538.110",
+      "major": 70,
+      "releasedAt": "2018-11-19T17:38:40.357Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1541788937",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1542061991",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1542150730",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1542649120",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1543258327",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.102/releases/1543352035"
+      ],
+      "exactVersion": "70.0.3538.102",
+      "major": 70,
+      "releasedAt": "2018-11-09T18:42:17.679Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1540408936",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1540500015",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1540925707",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1541788937",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1542061991",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.77/releases/1542150155"
+      ],
+      "exactVersion": "70.0.3538.77",
+      "major": 70,
+      "releasedAt": "2018-10-24T19:22:16.389Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.67/releases/1539715396",
+        "chrome/platforms/win/channels/stable/versions/70.0.3538.67/releases/1539906435"
+      ],
+      "exactVersion": "70.0.3538.67",
+      "major": 70,
+      "releasedAt": "2018-10-16T18:43:16.111Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1537207898",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1537294717",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1537384059",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1539715396",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1539906435",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1540500015",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.100/releases/1540924917"
+      ],
+      "exactVersion": "69.0.3497.100",
+      "major": 69,
+      "releasedAt": "2018-09-17T18:11:38.548Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.92/releases/1536687637",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.92/releases/1536779528",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.92/releases/1536876995"
+      ],
+      "exactVersion": "69.0.3497.92",
+      "major": 69,
+      "releasedAt": "2018-09-11T17:40:37.797Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.81/releases/1536084854",
+        "chrome/platforms/win/channels/stable/versions/69.0.3497.81/releases/1536188413"
+      ],
+      "exactVersion": "69.0.3497.81",
+      "major": 69,
+      "releasedAt": "2018-09-04T18:14:14.779Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1533751296",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1533851712",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1536084854",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1536188413",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1536687637",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1536779528",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1536876995",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1537207898",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1537294717",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.106/releases/1537383774"
+      ],
+      "exactVersion": "68.0.3440.106",
+      "major": 68,
+      "releasedAt": "2018-08-08T18:01:36.941Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.84/releases/1533069614",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.84/releases/1533167015",
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.84/releases/1533250413"
+      ],
+      "exactVersion": "68.0.3440.84",
+      "major": 68,
+      "releasedAt": "2018-07-31T20:40:14.206Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/68.0.3440.75/releases/1532463336"
+      ],
+      "exactVersion": "68.0.3440.75",
+      "major": 68,
+      "releasedAt": "2018-07-24T20:15:36.442Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1529948472",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1530035467",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1532463336",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1533167015",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1533250413",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.99/releases/1533850948"
+      ],
+      "exactVersion": "67.0.3396.99",
+      "major": 67,
+      "releasedAt": "2018-06-25T17:41:12.439Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.87/releases/1528824192",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.87/releases/1528915035",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.87/releases/1529948472"
+      ],
+      "exactVersion": "67.0.3396.87",
+      "major": 67,
+      "releasedAt": "2018-06-12T17:23:12.689Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.79/releases/1528307351",
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.79/releases/1528402337"
+      ],
+      "exactVersion": "67.0.3396.79",
+      "major": 67,
+      "releasedAt": "2018-06-06T17:49:11.946Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/67.0.3396.62/releases/1527619151"
+      ],
+      "exactVersion": "67.0.3396.62",
+      "major": 67,
+      "releasedAt": "2018-05-29T18:39:11.574Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1526408714",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1526494897",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1526581575",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1527619151",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1528307351",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.181/releases/1528402337"
+      ],
+      "exactVersion": "66.0.3359.181",
+      "major": 66,
+      "releasedAt": "2018-05-15T18:25:14.270Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.170/releases/1525983996",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.170/releases/1526062572"
+      ],
+      "exactVersion": "66.0.3359.170",
+      "major": 66,
+      "releasedAt": "2018-05-10T20:26:36.905Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1524777187",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1524870315",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1525203013",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1525983996",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1526062572",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.139/releases/1526494897"
+      ],
+      "exactVersion": "66.0.3359.139",
+      "major": 66,
+      "releasedAt": "2018-04-26T21:13:07.669Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.117/releases/1524006275",
+        "chrome/platforms/win/channels/stable/versions/66.0.3359.117/releases/1524181692"
+      ],
+      "exactVersion": "66.0.3359.117",
+      "major": 66,
+      "releasedAt": "2018-04-17T23:04:35.661Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1521577597",
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1521667059",
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1521747735",
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1524006275",
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1524181692",
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.181/releases/1524870315"
+      ],
+      "exactVersion": "65.0.3325.181",
+      "major": 65,
+      "releasedAt": "2018-03-20T20:26:37.352Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.162/releases/1520967218"
+      ],
+      "exactVersion": "65.0.3325.162",
+      "major": 65,
+      "releasedAt": "2018-03-13T18:53:38.774Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/65.0.3325.146/releases/1520370857"
+      ],
+      "exactVersion": "65.0.3325.146",
+      "major": 65,
+      "releasedAt": "2018-03-06T21:14:17.114Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1519350297",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1519698375",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1519767935",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1520370857",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1520967218",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.186/releases/1521667059"
+      ],
+      "exactVersion": "64.0.3282.186",
+      "major": 64,
+      "releasedAt": "2018-02-23T01:44:57.033Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.168/releases/1518562935"
+      ],
+      "exactVersion": "64.0.3282.168",
+      "major": 64,
+      "releasedAt": "2018-02-13T23:02:15.551Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.167/releases/1518563320"
+      ],
+      "exactVersion": "64.0.3282.167",
+      "major": 64,
+      "releasedAt": "2018-02-13T23:08:40.898Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.140/releases/1517524272",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.140/releases/1517874911",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.140/releases/1517954176",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.140/releases/1518562935"
+      ],
+      "exactVersion": "64.0.3282.140",
+      "major": 64,
+      "releasedAt": "2018-02-01T22:31:12.439Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.119/releases/1516822232",
+        "chrome/platforms/win/channels/stable/versions/64.0.3282.119/releases/1516912990"
+      ],
+      "exactVersion": "64.0.3282.119",
+      "major": 64,
+      "releasedAt": "2018-01-24T19:30:32.811Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1515089655",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1515203529",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1515453615",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1516822232",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1516912990",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1517874911",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1517954176",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1518562935",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1518563320",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1519350297",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.132/releases/1519698375"
+      ],
+      "exactVersion": "63.0.3239.132",
+      "major": 63,
+      "releasedAt": "2018-01-04T18:14:15.096Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.108/releases/1513289257",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.108/releases/1513633460",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.108/releases/1515019629"
+      ],
+      "exactVersion": "63.0.3239.108",
+      "major": 63,
+      "releasedAt": "2017-12-14T22:07:37.892Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1512589896",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1512769538",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1513031720",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1513208854",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1513289257",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1513633460",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1515019629",
+        "chrome/platforms/win/channels/stable/versions/63.0.3239.84/releases/1515203529"
+      ],
+      "exactVersion": "63.0.3239.84",
+      "major": 63,
+      "releasedAt": "2017-12-06T19:51:36.019Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1510601733",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1510684294",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1510777594",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1512589896",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1512769538",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.94/releases/1513031720"
+      ],
+      "exactVersion": "62.0.3202.94",
+      "major": 62,
+      "releasedAt": "2017-11-13T19:35:33.860Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.89/releases/1509996247",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.89/releases/1510083726"
+      ],
+      "exactVersion": "62.0.3202.89",
+      "major": 62,
+      "releasedAt": "2017-11-06T19:24:07.338Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.75/releases/1509043696",
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.75/releases/1509405367"
+      ],
+      "exactVersion": "62.0.3202.75",
+      "major": 62,
+      "releasedAt": "2017-10-26T18:48:16.545Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/62.0.3202.62/releases/1508273911"
+      ],
+      "exactVersion": "62.0.3202.62",
+      "major": 62,
+      "releasedAt": "2017-10-17T20:58:31.518Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1506029191",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1506365051",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1506451215",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1508273911",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1509405367",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1510083726",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.100/releases/1510684294"
+      ],
+      "exactVersion": "61.0.3163.100",
+      "major": 61,
+      "releasedAt": "2017-09-21T21:26:31.659Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.91/releases/1505412127",
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.91/releases/1505759948"
+      ],
+      "exactVersion": "61.0.3163.91",
+      "major": 61,
+      "releasedAt": "2017-09-14T18:02:07.957Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/61.0.3163.79/releases/1504635752"
+      ],
+      "exactVersion": "61.0.3163.79",
+      "major": 61,
+      "releasedAt": "2017-09-05T18:22:32.839Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1503595810",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1503685953",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1503945691",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1504635752",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1505759948",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1506029191",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.113/releases/1506365051"
+      ],
+      "exactVersion": "60.0.3112.113",
+      "major": 60,
+      "releasedAt": "2017-08-24T17:30:10.762Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.101/releases/1502732113",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.101/releases/1502909105",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.101/releases/1502995515",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.101/releases/1503595810",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.101/releases/1503685953"
+      ],
+      "exactVersion": "60.0.3112.101",
+      "major": 60,
+      "releasedAt": "2017-08-14T17:35:13.932Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.90/releases/1501703763",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.90/releases/1501781707",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.90/releases/1502129114",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.90/releases/1502732113",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.90/releases/1502909105"
+      ],
+      "exactVersion": "60.0.3112.90",
+      "major": 60,
+      "releasedAt": "2017-08-02T19:56:03.985Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.78/releases/1501007406",
+        "chrome/platforms/win/channels/stable/versions/60.0.3112.78/releases/1501092191"
+      ],
+      "exactVersion": "60.0.3112.78",
+      "major": 60,
+      "releasedAt": "2017-07-25T18:30:06.463Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1498497919",
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1498584050",
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1498673978",
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1501007406",
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1501092191",
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.115/releases/1501781707"
+      ],
+      "exactVersion": "59.0.3071.115",
+      "major": 59,
+      "releasedAt": "2017-06-26T17:25:19.482Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.109/releases/1497995422"
+      ],
+      "exactVersion": "59.0.3071.109",
+      "major": 59,
+      "releasedAt": "2017-06-20T21:50:22.977Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.104/releases/1497550838"
+      ],
+      "exactVersion": "59.0.3071.104",
+      "major": 59,
+      "releasedAt": "2017-06-15T18:20:38.382Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/59.0.3071.86/releases/1496692845"
+      ],
+      "exactVersion": "59.0.3071.86",
+      "major": 59,
+      "releasedAt": "2017-06-05T20:00:45.336Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1494351946",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1494451843",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1494538522",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1494881529",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1496692845",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1498497919",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.110/releases/1498584050"
+      ],
+      "exactVersion": "58.0.3029.110",
+      "major": 58,
+      "releasedAt": "2017-05-09T17:45:46.012Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.96/releases/1493748309",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.96/releases/1493853009",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.96/releases/1493937642"
+      ],
+      "exactVersion": "58.0.3029.96",
+      "major": 58,
+      "releasedAt": "2017-05-02T18:05:09.583Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.81/releases/1492624205",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.81/releases/1493153949",
+        "chrome/platforms/win/channels/stable/versions/58.0.3029.81/releases/1493246770"
+      ],
+      "exactVersion": "58.0.3029.81",
+      "major": 58,
+      "releasedAt": "2017-04-19T17:50:05.156Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1490815222",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1490921259",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1491258082",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1491420910",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1492624205",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1493153949",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1493246770",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1493748013",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1493853009",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1493937642",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1494351642",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1494451843",
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.133/releases/1494538522"
+      ],
+      "exactVersion": "57.0.2987.133",
+      "major": 57,
+      "releasedAt": "2017-03-29T19:20:22.228Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.110/releases/1489693514"
+      ],
+      "exactVersion": "57.0.2987.110",
+      "major": 57,
+      "releasedAt": "2017-03-16T19:45:14.198Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/57.0.2987.98/releases/1489088168"
+      ],
+      "exactVersion": "57.0.2987.98",
+      "major": 57,
+      "releasedAt": "2017-03-09T19:36:08.209Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1485991695",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1488850866",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1489088168",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1489693514",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1490815222",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1490921259",
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.87/releases/1491258082"
+      ],
+      "exactVersion": "56.0.2924.87",
+      "major": 56,
+      "releasedAt": "2017-02-01T23:28:15.605Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/56.0.2924.76/releases/1485384003"
+      ],
+      "exactVersion": "56.0.2924.76",
+      "major": 56,
+      "releasedAt": "2017-01-25T22:40:03.302Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/55.0.2883.87/releases/1481307007"
+      ],
+      "exactVersion": "55.0.2883.87",
+      "major": 55,
+      "releasedAt": "2016-12-09T18:10:07.357Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/55.0.2883.75/releases/1480632912"
+      ],
+      "exactVersion": "55.0.2883.75",
+      "major": 55,
+      "releasedAt": "2016-12-01T22:55:12.628Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/54.0.2840.99/releases/1478732532"
+      ],
+      "exactVersion": "54.0.2840.99",
+      "major": 54,
+      "releasedAt": "2016-11-09T23:02:12.620Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/54.0.2840.87/releases/1478023924"
+      ],
+      "exactVersion": "54.0.2840.87",
+      "major": 54,
+      "releasedAt": "2016-11-01T18:12:04.425Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/54.0.2840.71/releases/1476998343"
+      ],
+      "exactVersion": "54.0.2840.71",
+      "major": 54,
+      "releasedAt": "2016-10-20T21:19:03.948Z"
+    }
+  ]
+}

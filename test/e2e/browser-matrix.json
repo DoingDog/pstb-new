@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 4,
+  "releaseDate": "2026-09-22",
+  "targets": [
+    {
+      "product": "Chrome",
+      "slot": "current",
+      "major": 153,
+      "exactVersion": "153.0.8010.53",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/chrome-stable.json",
+      "sourceSha256": "0956881495d10ca5fd53108fbb279187b691ee5fe8008ea20e4a3a46979580f6"
+    },
+    {
+      "product": "Chrome",
+      "slot": "previous",
+      "major": 152,
+      "exactVersion": "152.0.7977.83",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/chrome-stable.json",
+      "sourceSha256": "0956881495d10ca5fd53108fbb279187b691ee5fe8008ea20e4a3a46979580f6"
+    },
+    {
+      "product": "Edge",
+      "slot": "current",
+      "major": 153,
+      "exactVersion": "153.0.4234.48",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/edge-stable.json",
+      "sourceSha256": "e6ca7bf5b7d48249ee3b6f30fb91df554b1bfbf46b9fe3712a8642cf2df18164"
+    },
+    {
+      "product": "Edge",
+      "slot": "previous",
+      "major": 152,
+      "exactVersion": "152.0.4191.96",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/edge-stable.json",
+      "sourceSha256": "e6ca7bf5b7d48249ee3b6f30fb91df554b1bfbf46b9fe3712a8642cf2df18164"
+    },
+    {
+      "product": "Firefox",
+      "slot": "current",
+      "major": 155,
+      "exactVersion": "155.0.1",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/firefox-stable.json",
+      "sourceSha256": "641b2bf22ba7f305b68ca655048e9d90cce61ac5f7fe51ac239ab18a0ead6ac5"
+    },
+    {
+      "product": "Firefox",
+      "slot": "previous",
+      "major": 154,
+      "exactVersion": "154.0.1",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/firefox-stable.json",
+      "sourceSha256": "641b2bf22ba7f305b68ca655048e9d90cce61ac5f7fe51ac239ab18a0ead6ac5"
+    },
+    {
+      "product": "Safari",
+      "slot": "current",
+      "major": 27,
+      "exactVersion": "27",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/safari-stable.json",
+      "sourceSha256": "27e2dafee9dc1fa0bdcebbae271d98a48940a75ee41ddb672907071f88bc9f69"
+    },
+    {
+      "product": "Safari",
+      "slot": "previous",
+      "major": 26,
+      "exactVersion": "26.6.1",
+      "sourceArtifact": "test/e2e/evidence/browser-target-sources/safari-stable.json",
+      "sourceSha256": "27e2dafee9dc1fa0bdcebbae271d98a48940a75ee41ddb672907071f88bc9f69"
+    }
+  ],
+  "rows": [],
+  "engineCoverage": []
+}
