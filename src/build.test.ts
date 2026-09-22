@@ -1,7 +1,10 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { createServer } from "node:http";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
@@ -404,16 +407,153 @@ describe("build contract", () => {
     expect(notices).not.toMatch(/\n\n$/u);
   });
 
-  it("uses a Windows PowerShell 5.1-compatible smoke response helper", async () => {
-    const smoke = await readFile("scripts/smoke.ps1", "utf8");
+  it("executes the extracted smoke helper in Windows PowerShell 5.1", async () => {
+    if (process.platform !== "win32") return;
 
-    expect(smoke).not.toContain("-SkipHttpErrorCheck");
-    expect(smoke).toContain("function Invoke-HttpResponse");
-    expect(smoke).toContain("[System.Net.HttpWebRequest]");
-    expect(smoke).toContain("-TimeoutMilliseconds $timeoutMilliseconds");
-    expect(smoke).toContain("taskkill.exe /PID $server.Id /T /F");
-    expect(smoke).toContain("Stop-Process -Id $listener.OwningProcess");
-    expect(smoke).toContain('$notModified.Headers["Content-Length"]');
-    expect(smoke).toContain('$notModified.Headers["Trailer"]');
-  });
+    const runPowerShell = (arguments_: string[]) => new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveResult, reject) => {
+      const child = spawn("powershell.exe", arguments_, { windowsHide: true });
+      let stdout = "";
+      let stderr = "";
+      const timeout = setTimeout(() => child.kill(), 5_000);
+
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.once("error", (error: NodeJS.ErrnoException) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        resolveResult({ code, stdout, stderr });
+      });
+    });
+
+    let version;
+    try {
+      version = await runPowerShell(["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!/^5\.1\./u.test(version.stdout.trim())) return;
+    expect(version.code).toBe(0);
+
+    const requests = new Map<string, { method: string; headers: Record<string, string | string[] | undefined>; body: string }>();
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const path = request.url ?? "/";
+        requests.set(path, { method: request.method ?? "", headers: request.headers, body: Buffer.concat(chunks).toString("utf8") });
+        if (path === "/get") {
+          response.end("get");
+        } else if (path === "/post") {
+          response.statusCode = 201;
+          response.end("created");
+        } else if (path === "/empty") {
+          response.statusCode = 204;
+          response.end();
+        } else if (path === "/missing") {
+          response.statusCode = 418;
+          response.end("missing");
+        } else if (path === "/not-modified") {
+          response.statusCode = 304;
+          response.setHeader("ETag", "\"test-etag\"");
+          response.setHeader("Cache-Control", "no-store");
+          response.end();
+        } else if (path === "/slow") {
+          setTimeout(() => response.end("slow"), 2_000);
+        } else {
+          response.statusCode = 404;
+          response.end();
+        }
+      });
+    });
+
+    await new Promise<void>((resolveServer, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolveServer();
+      });
+    });
+
+    let temporaryDirectory: string | undefined;
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("Local smoke helper endpoint did not bind to a TCP port");
+      const smoke = await readFile("scripts/smoke.ps1", "utf8");
+      const helperEnd = smoke.indexOf("\nnpm run build\n");
+      expect(helperEnd).toBeGreaterThan(0);
+      temporaryDirectory = await mkdtemp(join(tmpdir(), "cf-pastebin-smoke-helper-"));
+      const scriptPath = join(temporaryDirectory, "helper.ps1");
+      const base = `http://127.0.0.1:${address.port}`;
+      await writeFile(scriptPath, `${smoke.slice(0, helperEnd)}
+
+$get = Invoke-HttpResponse \"${base}/get\" -TimeoutMilliseconds 1000
+$post = Invoke-HttpResponse \"${base}/post\" -Method POST -ContentType \"application/json; charset=utf-8\" -Headers @{ \"X-Test\" = \"utf8\" } -Body '{\"message\":\"héllø 世界\"}' -TimeoutMilliseconds 1000
+$empty = Invoke-HttpResponse \"${base}/empty\" -Method POST -Body \"\" -TimeoutMilliseconds 1000
+$missing = Invoke-HttpResponse \"${base}/missing\" -TimeoutMilliseconds 1000
+$notModified = Invoke-HttpResponse \"${base}/not-modified\" -TimeoutMilliseconds 1000
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$timedOut = $false
+try {
+  Invoke-HttpResponse \"${base}/slow\" -TimeoutMilliseconds 250 | Out-Null
+} catch [System.Net.WebException] {
+  $timedOut = $true
+} finally {
+  $stopwatch.Stop()
+}
+[pscustomobject]@{
+  get = [pscustomobject]@{ status = $get.StatusCode; content = $get.Content }
+  post = [pscustomobject]@{ status = $post.StatusCode; content = $post.Content }
+  empty = [pscustomobject]@{ status = $empty.StatusCode; content = $empty.Content }
+  missing = [pscustomobject]@{ status = $missing.StatusCode; content = $missing.Content }
+  notModified = [pscustomobject]@{ status = $notModified.StatusCode; etag = [string]$notModified.Headers[\"ETag\"]; cacheControl = [string]$notModified.Headers[\"Cache-Control\"]; hasContentLength = $null -ne $notModified.Headers[\"Content-Length\"]; hasContentType = $null -ne $notModified.Headers[\"Content-Type\"]; hasTrailer = $null -ne $notModified.Headers[\"Trailer\"]; content = $notModified.Content }
+  timedOut = $timedOut
+  timeoutMilliseconds = $stopwatch.ElapsedMilliseconds
+} | ConvertTo-Json -Depth 4 -Compress
+`, "utf8");
+
+      const result = await runPowerShell(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+      expect(result.code, result.stderr).toBe(0);
+      const output = JSON.parse(result.stdout) as {
+        get: { status: number; content: string };
+        post: { status: number; content: string };
+        empty: { status: number; content: string };
+        missing: { status: number; content: string };
+        notModified: { status: number; etag: string; cacheControl: string; hasContentLength: boolean; hasContentType: boolean; hasTrailer: boolean; content: string };
+        timedOut: boolean;
+        timeoutMilliseconds: number;
+      };
+
+      expect(output.get).toEqual({ status: 200, content: "get" });
+      expect(output.post).toEqual({ status: 201, content: "created" });
+      expect(output.empty).toEqual({ status: 204, content: "" });
+      expect(output.missing).toEqual({ status: 418, content: "missing" });
+      expect(output.notModified).toEqual({
+        status: 304,
+        etag: "\"test-etag\"",
+        cacheControl: "no-store",
+        hasContentLength: false,
+        hasContentType: false,
+        hasTrailer: false,
+        content: "",
+      });
+      expect(output.timedOut).toBe(true);
+      expect(output.timeoutMilliseconds).toBeLessThan(1_500);
+      expect(requests.get("/get")).toMatchObject({ method: "GET", body: "" });
+      expect(requests.get("/get")!.headers).not.toHaveProperty("content-length");
+      expect(requests.get("/get")!.headers).not.toHaveProperty("content-type");
+      expect(requests.get("/post")).toMatchObject({ method: "POST", body: "{\"message\":\"héllø 世界\"}" });
+      expect(requests.get("/post")!.headers).toMatchObject({ "content-type": "application/json; charset=utf-8", "x-test": "utf8" });
+      expect(requests.get("/empty")).toMatchObject({ method: "POST", body: "" });
+      expect(requests.get("/empty")!.headers).toMatchObject({ "content-length": "0" });
+    } finally {
+      if (temporaryDirectory !== undefined) await rm(temporaryDirectory, { force: true, recursive: true });
+      await new Promise<void>((resolveServer, reject) => server.close((error) => error === undefined ? resolveServer() : reject(error)));
+    }
+  }, 15_000);
 });

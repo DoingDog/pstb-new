@@ -16,13 +16,13 @@ function Invoke-HttpResponse {
   $request.Method = $Method
   $request.Timeout = $TimeoutMilliseconds
   $request.ReadWriteTimeout = $TimeoutMilliseconds
-  if ($null -ne $ContentType) { $request.ContentType = $ContentType }
+  if ($PSBoundParameters.ContainsKey("ContentType")) { $request.ContentType = $ContentType }
   if ($null -ne $Headers) {
     foreach ($header in $Headers.GetEnumerator()) {
       $request.Headers[[string]$header.Key] = [string]$header.Value
     }
   }
-  if ($null -ne $Body) {
+  if ($PSBoundParameters.ContainsKey("Body")) {
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Body)
     $request.ContentLength = $bodyBytes.Length
     $requestStream = $request.GetRequestStream()
