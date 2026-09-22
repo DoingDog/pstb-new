@@ -1,0 +1,14 @@
+<output id="active-html-marker"></output>
+<script>
+const marker = { origin: location.origin, search: location.search };
+globalThis.__cfpbActiveHtmlMarker = marker;
+const output = document.querySelector("#active-html-marker");
+output.textContent = JSON.stringify(marker);
+void fetch("/ip-trace?active-html-marker=1")
+  .then((response) => {
+    output.dataset.fetchStatus = String(response.status);
+  })
+  .catch(() => {
+    output.dataset.fetchStatus = "error";
+  });
+</script>
