@@ -29,6 +29,14 @@ const budgets = Object.freeze({
   files: 8 * 1024 * 1024,
 });
 
+const markdownRootNames = Object.freeze(["micromark", "micromark-extension-gfm"]);
+const crepeRootSources = Object.freeze([
+  "node_modules/@milkdown/crepe/lib/esm/index.js",
+  "node_modules/@milkdown/kit/lib/core.js",
+  "node_modules/@milkdown/kit/lib/prose/state.js",
+]);
+const sharedInitialRecordNames = Object.freeze(["button", "clsx", "jsx-runtime", "rolldown-runtime"]);
+
 function normalizedPath(path) {
   return path.split(sep).join("/");
 }
@@ -248,10 +256,62 @@ function staticRecordClosure(manifest, rootKeys) {
   return keys;
 }
 
+function emittedFilesForRecords(manifest, keys) {
+  const paths = new Set();
+  for (const key of keys) {
+    const record = manifestRecord(manifest, key);
+    paths.add(emittedPath(record.file, `Manifest record ${key}`));
+    for (const path of stringList(record.css, `${key} css`)) paths.add(emittedPath(path, `${key} css`));
+    for (const path of stringList(record.assets, `${key} assets`)) paths.add(emittedPath(path, `${key} assets`));
+  }
+  return paths;
+}
+
+function staticEmittedFileClosure(manifest, rootKeys) {
+  return emittedFilesForRecords(manifest, staticRecordClosure(manifest, rootKeys));
+}
+
+function sharedInitialRecords(manifest, initial) {
+  const shared = new Set();
+  if (initial.has("index.html")) shared.add("index.html");
+  for (const key of initial) {
+    if (sharedInitialRecordNames.includes(manifestRecord(manifest, key).name)) shared.add(key);
+  }
+  return shared;
+}
+
+export function resolveMarkdownRoots(manifest) {
+  const dynamicImports = stringList(manifestRecord(manifest, "index.html").dynamicImports, "index.html dynamicImports");
+  return markdownRootNames.map((name) => requireSingle(
+    dynamicImports.filter((key) => manifestRecord(manifest, key).name === name),
+    `Markdown dynamic root named ${name}`,
+  ));
+}
+
+function resolveCrepeRoots(manifest) {
+  const dynamicImports = stringList(manifestRecord(manifest, "index.html").dynamicImports, "index.html dynamicImports");
+  return crepeRootSources.map((source) => {
+    const key = findSourceRecord(manifest, source);
+    if (!dynamicImports.includes(key)) throw new Error(`index.html must directly dynamically import ${source}`);
+    return key;
+  });
+}
+
 export function assertDynamicRootsOutsideInitial(manifest, rootKeys, group) {
   const initial = staticRecordClosure(manifest, ["index.html"]);
+  const initialFiles = staticEmittedFileClosure(manifest, ["index.html"]);
+  const sharedRecords = sharedInitialRecords(manifest, initial);
+  const sharedFiles = emittedFilesForRecords(manifest, sharedRecords);
   for (const rootKey of rootKeys) {
+    const lazyRecords = staticRecordClosure(manifest, [rootKey]);
+    const lazyFiles = staticEmittedFileClosure(manifest, [rootKey]);
     if (initial.has(rootKey)) throw new Error(`${group} dynamic root is reachable from the initial graph`);
+    if ([...lazyRecords].some((key) => initial.has(key) && !sharedRecords.has(key))) {
+      throw new Error(`${group} lazy implementation is reachable from the initial graph`);
+    }
+    if ([...lazyFiles].some((path) => initialFiles.has(path) && !sharedFiles.has(path))) {
+      throw new Error(`${group} lazy implementation asset is reachable from the initial graph`);
+    }
   }
 }
 
@@ -344,6 +404,11 @@ async function createClientAssetsManifest(manifest) {
   }
 
   const initial = await collectClosure(["index.html"]);
+  const markdownRoots = resolveMarkdownRoots(manifest);
+  const crepeRoots = resolveCrepeRoots(manifest);
+  assertDynamicRootsOutsideInitial(manifest, markdownRoots, "Markdown");
+  assertDynamicRootsOutsideInitial(manifest, crepeRoots, "Crepe");
+  assertDynamicRootsOutsideInitial(manifest, ["src/client/diff.ts"], "diff");
   const pageClosures = {};
   const pageRoots = {};
   for (const pageName of pageNames) {
@@ -356,19 +421,6 @@ async function createClientAssetsManifest(manifest) {
   }
 
   const applicationPages = sortedPaths(Object.values(pageClosures).flat());
-  const markdownRoots = stringList(indexEntry.dynamicImports, "index.html dynamicImports")
-    .filter((key) => {
-      const record = manifestRecord(manifest, key);
-      return record.name === "micromark" || record.name === "micromark-extension-gfm";
-    });
-  const crepeRoots = Object.entries(manifest)
-    .filter(([, record]) => isRecord(record) && typeof record.src === "string" && record.src.startsWith("node_modules/@milkdown/"))
-    .map(([key]) => key);
-  if (!markdownRoots.length || !crepeRoots.length) throw new Error("Vite manifest is missing the lazy Markdown or Crepe graph");
-  assertDynamicRootsOutsideInitial(manifest, markdownRoots, "Markdown");
-  assertDynamicRootsOutsideInitial(manifest, crepeRoots, "Crepe");
-  assertDynamicRootsOutsideInitial(manifest, ["src/client/diff.ts"], "diff");
-
   const markdown = markdownBudgetPaths(
     await collectClosure(markdownRoots),
     initial,

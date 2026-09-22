@@ -9,10 +9,11 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
 
-const { assertDynamicRootsOutsideInitial, markdownBudgetPaths, resolveManifestAssets } = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
+const { assertDynamicRootsOutsideInitial, markdownBudgetPaths, resolveManifestAssets, resolveMarkdownRoots } = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
   assertDynamicRootsOutsideInitial(manifest: Record<string, unknown>, rootKeys: string[], group: string): void;
   markdownBudgetPaths(markdownClosure: Iterable<string>, initial: Iterable<string>, pageClosures: Record<string, string[]>): string[];
   resolveManifestAssets(manifest: Record<string, unknown>): { appJs: string; appCss: string; diffWorker: string };
+  resolveMarkdownRoots(manifest: Record<string, unknown>): string[];
 };
 
 const dependencies = {
@@ -234,6 +235,48 @@ describe("build contract", () => {
 
     expect(() => assertDynamicRootsOutsideInitial(eagerMarkdownManifest, ["micromark"], "Markdown")).toThrow(
       "Markdown dynamic root is reachable from the initial graph",
+    );
+  });
+
+  it("rejects an eager static implementation of an otherwise dynamic root", () => {
+    const eagerMarkdownImplementationManifest = {
+      "index.html": {
+        file: "assets/app-entry.js",
+        src: "index.html",
+        isEntry: true,
+        imports: ["markdown-implementation"],
+      },
+      micromark: {
+        file: "assets/micromark-entry.js",
+        name: "micromark",
+        imports: ["markdown-implementation"],
+      },
+      "markdown-implementation": {
+        file: "assets/markdown-implementation.js",
+      },
+    };
+
+    expect(() => assertDynamicRootsOutsideInitial(eagerMarkdownImplementationManifest, ["micromark"], "Markdown")).toThrow(
+      "Markdown lazy implementation is reachable from the initial graph",
+    );
+  });
+
+  it("requires both pinned Markdown roots", () => {
+    const missingMarkdownRootManifest = {
+      "index.html": {
+        file: "assets/app-entry.js",
+        src: "index.html",
+        isEntry: true,
+        dynamicImports: ["micromark"],
+      },
+      micromark: {
+        file: "assets/micromark-entry.js",
+        name: "micromark",
+      },
+    };
+
+    expect(() => resolveMarkdownRoots(missingMarkdownRootManifest)).toThrow(
+      "Expected one Markdown dynamic root named micromark-extension-gfm",
     );
   });
 
