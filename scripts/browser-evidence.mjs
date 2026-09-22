@@ -704,7 +704,23 @@ async function acquireVendor(product, context, fetchImpl, options) {
   let url = config.url;
   const tokens = new Set();
   while (true) {
-    const body = await deadlineOperation(context, (signal) => fetchResponse(fetchImpl, url, signal), options);
+    let body;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const result = await deadlineOperation(context, async (signal) => {
+        const response = await fetchImpl(url, { redirect: "error", signal });
+        return { status: response?.status, body: response?.status === 200 || response?.status === 400 ? Buffer.from(await response.arrayBuffer()) : undefined };
+      }, options);
+      if (result.status === 200) {
+        body = result.body;
+        break;
+      }
+      let retryable = false;
+      try {
+        const error = JSON.parse(result.body.toString("utf8"));
+        retryable = isObject(error) && isObject(error.error) && error.error.code === 400 && error.error.status === "INVALID_ARGUMENT";
+      } catch {}
+      if (url === config.url || result.status !== 400 || !retryable || attempt === 5) fail(`Official vendor source did not return HTTP 200: ${url}`);
+    }
     const payload = json(body.toString("utf8"), "Chrome response");
     bodies.push(body);
     payloads.push(payload);
@@ -1654,13 +1670,16 @@ async function browserSelfTest() {
   };
   try {
     const retrievedAt = "2026-09-13T12:00:00.000Z";
-    const acquisitionRoot = resolve(dir, "acquisition");
-    const acquisitionResponses = new Map([
-      [sourceConfigurations.Chrome.url, JSON.stringify({ releases: [
-        { fraction: 1, name: "chrome-120", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
-        { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
-        { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
-      ] })],
+    const chromeContinuationUrl = `${sourceConfigurations.Chrome.url}&page_token=continuation%20token`;
+    const chromeFirstBody = JSON.stringify({ releases: [
+      { fraction: 1, name: "chrome-120", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
+    ], nextPageToken: "continuation token" });
+    const chromeContinuationBody = JSON.stringify({ releases: [
+      { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
+      { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
+    ] });
+    const retryableChromeError = JSON.stringify({ error: { code: 400, status: "INVALID_ARGUMENT" } });
+    const vendorResponses = [
       [sourceConfigurations.Edge.url, JSON.stringify([{ Product: "Stable", Releases: [
         { Platform: "Windows", Architecture: "x64", ReleaseId: 120, ProductVersion: "120.0", PublishedTime: "2026-09-10T00:00:00" },
         { Platform: "Windows", Architecture: "x64", ReleaseId: 117, ProductVersion: "117.0", PublishedTime: "2026-09-09T00:00:00" },
@@ -1668,16 +1687,50 @@ async function browserSelfTest() {
       ] }])],
       [sourceConfigurations.Firefox.url, JSON.stringify({ "120.0": "2026-09-10", "117.0": "2026-09-09", "111.0": "2026-09-08" })],
       [sourceConfigurations.Safari.url, "<table><tr><th>Name and information link</th><th>Available for</th><th>Release date</th></tr><tr><td>Safari 120.0</td><td>x</td><td>10 Sep 2026</td></tr><tr><td>Safari 117.0</td><td>x</td><td>09 Sep 2026</td></tr><tr><td>Safari 111.0</td><td>x</td><td>08 Sep 2026</td></tr></table>"],
-    ]);
-    await acquireTargets({ repoRoot: acquisitionRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: async (url) => {
-      const body = acquisitionResponses.get(url);
-      if (body === undefined) return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-      return { status: 200, arrayBuffer: async () => Buffer.from(body) };
-    } });
+    ];
+    const queuedFetch = (responses, calls) => async (url) => {
+      calls.push(url);
+      const response = responses.get(url)?.shift();
+      if (response === undefined) return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      return { status: response.status, arrayBuffer: async () => Buffer.from(response.body) };
+    };
+    const acquisitionRoot = resolve(dir, "acquisition");
+    const acquisitionCalls = [];
+    await acquireTargets({ repoRoot: acquisitionRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+      [chromeContinuationUrl, [
+        { status: 400, body: retryableChromeError },
+        { status: 400, body: retryableChromeError },
+        { status: 200, body: chromeContinuationBody },
+      ]],
+      ...vendorResponses.map(([url, body]) => [url, [{ status: 200, body }]]),
+    ]), acquisitionCalls) });
     for (const product of productNames) {
       const artifact = await readJson(acquisitionRoot, sourceConfigurations[product].artifact);
       equal(artifact.retrievedAt, retrievedAt, `${product} acquisition timestamp`);
     }
+    const acquiredChrome = await readJson(acquisitionRoot, sourceConfigurations.Chrome.artifact);
+    equal(acquisitionCalls.filter((url) => url === chromeContinuationUrl).length, 3, "Chrome continuation retries exact URL");
+    equal(acquiredChrome.source.responseCount, 2, "Chrome retryable failures are excluded from response count");
+    equal(acquiredChrome.source.responseSha256, "4ad02dbc8acdae5900950d5e361c41739e8810fb983058abaa2c6796d895a2db", "Chrome retryable failures are excluded from response hash");
+
+    const exhaustedRoot = resolve(dir, "chrome-retry-exhausted");
+    const exhaustionCalls = [];
+    await expectThrows(() => acquireTargets({ repoRoot: exhaustedRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+      [chromeContinuationUrl, Array.from({ length: 6 }, () => ({ status: 400, body: retryableChromeError }))],
+    ]), exhaustionCalls) }), "Chrome retry exhaustion makes no writes");
+    equal(exhaustionCalls.filter((url) => url === chromeContinuationUrl).length, 6, "Chrome continuation stops after six physical attempts");
+    equal(existsSync(exhaustedRoot), false, "Chrome retry exhaustion performs no writes");
+
+    const non400Root = resolve(dir, "chrome-continuation-non-400");
+    const non400Calls = [];
+    await expectThrows(() => acquireTargets({ repoRoot: non400Root, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+      [chromeContinuationUrl, [{ status: 500, body: "server failure" }]],
+    ]), non400Calls) }), "Chrome non-400 continuation fails without retry");
+    equal(non400Calls.filter((url) => url === chromeContinuationUrl).length, 1, "Chrome non-400 continuation is not retried");
+    equal(existsSync(non400Root), false, "Chrome non-400 continuation performs no writes");
     const chrome = normalizeChromePayloads([{ releases: [
       { fraction: 1, name: "a", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
       { fraction: 1, name: "b", version: "120.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
