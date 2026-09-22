@@ -67,6 +67,39 @@
       "sourceSha256": "27e2dafee9dc1fa0bdcebbae271d98a48940a75ee41ddb672907071f88bc9f69"
     }
   ],
-  "rows": [],
+  "rows": [
+    {
+      "product": "Safari",
+      "slot": "current",
+      "environment": "macos-safari-current",
+      "targetMajor": 27,
+      "observedVersion": null,
+      "mode": "manual-branded",
+      "status": "not-available",
+      "testedAt": "2026-09-22T10:54:05.429Z",
+      "captureReceipt": null,
+      "smokeReceipt": null,
+      "unavailableReceipt": {
+        "path": "test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json",
+        "sha256": "c432418beb6daf5225a3ad0d6b9900025eb64294257c122970d53b9aae2eac10"
+      }
+    },
+    {
+      "product": "Safari",
+      "slot": "previous",
+      "environment": "macos-safari-previous",
+      "targetMajor": 26,
+      "observedVersion": null,
+      "mode": "manual-branded",
+      "status": "not-available",
+      "testedAt": "2026-09-22T10:54:05.429Z",
+      "captureReceipt": null,
+      "smokeReceipt": null,
+      "unavailableReceipt": {
+        "path": "test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json",
+        "sha256": "63a137a81c454c5c0985cda002d5e113e5c42381ec1435c0a826871f8b376fdd"
+      }
+    }
+  ],
   "engineCoverage": []
 }

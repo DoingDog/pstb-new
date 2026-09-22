@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-09-22",
+  "product": "Safari",
+  "slot": "current",
+  "environment": "macos-safari-current",
+  "testedAt": "2026-09-22T10:54:05.429Z",
+  "reporter": "Claude Code release controller",
+  "target": {
+    "sourceArtifact": "test/e2e/evidence/browser-target-sources/safari-stable.json",
+    "sourceSha256": "27e2dafee9dc1fa0bdcebbae271d98a48940a75ee41ddb672907071f88bc9f69",
+    "exactVersion": "27",
+    "major": 27
+  },
+  "failure": "runner-not-provisioned",
+  "notes": "No macOS runner with the target Safari major is provisioned for this release campaign; Safari was not run or claimed on the Windows release controller."
+}
