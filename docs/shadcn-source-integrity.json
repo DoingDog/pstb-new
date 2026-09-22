@@ -8,82 +8,82 @@
     {
       "localPath": "src/client/App.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/blocks/sidebar-11/page.tsx",
-      "sha256": "0d1167643511d9afc6cb4b8d93be11b5df737e8e87102b6c51d9f7ada8cd0424"
+      "sha256": "d877220dadd17e8b74396ebf9dd3247a944cd9093504e155f3657ef07e19b85b"
     },
     {
       "localPath": "src/client/components/app-sidebar.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/blocks/sidebar-11/components/app-sidebar.tsx",
-      "sha256": "7418df59a72fe29f88f6c9cdd6a5d187883801e22c73cdba623a5511ae021f4d"
+      "sha256": "fc8eb22017dcfc98d217d680649f7fbd5a1ffa90130c561cca6fed94d3254c58"
     },
     {
       "localPath": "src/client/components/ui/sidebar.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
-      "sha256": "fb2960fc909a1ad987efd0f113bb7800dd5b77a87c85d255349c1490fae80b60"
+      "sha256": "b943647eca8d6add6e9a84a2f8cf4f6e75d79755f8eb9522717a62c331363768"
     },
     {
       "localPath": "src/client/components/ui/sheet.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/sheet.tsx",
-      "sha256": "7aa17c8c19e2154224b2523212f0ded53c64bc80a9bb997f560d0231835b63c3"
+      "sha256": "39188e283b222f8ca5be9380ce55b96733db779e01a8cba7f6e5b44a99e71b54"
     },
     {
       "localPath": "src/client/components/ui/breadcrumb.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/breadcrumb.tsx",
-      "sha256": "2ba893135a4ee366c7908d78e96faf45e3a9eafea65bc2d656ca58cd6204ee94"
+      "sha256": "ffac4dd0249ee8763a7a0ac5ca4954ba12f52931b90e303e45f7bf603a11a3b3"
     },
     {
       "localPath": "src/client/components/ui/collapsible.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/collapsible.tsx",
-      "sha256": "0b0530353119a13c5ebec52bdb9adc5575fdade871ffff5e6bd31066599da4f9"
+      "sha256": "00cfc4083eae423b569d5dc540be4aac5cf7a58bd3b2851e53af7c03eced3112"
     },
     {
       "localPath": "src/client/components/ui/dialog.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/dialog.tsx",
-      "sha256": "e5f8b1772384325505ee04c459c7cae29c26f4c911052f36e62b30c16bcd1f84"
+      "sha256": "4aa6fd48c513fffab19074257e4294f00593892bb2a19c531436a8aa82a814e3"
     },
     {
       "localPath": "src/client/components/ui/tooltip.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/tooltip.tsx",
-      "sha256": "74f62fe8fd52370d5ae2e298f5e95475af6263028e959b1c7e7aaf78662e504c"
+      "sha256": "26b953aab49c0d748cc68d11fd01bcf9ba0a479b03322632836372ea9133f221"
     },
     {
       "localPath": "src/client/components/ui/tabs.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/tabs.tsx",
-      "sha256": "a82b7f1f47e81ddcbe89ef6e10b4d854433805aed017b107fb45463d05d591f8"
+      "sha256": "f6a47bebc5c8d72f88eab00cbb6b323082fbb21fe9736bb3dd5104f62ee1139f"
     },
     {
       "localPath": "src/client/components/ui/field.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/field.tsx",
-      "sha256": "41a5e1fa5e089554556d30e6c82386ee87e07d6a394ec8bbd875d619c95ac48f"
+      "sha256": "8f7f6b3cd928350ff5c2e49c5f659fb86182e1e40db2c7b8570ae40544e7be67"
     },
     {
       "localPath": "src/client/components/ui/label.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/label.tsx",
-      "sha256": "2638dcbc97b5ff8beeebff3d5933c16961a3f2992a179c498e0942bd1fab4361"
+      "sha256": "9a39f67c2941a417ce7df3c66d217f91f7351f31d4ccd41418fa6e1a88ce8c0b"
     },
     {
       "localPath": "src/client/components/ui/input.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/input.tsx",
-      "sha256": "8a6d349569812a10b32346060f0c6d74fb1347cbb754d175ff58fc38843a300a"
+      "sha256": "3621a95e0de15fc7ebe6637e1ae13324348611ad6d3c4b7b64d117d0016b6527"
     },
     {
       "localPath": "src/client/components/ui/textarea.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/textarea.tsx",
-      "sha256": "ee63c6e9427a51d79a804d76611907c2f8066f88b65e0d40cb17a1acf690433b"
+      "sha256": "5a9de8c485164ae3bfdeec3466d1775331414e090a2c23530697d8e5f7d4239e"
     },
     {
       "localPath": "src/client/components/ui/button.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/button.tsx",
-      "sha256": "d0576ce1eab08d160aa69807f0d11b7126b819bd358e968c0f45029cb7be894e"
+      "sha256": "88b6ece34e6b244e9c25d4de9f433d0fe31c2692c5206720914022470ef1725a"
     },
     {
       "localPath": "src/client/components/ui/separator.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/separator.tsx",
-      "sha256": "8887f8873944149cecd2f201ed059e8b80a9b665e6540e7e64c1055ec0723f5d"
+      "sha256": "74e88a4f194f99e81b4673f3d4ca7ace4c1c1f95b479f3a413c6c341c0c2b22c"
     },
     {
       "localPath": "src/client/hooks/use-mobile.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/hooks/use-mobile.tsx",
-      "sha256": "f980b9a896f121d783a2caa4b1189f4d8be44f35c4837be4efbcf217421608d4"
+      "sha256": "2d78f4506b1e227042e6a1fba6f4cbefb086e4dab41d815c28655f75fe3f332a"
     }
   ]
 }
