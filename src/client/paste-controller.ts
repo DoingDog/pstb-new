@@ -941,7 +941,14 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
       autosave: { state: "clean", confirmedAt: state.autosave.confirmedAt, failedAt: null },
     };
     const settle = (preparedState: InternalState, outcome: "succeeded" | "failed", settledAt: string): InternalState => {
-      if (action === null) return preparedState;
+      const currentAction = state.lastAction;
+      if (
+        action === null
+        || currentAction.state !== "pending"
+        || currentAction.key !== action.key
+        || currentAction.attempt !== action.attempt
+        || currentAction.startedAt !== action.startedAt
+      ) return { ...preparedState, lastAction: currentAction };
       return {
         ...preparedState,
         lastAction: {

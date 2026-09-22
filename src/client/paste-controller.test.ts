@@ -367,6 +367,44 @@ describe("PasteController prepared remote snapshots", () => {
     expect(controller.effects()).toEqual([]);
   });
 
+  it("preserves a newer action while committing canonical remote state", () => {
+    const { controller } = pasteControllerFixture();
+    const action = { key: "use-remote" as const, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
+    controller.recordLocalAction({ ...action, state: "pending" });
+    const prepared = controller.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(controller, action));
+    if (prepared === null) throw new Error("expected prepared remote snapshot");
+    const newer = { key: "copy" as const, attempt: 8, startedAt: "2026-09-20T00:00:01.000Z" };
+    controller.recordLocalAction({ ...newer, state: "pending" });
+
+    prepared.commit("2026-09-20T00:00:02.000Z");
+
+    expect(snapshot(controller)).toMatchObject({
+      acceptedSource: "remote",
+      draft: "remote",
+      lastSavedContent: "remote",
+      version: "g.2",
+      contentRevision: 2,
+      responseEtag: '"sha256-remote"',
+      mutation: { state: "idle" },
+    });
+    expect(snapshot(controller).lastAction).toEqual({ state: "pending", ...newer });
+  });
+
+  it("preserves a newer action when a prepared remote snapshot fails", () => {
+    const { controller } = pasteControllerFixture();
+    const action = { key: "reload-server" as const, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
+    controller.recordLocalAction({ ...action, state: "pending" });
+    const prepared = controller.prepareRemoteSnapshot(reloadSnapshot(), remoteApplyOptions(controller, action));
+    if (prepared === null) throw new Error("expected prepared remote snapshot");
+    const newer = { key: "download" as const, attempt: 8, startedAt: "2026-09-20T00:00:01.000Z" };
+    controller.recordLocalAction({ ...newer, state: "pending" });
+    const before = snapshot(controller);
+
+    prepared.fail("2026-09-20T00:00:02.000Z");
+
+    expect(snapshot(controller)).toEqual(before);
+  });
+
   it("settles a prepared remote snapshot at most once", () => {
     const { controller } = pasteControllerFixture();
     const action = { key: "use-remote" as const, attempt: 7, startedAt: "2026-09-20T00:00:00.000Z" };
