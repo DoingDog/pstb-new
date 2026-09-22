@@ -51,6 +51,25 @@ const devDependencies = {
   wrangler: "4.131.1",
 };
 
+const installedNotices = {
+  "@milkdown/crepe@7.22.1": "node_modules/@milkdown/crepe/LICENSE",
+  "@modelcontextprotocol/server@2.0.0": "node_modules/@modelcontextprotocol/server/LICENSE",
+  "class-variance-authority@0.7.1": "node_modules/class-variance-authority/LICENSE",
+  "cn@0.3.0": "node_modules/cn/LICENSE",
+  "diff@8.0.2": "node_modules/diff/LICENSE",
+  "hono@4.13.7": "node_modules/hono/LICENSE",
+  "lucide-react@1.45.0": "node_modules/lucide-react/LICENSE",
+  "micromark@4.0.2": "node_modules/micromark/license",
+  "micromark-extension-gfm@3.0.0": "node_modules/micromark-extension-gfm/license",
+  "radix-ui@1.6.7": "node_modules/radix-ui/LICENSE",
+  "react@19.3.0": "node_modules/react/LICENSE",
+  "react-dom@19.3.0": "node_modules/react-dom/LICENSE",
+  "tw-animate-css@1.4.0": "node_modules/tw-animate-css/LICENSE",
+  "typescript@7.0.2": "node_modules/typescript/LICENSE",
+  "TypeScript distributed NOTICE": "node_modules/typescript/NOTICE.txt",
+  "zod@4.6.4": "node_modules/zod/LICENSE",
+} as const;
+
 const scripts = {
   "build:client": "node scripts/build.mjs",
   build: "npm run build:client && tsc --noEmit",
@@ -163,6 +182,85 @@ function sourceComment(upstreamPath: string): string {
       ? `new-york-v4/${upstreamPath.slice("apps/v4/registry/new-york-v4/ui/".length, -".tsx".length)}`
       : upstreamPath;
   return `// Derived from shadcn-ui/ui ${source} at 2b3e6d4f8d9161fe5c19340dc383aade392012dd; MIT; see THIRD_PARTY_NOTICES.md.`;
+}
+
+const normalizeNotice = (value: string): string => value.replaceAll("\r\n", "\n").replace(/[\t ]+\n/gu, "\n").trim();
+
+const pinnedShadcnSourceNotice = [
+  "The following source was materialized or adapted from `shadcn-ui/ui` at commit `2b3e6d4f8d9161fe5c19340dc383aade392012dd`, using style `new-york-v4`, block `sidebar-11`, and `shadcn@4.21.0` for one-time materialization. The normal build does not invoke the shadcn CLI or a registry.",
+  "",
+  "### Block source paths",
+  "",
+  ...copiedSourceFiles
+    .filter(([, upstreamPath]) => upstreamPath.startsWith("apps/v4/registry/new-york-v4/blocks/sidebar-11/"))
+    .map(([localPath, upstreamPath]) => `- \`${upstreamPath}\` -> \`${localPath}\``),
+  "",
+  "### Materialized primitive and hook source paths",
+  "",
+  ...copiedSourceFiles
+    .filter(([, upstreamPath]) => !upstreamPath.startsWith("apps/v4/registry/new-york-v4/blocks/sidebar-11/"))
+    .map(([localPath, upstreamPath]) => `- \`${upstreamPath}\` -> \`${localPath}\``),
+].join("\n");
+
+const shadcnMitLicense = [
+  "Copyright (c) 2023 shadcn",
+  "",
+  "Permission is hereby granted, free of charge, to any person obtaining a copy",
+  "of this software and associated documentation files (the \"Software\"), to deal",
+  "in the Software without restriction, including without limitation the rights",
+  "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+  "copies of the Software, and to permit persons to whom the Software is",
+  "furnished to do so, subject to the following conditions:",
+  "",
+  "The above copyright notice and this permission notice shall be included in all",
+  "copies or substantial portions of the Software.",
+  "",
+  "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR",
+  "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,",
+  "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE",
+  "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+  "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,",
+  "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE",
+  "SOFTWARE.",
+].join("\n");
+
+function parseNoticeSections(notices: string): Map<string, string> {
+  const markdown = notices.replaceAll("\r\n", "\n");
+  const headings = [...markdown.matchAll(/^## (.+)$/gmu)];
+  const sections = new Map<string, string>();
+  for (const [index, heading] of headings.entries()) {
+    const name = heading[1]!;
+    if (sections.has(name)) throw new Error(`Duplicate third-party notice section: ${name}`);
+    const start = heading.index! + heading[0].length;
+    const end = headings[index + 1]?.index ?? markdown.length;
+    sections.set(name, markdown.slice(start, end));
+  }
+  return sections;
+}
+
+function requiredNoticeSection(sections: Map<string, string>, name: string): string {
+  const section = sections.get(name);
+  if (section === undefined) throw new Error(`Missing third-party notice section: ${name}`);
+  return section;
+}
+
+async function assertThirdPartyNotices(notices: string): Promise<void> {
+  const sections = parseNoticeSections(notices);
+  if (normalizeNotice(requiredNoticeSection(sections, "Pinned shadcn/ui source")) !== pinnedShadcnSourceNotice) {
+    throw new Error("Pinned shadcn/ui source section does not match expected content");
+  }
+  if (normalizeNotice(requiredNoticeSection(sections, "shadcn/ui MIT License")) !== shadcnMitLicense) {
+    throw new Error("shadcn/ui MIT License section does not match expected content");
+  }
+  for (const [packageName, sourcePath] of Object.entries(installedNotices)) {
+    const installedNotice = normalizeNotice(await readFile(sourcePath, "utf8"));
+    if (normalizeNotice(requiredNoticeSection(sections, packageName)) !== installedNotice) {
+      throw new Error(`Notice section ${packageName} does not match ${sourcePath}`);
+    }
+  }
+  expect(notices).not.toMatch(/[\t ]+$/mu);
+  expect(notices).toMatch(/\n$/u);
+  expect(notices).not.toMatch(/\n\n$/u);
 }
 
 describe("build contract", () => {
@@ -417,37 +515,58 @@ describe("build contract", () => {
     expect(manifest.files.reduce((total, file) => total + file.bytes, 0)).toBeLessThanOrEqual(8 * 1024 * 1024);
   });
 
-  it("records exact installed third-party notices", async () => {
-    const notices = await readFile("THIRD_PARTY_NOTICES.md", "utf8");
-    const normalize = (value: string): string => value.replaceAll("\r\n", "\n").replace(/[\t ]+\n/gu, "\n").trim();
-    const installedNotices = {
-      "@milkdown/crepe@7.22.1": "node_modules/@milkdown/crepe/LICENSE",
-      "@modelcontextprotocol/server@2.0.0": "node_modules/@modelcontextprotocol/server/LICENSE",
-      "class-variance-authority@0.7.1": "node_modules/class-variance-authority/LICENSE",
-      "cn@0.3.0": "node_modules/cn/LICENSE",
-      "diff@8.0.2": "node_modules/diff/LICENSE",
-      "hono@4.13.7": "node_modules/hono/LICENSE",
-      "lucide-react@1.45.0": "node_modules/lucide-react/LICENSE",
-      "micromark@4.0.2": "node_modules/micromark/license",
-      "micromark-extension-gfm@3.0.0": "node_modules/micromark-extension-gfm/license",
-      "radix-ui@1.6.7": "node_modules/radix-ui/LICENSE",
-      "react@19.3.0": "node_modules/react/LICENSE",
-      "react-dom@19.3.0": "node_modules/react-dom/LICENSE",
-      "tw-animate-css@1.4.0": "node_modules/tw-animate-css/LICENSE",
-      "typescript@7.0.2": "node_modules/typescript/LICENSE",
-      "TypeScript distributed NOTICE": "node_modules/typescript/NOTICE.txt",
-      "zod@4.6.4": "node_modules/zod/LICENSE",
-    } as const;
+  it("rejects notice mutations that document-wide containment accepts", async () => {
+    const notices = (await readFile("THIRD_PARTY_NOTICES.md", "utf8")).replaceAll("\r\n", "\n");
+    const section = (heading: string): string => {
+      const start = notices.indexOf(`## ${heading}\n`);
+      const end = notices.indexOf("\n## ", start + 1);
+      return notices.slice(start, end === -1 ? notices.length : end);
+    };
+    const diffSection = section("diff@8.0.2");
+    const swappedHeadingNotices = notices
+      .replace("## diff@8.0.2", "## swapped package heading")
+      .replace("## hono@4.13.7", "## diff@8.0.2")
+      .replace("## swapped package heading", "## hono@4.13.7");
 
-    expect(notices).toContain("shadcn@4.21.0");
-    expect(notices).toContain("2b3e6d4f8d9161fe5c19340dc383aade392012dd");
-    for (const [, upstreamPath] of copiedSourceFiles) expect(notices).toContain(upstreamPath);
-    for (const [packageName, sourcePath] of Object.entries(installedNotices)) {
-      expect(normalize(notices), packageName).toContain(normalize(await readFile(sourcePath, "utf8")));
+    for (const { mutated, reason } of [
+      {
+        mutated: swappedHeadingNotices,
+        reason: "Notice section diff@8.0.2 does not match node_modules/diff/LICENSE",
+      },
+      {
+        mutated: notices.replace("## hono@4.13.7", `${diffSection}\n\n## hono@4.13.7`),
+        reason: "Duplicate third-party notice section: diff@8.0.2",
+      },
+      {
+        mutated: notices.replace(diffSection, ""),
+        reason: "Missing third-party notice section: diff@8.0.2",
+      },
+      {
+        mutated: notices.replace("## Pinned shadcn/ui source\n\n", ""),
+        reason: "Missing third-party notice section: Pinned shadcn/ui source",
+      },
+      {
+        mutated: notices.replace("one-time materialization", "one time materialization"),
+        reason: "Pinned shadcn/ui source section does not match expected content",
+      },
+      {
+        mutated: notices.replace("Copyright (c) 2023 shadcn", "Copyright (c) 2024 shadcn"),
+        reason: "shadcn/ui MIT License section does not match expected content",
+      },
+    ]) {
+      expect(mutated, reason).not.toBe(notices);
+      try {
+        await assertThirdPartyNotices(mutated);
+      } catch (error) {
+        expect(error).toHaveProperty("message", reason);
+        continue;
+      }
+      throw new Error(`Accepted notice mutation: ${reason}`);
     }
-    expect(notices).not.toMatch(/[\t ]+$/mu);
-    expect(notices).toMatch(/\n$/u);
-    expect(notices).not.toMatch(/\n\n$/u);
+  });
+
+  it("records exact installed third-party notices", async () => {
+    await assertThirdPartyNotices(await readFile("THIRD_PARTY_NOTICES.md", "utf8"));
   });
 
   it("executes the extracted smoke helper in Windows PowerShell 5.1", async () => {
