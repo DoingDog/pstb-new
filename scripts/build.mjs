@@ -234,6 +234,31 @@ function without(paths, ...excluded) {
   return sortedPaths([...paths].filter((path) => !excludedPaths.has(path)));
 }
 
+function staticRecordClosure(manifest, rootKeys) {
+  const keys = new Set();
+
+  function visit(key) {
+    if (keys.has(key)) return;
+    keys.add(key);
+    const record = manifestRecord(manifest, key);
+    for (const importKey of stringList(record.imports, `${key} imports`)) visit(importKey);
+  }
+
+  for (const rootKey of rootKeys) visit(rootKey);
+  return keys;
+}
+
+export function assertDynamicRootsOutsideInitial(manifest, rootKeys, group) {
+  const initial = staticRecordClosure(manifest, ["index.html"]);
+  for (const rootKey of rootKeys) {
+    if (initial.has(rootKey)) throw new Error(`${group} dynamic root is reachable from the initial graph`);
+  }
+}
+
+export function markdownBudgetPaths(markdownClosure, initial, pageClosures) {
+  return sortedPaths(Object.values(pageClosures).flatMap((pageClosure) => without(markdownClosure, initial, pageClosure)));
+}
+
 function cssAssetPath(cssPath, reference) {
   const target = reference.split(/[?#]/u, 1)[0];
   if (!target || target.startsWith("#") || target.startsWith("data:")) return null;
@@ -340,13 +365,18 @@ async function createClientAssetsManifest(manifest) {
     .filter(([, record]) => isRecord(record) && typeof record.src === "string" && record.src.startsWith("node_modules/@milkdown/"))
     .map(([key]) => key);
   if (!markdownRoots.length || !crepeRoots.length) throw new Error("Vite manifest is missing the lazy Markdown or Crepe graph");
+  assertDynamicRootsOutsideInitial(manifest, markdownRoots, "Markdown");
+  assertDynamicRootsOutsideInitial(manifest, crepeRoots, "Crepe");
+  assertDynamicRootsOutsideInitial(manifest, ["src/client/diff.ts"], "diff");
 
-  const markdown = without(
+  const markdown = markdownBudgetPaths(
     await collectClosure(markdownRoots),
     initial,
-    pageClosures.OrdinaryPage,
-    pageClosures.LocalOnlyPastePage,
-    pageClosures.MarkdownPage,
+    {
+      OrdinaryPage: pageClosures.OrdinaryPage,
+      LocalOnlyPastePage: pageClosures.LocalOnlyPastePage,
+      MarkdownPage: pageClosures.MarkdownPage,
+    },
   );
   const crepe = without(await collectClosure(crepeRoots), initial, pageClosures.OrdinaryPage);
   const diff = without(await collectClosure(["src/client/diff.ts"]), initial, pageClosures.OrdinaryPage);

@@ -6,7 +6,9 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
 
-const { resolveManifestAssets } = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
+const { assertDynamicRootsOutsideInitial, markdownBudgetPaths, resolveManifestAssets } = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
+  assertDynamicRootsOutsideInitial(manifest: Record<string, unknown>, rootKeys: string[], group: string): void;
+  markdownBudgetPaths(markdownClosure: Iterable<string>, initial: Iterable<string>, pageClosures: Record<string, string[]>): string[];
   resolveManifestAssets(manifest: Record<string, unknown>): { appJs: string; appCss: string; diffWorker: string };
 };
 
@@ -199,6 +201,39 @@ describe("build contract", () => {
     })).toThrow();
   });
 
+  it("accounts for the Markdown graph per callsite before deduplicating", () => {
+    const pageClosures = {
+      OrdinaryPage: ["ordinary-only", "shared-markdown"],
+      LocalOnlyPastePage: ["local-only"],
+      MarkdownPage: ["markdown-page-only"],
+    };
+
+    expect(markdownBudgetPaths(
+      ["initial", "markdown-only", "shared-markdown"],
+      ["initial"],
+      pageClosures,
+    )).toEqual(["markdown-only", "shared-markdown"]);
+  });
+
+  it("rejects a raw-manifest lazy root hoisted into the entry graph", () => {
+    const eagerMarkdownManifest = {
+      "index.html": {
+        file: "assets/app-entry.js",
+        src: "index.html",
+        isEntry: true,
+        imports: ["micromark"],
+      },
+      micromark: {
+        file: "assets/micromark-entry.js",
+        name: "micromark",
+      },
+    };
+
+    expect(() => assertDynamicRootsOutsideInitial(eagerMarkdownManifest, ["micromark"], "Markdown")).toThrow(
+      "Markdown dynamic root is reachable from the initial graph",
+    );
+  });
+
   it("pins the exact React Vite Tailwind package and lockfile contract", async () => {
     const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
       engines: Record<string, string>;
@@ -336,21 +371,49 @@ describe("build contract", () => {
     expect(manifest.files.reduce((total, file) => total + file.bytes, 0)).toBeLessThanOrEqual(8 * 1024 * 1024);
   });
 
-  it("records complete third-party notices", async () => {
+  it("records exact installed third-party notices", async () => {
     const notices = await readFile("THIRD_PARTY_NOTICES.md", "utf8");
+    const normalize = (value: string): string => value.replaceAll("\r\n", "\n").replace(/[\t ]+\n/gu, "\n").trim();
+    const installedNotices = {
+      "@milkdown/crepe@7.22.1": "node_modules/@milkdown/crepe/LICENSE",
+      "@modelcontextprotocol/server@2.0.0": "node_modules/@modelcontextprotocol/server/LICENSE",
+      "class-variance-authority@0.7.1": "node_modules/class-variance-authority/LICENSE",
+      "cn@0.3.0": "node_modules/cn/LICENSE",
+      "diff@8.0.2": "node_modules/diff/LICENSE",
+      "hono@4.13.7": "node_modules/hono/LICENSE",
+      "lucide-react@1.45.0": "node_modules/lucide-react/LICENSE",
+      "micromark@4.0.2": "node_modules/micromark/license",
+      "micromark-extension-gfm@3.0.0": "node_modules/micromark-extension-gfm/license",
+      "radix-ui@1.6.7": "node_modules/radix-ui/LICENSE",
+      "react@19.3.0": "node_modules/react/LICENSE",
+      "react-dom@19.3.0": "node_modules/react-dom/LICENSE",
+      "tw-animate-css@1.4.0": "node_modules/tw-animate-css/LICENSE",
+      "typescript@7.0.2": "node_modules/typescript/LICENSE",
+      "TypeScript distributed NOTICE": "node_modules/typescript/NOTICE.txt",
+      "zod@4.6.4": "node_modules/zod/LICENSE",
+    } as const;
 
     expect(notices).toContain("shadcn@4.21.0");
     expect(notices).toContain("2b3e6d4f8d9161fe5c19340dc383aade392012dd");
     for (const [, upstreamPath] of copiedSourceFiles) expect(notices).toContain(upstreamPath);
-    expect(notices).toContain("Copyright (c) 2023 shadcn");
-    expect(notices).toContain("Permission is hereby granted, free of charge, to any person obtaining a copy");
-    expect(notices).toContain("THE SOFTWARE IS PROVIDED \"AS IS\"");
-    expect(notices).toContain("Lucide");
-    expect(notices).toContain("ISC License");
-    expect(notices).toContain("class-variance-authority");
-    expect(notices).toContain("TypeScript");
-    expect(notices).toContain("Apache License");
-    expect(notices).toContain("Version 2.0, January 2004");
-    expect(notices.replaceAll("\r\n", "\n")).toContain((await readFile("node_modules/typescript/NOTICE.txt", "utf8")).replaceAll("\r\n", "\n"));
+    for (const [packageName, sourcePath] of Object.entries(installedNotices)) {
+      expect(normalize(notices), packageName).toContain(normalize(await readFile(sourcePath, "utf8")));
+    }
+    expect(notices).not.toMatch(/[\t ]+$/mu);
+    expect(notices).toMatch(/\n$/u);
+    expect(notices).not.toMatch(/\n\n$/u);
+  });
+
+  it("uses a Windows PowerShell 5.1-compatible smoke response helper", async () => {
+    const smoke = await readFile("scripts/smoke.ps1", "utf8");
+
+    expect(smoke).not.toContain("-SkipHttpErrorCheck");
+    expect(smoke).toContain("function Invoke-HttpResponse");
+    expect(smoke).toContain("[System.Net.HttpWebRequest]");
+    expect(smoke).toContain("-TimeoutMilliseconds $timeoutMilliseconds");
+    expect(smoke).toContain("taskkill.exe /PID $server.Id /T /F");
+    expect(smoke).toContain("Stop-Process -Id $listener.OwningProcess");
+    expect(smoke).toContain('$notModified.Headers["Content-Length"]');
+    expect(smoke).toContain('$notModified.Headers["Trailer"]');
   });
 });
