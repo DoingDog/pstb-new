@@ -55,6 +55,16 @@ function disposeTerminalResources(resources: TerminalLocalRuntime["resources"], 
 }
 
 function terminalResourcesForRollback(local: TerminalLocalRuntime, rollback: SurfaceRollback) {
+  const capture = local.surface.snapshot().capture;
+  const expectedParentToken = rollback.failedGeneration === rollback.oldGeneration
+    ? capture.parentApplyToken
+    : capture.parentApplyToken + 1;
+  if (
+    capture.currentDisplayGeneration !== rollback.oldGeneration
+    || capture.currentExactSource !== rollback.oldSource
+    || capture.hostGeneration !== rollback.hostGeneration
+    || expectedParentToken !== rollback.parentApplyToken
+  ) return { current: null, previous: null };
   const current = local.resources?.generation === rollback.failedGeneration
     ? local.resources
     : null;
