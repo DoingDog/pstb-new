@@ -705,6 +705,7 @@ async function acquireVendor(product, context, fetchImpl, options) {
   const tokens = new Set();
   while (true) {
     let body;
+    let staleTerminalToken = false;
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const result = await deadlineOperation(context, async (signal) => {
         const response = await fetchImpl(url, { redirect: "error", signal });
@@ -717,10 +718,19 @@ async function acquireVendor(product, context, fetchImpl, options) {
       let retryable = false;
       try {
         const error = JSON.parse(result.body.toString("utf8"));
-        retryable = isObject(error) && isObject(error.error) && error.error.code === 400 && error.error.status === "INVALID_ARGUMENT";
+        retryable = isObject(error) && Object.keys(error).length === 1 && isObject(error.error) && Object.keys(error.error).length === 3 && error.error.code === 400 && error.error.message === "Request contains an invalid argument." && error.error.status === "INVALID_ARGUMENT";
       } catch {}
-      if (url === config.url || result.status !== 400 || !retryable || attempt === 5) fail(`Official vendor source did not return HTTP 200: ${url}`);
+      if (url === config.url || result.status !== 400 || !retryable) fail(`Official vendor source did not return HTTP 200: ${url}`);
+      if (attempt === 5) {
+        const previousPayload = payloads.at(-1);
+        if (Array.isArray(previousPayload?.releases) && previousPayload.releases.length < 1000) {
+          staleTerminalToken = true;
+          break;
+        }
+        fail(`Official vendor source did not return HTTP 200: ${url}`);
+      }
     }
+    if (staleTerminalToken) break;
     const payload = json(body.toString("utf8"), "Chrome response");
     bodies.push(body);
     payloads.push(payload);
@@ -1671,6 +1681,7 @@ async function browserSelfTest() {
   try {
     const retrievedAt = "2026-09-13T12:00:00.000Z";
     const chromeContinuationUrl = `${sourceConfigurations.Chrome.url}&page_token=continuation%20token`;
+    const chromeTerminalUrl = `${sourceConfigurations.Chrome.url}&page_token=terminal%20token`;
     const chromeFirstBody = JSON.stringify({ releases: [
       { fraction: 1, name: "chrome-120", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
     ], nextPageToken: "continuation token" });
@@ -1678,7 +1689,18 @@ async function browserSelfTest() {
       { fraction: 1, name: "chrome-117", version: "117.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
       { fraction: 1, name: "chrome-111", version: "111.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
     ] });
-    const retryableChromeError = JSON.stringify({ error: { code: 400, status: "INVALID_ARGUMENT" } });
+    const chromeFullReleases = Array.from({ length: 1000 }, (_, index) => {
+      const major = [120, 117, 111][index % 3];
+      return { fraction: 1, name: `chrome-full-${index}`, version: `${major}.${Math.floor(index / 3)}.0`, serving: { startTime: "2026-09-10T00:00:00.000Z" } };
+    });
+    const chromeFullFirstBody = JSON.stringify({ releases: chromeFullReleases, nextPageToken: "continuation token" });
+    const chromeTerminalBody = JSON.stringify({ releases: [
+      { fraction: 1, name: "chrome-terminal-110", version: "110.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
+      { fraction: 1, name: "chrome-terminal-109", version: "109.0", serving: { startTime: "2026-09-08T00:00:00.000Z" } },
+      { fraction: 1, name: "chrome-terminal-108", version: "108.0", serving: { startTime: "2026-09-07T00:00:00.000Z" } },
+    ], nextPageToken: "terminal token" });
+    const retryableChromeError = JSON.stringify({ error: { code: 400, message: "Request contains an invalid argument.", status: "INVALID_ARGUMENT" } });
+    const differentChromeError = JSON.stringify({ error: { code: 400, message: "A different error.", status: "INVALID_ARGUMENT" } });
     const vendorResponses = [
       [sourceConfigurations.Edge.url, JSON.stringify([{ Product: "Stable", Releases: [
         { Platform: "Windows", Architecture: "x64", ReleaseId: 120, ProductVersion: "120.0", PublishedTime: "2026-09-10T00:00:00" },
@@ -1694,6 +1716,30 @@ async function browserSelfTest() {
       if (response === undefined) return { status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
       return { status: response.status, arrayBuffer: async () => Buffer.from(response.body) };
     };
+
+    const staleTerminalRoot = resolve(dir, "chrome-stale-terminal");
+    const staleTerminalCalls = [];
+    let staleTerminalFailure;
+    try {
+      await acquireTargets({ repoRoot: staleTerminalRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+        [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFullFirstBody }]],
+        [chromeContinuationUrl, [{ status: 200, body: chromeTerminalBody }]],
+        [chromeTerminalUrl, Array.from({ length: 6 }, () => ({ status: 400, body: retryableChromeError }))],
+        ...vendorResponses.map(([url, body]) => [url, [{ status: 200, body }]]),
+      ]), staleTerminalCalls) });
+    } catch (error) {
+      staleTerminalFailure = error;
+    }
+    if (staleTerminalFailure !== undefined) {
+      equal(staleTerminalCalls.filter((url) => url === chromeTerminalUrl).length, 6, "Chrome stale terminal token has six physical attempts before failure");
+      equal(existsSync(staleTerminalRoot), false, "Chrome stale terminal failure performs no writes");
+      throw staleTerminalFailure;
+    }
+    const staleTerminalChrome = await readJson(staleTerminalRoot, sourceConfigurations.Chrome.artifact);
+    equal(staleTerminalCalls.filter((url) => url === chromeTerminalUrl).length, 6, "Chrome stale terminal token has six physical attempts");
+    equal(staleTerminalChrome.source.responseCount, 2, "Chrome stale terminal token preserves successful pages once");
+    equal(staleTerminalChrome.source.responseSha256, sha256(Buffer.concat([Buffer.from(chromeFullFirstBody), Buffer.from("\n"), Buffer.from(chromeTerminalBody)])), "Chrome stale terminal token preserves successful page hash");
+
     const acquisitionRoot = resolve(dir, "acquisition");
     const acquisitionCalls = [];
     await acquireTargets({ repoRoot: acquisitionRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
@@ -1717,11 +1763,21 @@ async function browserSelfTest() {
     const exhaustedRoot = resolve(dir, "chrome-retry-exhausted");
     const exhaustionCalls = [];
     await expectThrows(() => acquireTargets({ repoRoot: exhaustedRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
-      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFullFirstBody }]],
       [chromeContinuationUrl, Array.from({ length: 6 }, () => ({ status: 400, body: retryableChromeError }))],
-    ]), exhaustionCalls) }), "Chrome retry exhaustion makes no writes");
-    equal(exhaustionCalls.filter((url) => url === chromeContinuationUrl).length, 6, "Chrome continuation stops after six physical attempts");
-    equal(existsSync(exhaustedRoot), false, "Chrome retry exhaustion performs no writes");
+    ]), exhaustionCalls) }), "Chrome full-page retry exhaustion makes no writes");
+    equal(exhaustionCalls.filter((url) => url === chromeContinuationUrl).length, 6, "Chrome full-page continuation stops after six physical attempts");
+    equal(existsSync(exhaustedRoot), false, "Chrome full-page retry exhaustion performs no writes");
+
+    const differentErrorRoot = resolve(dir, "chrome-continuation-different-error");
+    const differentErrorCalls = [];
+    await expectThrows(() => acquireTargets({ repoRoot: differentErrorRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFullFirstBody }]],
+      [chromeContinuationUrl, [{ status: 200, body: chromeTerminalBody }]],
+      [chromeTerminalUrl, [{ status: 400, body: differentChromeError }]],
+    ]), differentErrorCalls) }), "Chrome different terminal error makes no writes");
+    equal(differentErrorCalls.filter((url) => url === chromeTerminalUrl).length, 1, "Chrome different terminal error is not retried");
+    equal(existsSync(differentErrorRoot), false, "Chrome different terminal error performs no writes");
 
     const non400Root = resolve(dir, "chrome-continuation-non-400");
     const non400Calls = [];
@@ -1731,6 +1787,21 @@ async function browserSelfTest() {
     ]), non400Calls) }), "Chrome non-400 continuation fails without retry");
     equal(non400Calls.filter((url) => url === chromeContinuationUrl).length, 1, "Chrome non-400 continuation is not retried");
     equal(existsSync(non400Root), false, "Chrome non-400 continuation performs no writes");
+
+    const repeatedTokenRoot = resolve(dir, "chrome-repeated-token");
+    await expectThrows(() => acquireTargets({ repoRoot: repeatedTokenRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFullFirstBody }]],
+      [chromeContinuationUrl, [{ status: 200, body: JSON.stringify({ releases: [], nextPageToken: "continuation token" }) }]],
+    ]), []) }), "Chrome repeated token makes no writes");
+    equal(existsSync(repeatedTokenRoot), false, "Chrome repeated token performs no writes");
+
+    const validationRoot = resolve(dir, "chrome-validation-error");
+    await expectThrows(() => acquireTargets({ repoRoot: validationRoot, releaseDate: "2026-09-13", clock: oneCallClock(), fetchImpl: queuedFetch(new Map([
+      [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+      [chromeContinuationUrl, [{ status: 200, body: JSON.stringify({ releases: [{ fraction: 1, name: "chrome-invalid", version: "invalid", serving: { startTime: "2026-09-09T00:00:00.000Z" } }] }) }]],
+      ...vendorResponses.map(([url, body]) => [url, [{ status: 200, body }]]),
+    ]), []) }), "Chrome validation error makes no writes");
+    equal(existsSync(validationRoot), false, "Chrome validation error performs no writes");
     const chrome = normalizeChromePayloads([{ releases: [
       { fraction: 1, name: "a", version: "120.0", serving: { startTime: "2026-09-10T00:00:00.000Z" } },
       { fraction: 1, name: "b", version: "120.0", serving: { startTime: "2026-09-09T00:00:00.000Z" } },
