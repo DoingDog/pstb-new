@@ -276,7 +276,7 @@ describe("build contract", () => {
       compatibility_date: "2026-09-12",
       workers_dev: false,
       preview_urls: false,
-      routes: [{ pattern: "b-new.awsl.app", custom_domain: true, previews_enabled: false }],
+      routes: [{ pattern: "n.awsl.app", custom_domain: true, previews_enabled: false }],
       kv_namespaces: [{ binding: "PASTE_DB", id: "cd0ebbaba15e486a8e1071bb21e31a9f" }],
       assets: { directory: "./dist/assets" },
     });

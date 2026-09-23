@@ -81,6 +81,21 @@ function OrdinaryPastePageBody({
   const [initialSource] = React.useState(source);
   const [active, setActive] = React.useState<ContentMode | "history" | "settings">("view");
   const [wrap, setWrap] = React.useState(false);
+  const sourceState = React.useRef({ source, revision: 0, compositionId: 0 });
+  const lastPropSource = React.useRef(source);
+  if (lastPropSource.current !== source) {
+    lastPropSource.current = source;
+    sourceState.current = { ...sourceState.current, source, revision: sourceState.current.revision + 1 };
+  }
+  const reportSourceEvent = React.useCallback((event: SourceEvent) => {
+    sourceState.current = {
+      source: event.content,
+      revision: sourceState.current.revision + 1,
+      compositionId: sourceState.current.compositionId + (event.type === "composition-start" ? 1 : 0),
+    };
+    onSourceEvent(event);
+  }, [onSourceEvent]);
+  const readSourceState = React.useCallback(() => sourceState.current, []);
   const contentProps = {
     format,
     source,
@@ -94,7 +109,8 @@ function OrdinaryPastePageBody({
     initialMarkdown,
     wrap: wrap ? "soft" as const : "off" as const,
     autosave,
-    onSourceEvent,
+    onSourceEvent: reportSourceEvent,
+    readSourceState,
     locale,
     ...(onSurfaceMounted === undefined ? {} : { onSurfaceMounted }),
     importBrowserMarkdown,

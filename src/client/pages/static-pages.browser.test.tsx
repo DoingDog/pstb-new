@@ -154,6 +154,15 @@ afterEach(async () => {
 });
 
 describe("create interaction", () => {
+  it("shows at least six lines in the empty content field", async () => {
+    const fixture = await mount(<CreatePage locale="en" create={vi.fn()} />);
+    const textarea = fixture.host.querySelector<HTMLTextAreaElement>('[name="content"]')!;
+    const style = getComputedStyle(textarea);
+    const sixLines = 6 * parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    expect(textarea.rows).toBe(6);
+    expect(textarea.getBoundingClientRect().height).toBeGreaterThanOrEqual(sixLines - 1);
+  });
+
   it("renders labeled controlled fields and the seven fixed expiration values", async () => {
     const fixture = await mount(<CreatePage locale="en" create={vi.fn()} />);
 

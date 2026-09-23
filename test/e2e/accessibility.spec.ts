@@ -269,12 +269,14 @@ test.describe("accessibility branches", () => {
     await expect(page.getByRole("alert")).toContainText("The password is ambiguous");
   });
 
-  test("mounts the lazy ordinary route before controlling autosync time on every engine", async ({ page, request }) => {
+  test("controls autosync time after the lazy ordinary route mounts on every engine", async ({ page, request }) => {
     const { id } = await createPaste(request, { content: "lazy route clock" });
-    await page.goto(`/${id}`);
-    await expect(page.locator("[data-ordinary-paste-page]")).toBeVisible();
     await page.clock.install({ time: new Date("2026-09-23T00:00:00.000Z") });
     await page.clock.pauseAt(new Date("2026-09-23T00:00:01.000Z"));
+    await page.goto(`/${id}`);
+    await page.waitForLoadState("networkidle");
+    await page.clock.runFor(300);
+    await expect(page.locator("[data-ordinary-paste-page]")).toBeVisible();
     const poll = page.waitForResponse((response) => response.request().method() === "GET"
       && new URL(response.url()).pathname === `/api/pastes/${id}`);
     await page.clock.fastForward(3_000);

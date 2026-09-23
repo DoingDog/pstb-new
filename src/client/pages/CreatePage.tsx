@@ -242,7 +242,7 @@ export function CreatePage({ locale, create }: CreatePageProps) {
               <FieldLabel htmlFor="create-content">{copy.content}</FieldLabel>
               <HelpTrigger label={`${copy.help}: ${copy.content}`} content={dictionaries[locale].help.contentLimit} descriptionId="create-content-help" />
             </div>
-            <Textarea id="create-content" name="content" value={fields.content} className="min-h-11" aria-describedby="create-content-help" aria-invalid={failed("content") || undefined} aria-errormessage={failed("content") ? "create-validation-error" : undefined} onChange={(event) => update("content", event.currentTarget.value)} onPaste={onPaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void onDrop(event)} />
+            <Textarea id="create-content" name="content" value={fields.content} rows={6} className="min-h-44" aria-describedby="create-content-help" aria-invalid={failed("content") || undefined} aria-errormessage={failed("content") ? "create-validation-error" : undefined} onChange={(event) => update("content", event.currentTarget.value)} onPaste={onPaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void onDrop(event)} />
           </Field>
           <Field>
             <FieldLabel htmlFor="create-title">{copy.title}</FieldLabel>

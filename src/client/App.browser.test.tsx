@@ -452,6 +452,17 @@ afterEach(() => {
 });
 
 describe("Task 15 async lifecycle behavior", () => {
+  it("keeps locale and theme names accessible without visible header labels", async () => {
+    const rendered = await mount(<App initialPage={pages[1]![1]} />);
+    for (const [id, names] of [["document-locale", ["Language", "语言"]], ["document-theme", ["Theme", "主题"]]] as const) {
+      const select = rendered.querySelector(`#${id}`)!;
+      const label = rendered.querySelector<HTMLLabelElement>(`label[for="${id}"]`)!;
+      expect(label.control).toBe(select);
+      expect(names).toContain(label.querySelector("span")?.textContent);
+      expect(label.querySelector("span")!.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("settles a create attempt in OperationStatus", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => errorResponse(500, "INTERNAL_ERROR")));
     const rendered = await mount(<App initialPage={pages[1]![1]} />);

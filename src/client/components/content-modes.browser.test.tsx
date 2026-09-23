@@ -17,6 +17,7 @@ import { prepareMarkdownVisual } from "../markdown";
 import "../index.css";
 import { Crepe } from "@milkdown/crepe";
 import { editorViewCtx } from "@milkdown/kit/core";
+import { TextSelection } from "@milkdown/kit/prose/state";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,6 +33,7 @@ const markdownModes = vi.hoisted(() => {
   type Deferred = { promise: Promise<void>; resolve(): void; reject(reason?: unknown): void };
   const instances: Array<{
     options: Options;
+    enterSource: ReturnType<typeof vi.fn>;
     enterVisual: ReturnType<typeof vi.fn>;
     enterPreview: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
@@ -478,6 +480,128 @@ describe("Tabs keyboard", () => {
   });
 });
 describe("plaintext autosave", () => {
+  it("keeps native IME preedit in the textarea before the page publishes its source", () => {
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<PlaintextEditor value="seed" wrap="off" autosave={autosave} onSourceEvent={vi.fn()} />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter.call(textarea, "seed中");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, data: "中", isComposing: true }));
+      expect(textarea.value).toBe("seed中");
+    });
+    expect(textarea.value).toBe("seed中");
+    expect(autosave.input).toHaveBeenCalledWith("seed中", expect.any(Number));
+  });
+
+  it("resumes autosave on blur when an IME does not emit compositionend", () => {
+    vi.useFakeTimers();
+    const requests: AutosaveSaveRequest[] = [];
+    let controller: AutosaveControllerApi | null = null;
+    const host = mount(<AutosaveHarness identity="missing-compositionend" requests={requests} onController={(value) => { controller = value; }} />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      textarea.focus();
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter.call(textarea, "中");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+      textarea.blur();
+    });
+    expect(controller!.snapshot().dueAt).not.toBeNull();
+    React.act(() => vi.advanceTimersByTime(Math.ceil(controller!.snapshot().dueAt! - performance.now())));
+    expect(requests.map((request) => request.content)).toEqual(["中"]);
+  });
+
+  it("releases an unfinished composition when switching away from Edit", () => {
+    vi.useFakeTimers();
+    const requests: AutosaveSaveRequest[] = [];
+    let controller: AutosaveControllerApi | null = null;
+    const onController = (value: AutosaveControllerApi) => { controller = value; };
+    const host = mount(<AutosaveHarness identity="switch-during-composition" requests={requests} onController={onController} />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter.call(textarea, "中");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    });
+    rerender(host, <AutosaveHarness identity="switch-during-composition" requests={requests} onController={onController} visible={false} />);
+    rerender(host, <AutosaveHarness identity="switch-during-composition" requests={requests} onController={onController} />);
+    input(host.querySelector("textarea")!, "中文");
+    expect(controller!.snapshot().dueAt).not.toBeNull();
+    React.act(() => vi.advanceTimersByTime(Math.ceil(controller!.snapshot().dueAt! - performance.now())));
+    expect(requests.map((request) => request.content)).toEqual(["中文"]);
+  });
+
+  it("commits the latest IME input when its own event unmounts the editor", () => {
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    function Harness() {
+      const [visible, setVisible] = React.useState(true);
+      return visible ? <PlaintextEditor value="seed" wrap="off" autosave={autosave} onSourceEvent={(event) => {
+        events.push(event);
+        if (event.type === "composition-input") setVisible(false);
+      }} /> : null;
+    }
+    const host = mount(<Harness />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter.call(textarea, "seed中");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    });
+
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["seed中"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("seed中", expect.any(Number));
+  });
+
+  it("uses native input isComposing when composition events are omitted", () => {
+    vi.useFakeTimers();
+    const requests: AutosaveSaveRequest[] = [];
+    let controller: AutosaveControllerApi | null = null;
+    const host = mount(<AutosaveHarness identity="native-composition-flag" requests={requests} onController={(value) => { controller = value; }} />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      setter.call(textarea, "中");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    });
+    React.act(() => vi.advanceTimersByTime(10_000));
+    expect(requests).toEqual([]);
+
+    React.act(() => {
+      setter.call(textarea, "中文");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: false }));
+    });
+    React.act(() => vi.advanceTimersByTime(Math.max(0, Math.ceil(controller!.snapshot().dueAt! - performance.now()))));
+    expect(requests.map((request) => request.content)).toEqual(["中文"]);
+  });
+
+  it("does not restart autosave when compositionend follows a committed native input", () => {
+    const events: SourceEvent[] = [];
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<PlaintextEditor value="first" wrap="off" autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    const textarea = host.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+
+    React.act(() => {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      setter.call(textarea, "中文");
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: false }));
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    });
+    expect(events.filter((event) => event.type === "composition-end")).toHaveLength(1);
+    expect(autosave.compositionEnd).toHaveBeenCalledOnce();
+  });
+
   it("reports exact composition variants before matching autosave calls and suppresses duplicate input", () => {
     const events: Array<{ type: string; content: string; eventAt: number }> = [];
     const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
@@ -837,6 +961,32 @@ describe("Markdown lifecycle", () => {
     expect(markdownModes.instances[0]!.enterVisual).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts a retained Visual document when Source Retry completes teardown", async () => {
+    const events: SourceEvent[] = [];
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await nextTask();
+    const controller = markdownModes.instances[0]!;
+    controller.enterSource.mockImplementationOnce(async () => { controller.emitError(); });
+    controller.enterSource.mockImplementationOnce(async () => {
+      controller.emitChange("中文\n", performance.now());
+      controller.options.onModeChange?.("source");
+    });
+    await clickRole("tab", "Source");
+    await nextTask();
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    await clickRole("tab", "Visual");
+    expect(controller.enterVisual).toHaveBeenCalledOnce();
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+
+    await clickRole("button", "Retry");
+    await nextTask();
+    expect(controller.enterSource).toHaveBeenCalledTimes(2);
+    expect(events.some((event) => event.type === "crepe-change" && event.content === "中文\n")).toBe(true);
+    expect(autosave.input).toHaveBeenCalledWith("中文\n", expect.any(Number));
+  });
+
   it("retries a current visual serialization failure once", async () => {
     const host = mount(<MarkdownWorkbench
       source="# source"
@@ -976,6 +1126,613 @@ describe("Markdown lifecycle", () => {
 });
 
 describe("MarkdownWorkbench real Crepe ownership", () => {
+  it("marks visual IME composition as local work before any document transaction", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    crepeControls.active!.editor.action((ctx) => {
+      ctx.get(editorViewCtx).dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    });
+    expect(events.map((event) => event.type)).toEqual(["composition-start"]);
+    expect(autosave.compositionStart).toHaveBeenCalledOnce();
+    expect(autosave.input).not.toHaveBeenCalled();
+  });
+
+  it("does not autosave visual IME preedit and publishes its final document on compositionend", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    crepeControls.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      dom = view.dom;
+      view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      expect(view.composing).toBe(true);
+    });
+    replaceVisualDocument("中");
+    expect(events.map((event) => event.type)).toEqual(["composition-start"]);
+    expect(autosave.input).not.toHaveBeenCalled();
+
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["中\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中\n", expect.any(Number));
+    expect(currentMarkdownTab(host)).toBe("Visual");
+  });
+
+  it("keeps the original Markdown bytes when an IME composition has no document change", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    await React.act(async () => {
+      crepeControls!.active!.editor.action((ctx) => {
+        const dom = ctx.get(editorViewCtx).dom;
+        dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+        dom.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      });
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 35)));
+    });
+    expect(events.filter((event) => event.type === "crepe-change")).toEqual([]);
+    expect(autosave.input).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("first");
+  });
+
+  it("keeps autosave paused when the next visual IME composition begins before the prior flush", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("第一");
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      dom!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      replaceVisualDocument("第二");
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(autosave.compositionEnd).not.toHaveBeenCalled();
+    expect(autosave.input).not.toHaveBeenCalled();
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["第二\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("第二\n", expect.any(Number));
+  });
+
+  it("keeps a real autosave paused throughout visual preedit and saves only the committed text", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const requests: AutosaveSaveRequest[] = [];
+    mount(<VisualAutosaveHarness requests={requests} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    await React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
+    expect(requests).toEqual([]);
+
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+    });
+    expect(requests.map((request) => request.content)).toEqual(["中文\n"]);
+  });
+
+  it("keeps visual IME changes paused until a failed serializer Retry succeeds", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    crepeControls.failGetMarkdown = true;
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    expect(autosave.compositionEnd).not.toHaveBeenCalled();
+    crepeControls.failGetMarkdown = false;
+    await clickRole("button", "Retry");
+    expect(events.some((event) => event.type === "crepe-change" && event.content === "中文\n")).toBe(true);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+  });
+
+  it("keeps an unsaved Visual IME document available for Retry when Source serialization fails", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const prepared = await prepareMarkdownVisual("first", document);
+    const compositionEnd = vi.fn();
+    let retry: (() => Promise<void>) | null = null;
+    prepared.bind({
+      onDocumentChange: () => undefined,
+      onVisualCompositionEnd: compositionEnd,
+      onVisualError: (error) => { retry = error.retry; },
+    });
+    document.body.appendChild(prepared.root);
+    try {
+      let dom: HTMLElement | null = null;
+      crepeControls.active!.editor.action((ctx) => {
+        dom = ctx.get(editorViewCtx).dom;
+        dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      });
+      replaceVisualDocument("中文");
+      crepeControls.failGetMarkdown = true;
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      await prepared.modes.enterSource();
+      expect(retry).not.toBeNull();
+      expect(crepeControls.getMarkdownCalls).toBeGreaterThan(0);
+      expect(crepeControls.destroyCalls).toBe(0);
+      expect(compositionEnd).not.toHaveBeenCalled();
+
+      crepeControls.failGetMarkdown = false;
+      await retry!();
+      expect(prepared.source.value).toBe("中文\n");
+      expect(compositionEnd).toHaveBeenCalledWith("中文\n");
+    } finally {
+      crepeControls.failGetMarkdown = false;
+      await prepared.dispose();
+    }
+  });
+
+  it("retries failed Source teardown without discarding the prepared Visual IME document", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const prepared = await prepareMarkdownVisual("first", document);
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    function Harness() {
+      const [source, setSource] = React.useState("first");
+      return <MarkdownWorkbench source={source} initialSource="first" initialMarkdown={null} wrap="off"
+        autosave={autosave} preparedVisual={prepared} onSourceEvent={(event) => { events.push(event); setSource(event.content); }}
+        loadCrepeStyle={async () => undefined} />;
+    }
+    const host = mount(<Harness />);
+    try {
+      await clickRole("tab", "Visual");
+      await waitForMarkdownTab(host, "Visual");
+      const enterSource = prepared.modes.enterSource;
+      let failOnce = true;
+      prepared.modes.enterSource = () => {
+        if (failOnce) {
+          failOnce = false;
+          crepeControls!.failGetMarkdown = true;
+        }
+        return enterSource();
+      };
+      let dom: HTMLElement | null = null;
+      React.act(() => crepeControls!.active!.editor.action((ctx) => {
+        dom = ctx.get(editorViewCtx).dom;
+        dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      }));
+      replaceVisualDocument("中文");
+      await React.act(async () => {
+        dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+        const sourceTab = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Source")!;
+        sourceTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+        sourceTab.click();
+        await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 35)));
+      });
+      expect(failOnce).toBe(false);
+      expect(crepeControls!.getMarkdownCalls).toBeGreaterThan(0);
+      expect(host.querySelector('[role="alert"]')).not.toBeNull();
+      expect(crepeControls!.destroyCalls).toBe(0);
+      expect(autosave.compositionEnd).not.toHaveBeenCalled();
+
+      crepeControls.failGetMarkdown = false;
+      await clickRole("button", "Retry");
+      await React.act(async () => {
+        await vi.waitFor(() => expect(events.some((event) => event.type === "crepe-change" && event.content === "中文\n")).toBe(true));
+      });
+      await waitForMarkdownTab(host, "Source");
+      expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("中文\n");
+      expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+    } finally {
+      crepeControls!.failGetMarkdown = false;
+      unmount(host);
+      await prepared.dispose();
+    }
+  });
+
+  it("retains a committed visual composition when switching to Source immediately", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    crepeControls.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      dom = view.dom;
+      view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      expect(view.composing).toBe(true);
+    });
+    replaceVisualDocument("中文");
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Source")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    await waitForMarkdownTab(host, "Source");
+
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["中文\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("中文\n");
+  });
+
+  it("releases Visual autosave on blur when compositionend is missing", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.focus();
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    await React.act(async () => {
+      dom!.blur();
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["中文\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+  });
+
+  it("commits IME text inserted between adjacent inline images", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      const paragraph = view.state.schema.nodes.paragraph!;
+      const image = view.state.schema.nodes.image!;
+      const nodes = [image.create({ src: "a.png" }), image.create({ src: "b.png" })];
+      const transaction = view.state.tr.replaceWith(0, view.state.doc.content.size, paragraph.create(null, nodes));
+      view.dispatch(transaction.setSelection(TextSelection.create(transaction.doc, 2)));
+      expect(view.state.selection.$from.nodeBefore?.type.name).toBe("image");
+      expect(view.state.selection.$from.nodeAfter?.type.name).toBe("image");
+      dom = view.dom;
+    }));
+    events.length = 0;
+    autosave.input.mockClear();
+    await React.act(async () => {
+      dom!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "中" }));
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 35)));
+    });
+    crepeControls.active!.editor.action((ctx) => {
+      expect(ctx.get(editorViewCtx).state.doc.textContent).toContain("中");
+    });
+    expect(events.map((event) => event.content).some((source) => source.includes("中"))).toBe(true);
+    expect(autosave.input).toHaveBeenCalled();
+    expect(currentMarkdownTab(host)).toBe("Visual");
+  });
+
+  it("retains IME text between initial inline images when switching to Source before insertion", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const initialSource = "![a](a.png)![b](b.png)";
+    const host = mount(<RealMarkdownHarness initialSource={initialSource} autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    await waitForMarkdownTab(host, "Visual");
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)));
+      expect(view.state.selection.$from.nodeBefore?.type.name).toBe("image");
+      expect(view.state.selection.$from.nodeAfter?.type.name).toBe("image");
+      dom = view.dom;
+    }));
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "中" }));
+      const source = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Source")!;
+      source.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      source.click();
+    });
+    await React.act(async () => { await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 35))); });
+    await waitForMarkdownTab(host, "Source");
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain("中");
+    expect(events.some((event) => event.type === "crepe-change" && event.content.includes("中"))).toBe(true);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith(expect.stringContaining("中"), expect.any(Number));
+  });
+
+  it("keeps the committed source when Preview and Visual are selected before composition flush", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      const preview = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Preview")!;
+      preview.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      preview.click();
+    });
+    React.act(() => {
+      const visual = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Visual")!;
+      visual.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      visual.click();
+    });
+    await React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 35)); });
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["中文\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+    expect(currentMarkdownTab(host)).toBe("Visual");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("returns to Visual when Preview teardown is already waiting for a committed IME flush", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      const preview = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Preview")!;
+      preview.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      preview.click();
+    });
+    await React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
+    React.act(() => {
+      const visual = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Visual")!;
+      visual.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      visual.click();
+    });
+    await React.act(async () => { await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 50))); });
+    await waitForMarkdownTab(host, "Visual");
+    expect(currentMarkdownTab(host)).toBe("Visual");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(events.some((event) => event.content.includes("中文"))).toBe(true);
+  });
+
+  it("renders committed Visual text rather than the initial Preview after an immediate switch", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<MarkdownWorkbench
+      source="first" initialSource="first" initialMarkdown={trustedHtml("<p>initial only</p>")}
+      wrap="off" autosave={autosave} onSourceEvent={(event) => events.push(event)}
+      loadCrepeStyle={async () => undefined}
+    />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("中文");
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      const preview = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Preview")!;
+      preview.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      preview.click();
+    });
+    await React.act(async () => { await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 40))); });
+    await waitForMarkdownTab(host, "Preview");
+    expect(events.some((event) => event.type === "crepe-change" && event.content.includes("中文"))).toBe(true);
+    await React.act(async () => {
+      await vi.waitFor(() => {
+        const visiblePanel = Array.from(host.querySelectorAll<HTMLElement>('[role="tabpanel"]')).find((panel) => !panel.hidden);
+        expect(visiblePanel?.textContent).toContain("中文");
+        expect(visiblePanel?.textContent).not.toContain("initial only");
+      });
+    });
+  });
+
+  it("commits a completed Visual IME edit when the outer View tab unmounts Markdown", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<OrdinaryPastePage {...ordinaryPageProps({
+      format: "markdown", source: "first", acceptedSource: "first", autosaveAcceptedSource: "first", lastSavedContent: "first",
+      autosave, onSourceEvent: (event) => events.push(event), loadCrepeStyle: async () => undefined,
+    })} />);
+    await clickRole("tab", "Markdown");
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    crepeControls.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      dom = view.dom;
+      view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    });
+    replaceVisualDocument("中文");
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      const viewTab = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "View")!;
+      viewTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      viewTab.click();
+    });
+    expect(host.querySelector('[data-markdown-workbench]')).toBeNull();
+    await React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 35)); });
+
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["中文\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("中文\n", expect.any(Number));
+  });
+
+  it("does not replace newer Edit input with a retired Visual composition", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    function Harness() {
+      const [source, setSource] = React.useState("first\n");
+      return <OrdinaryPastePage {...ordinaryPageProps({
+        format: "markdown", source, acceptedSource: "first\n", autosaveAcceptedSource: "first\n", lastSavedContent: "first\n",
+        autosave, onSourceEvent: (event) => { events.push(event); setSource(event.content); }, loadCrepeStyle: async () => undefined,
+      })} />;
+    }
+    const host = mount(<Harness />);
+    await clickRole("tab", "Markdown");
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    replaceVisualDocument("视觉中文");
+    React.act(() => {
+      dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      const view = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "View")!;
+      view.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      view.click();
+    });
+    React.act(() => {
+      const edit = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((tab) => tab.textContent === "Edit")!;
+      edit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+      edit.click();
+    });
+    input(host.querySelector<HTMLTextAreaElement>("textarea")!, "更新内容");
+    expect(events.at(-1)).toMatchObject({ type: "input", content: "更新内容" });
+    await React.act(async () => { await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 35))); });
+
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("更新内容");
+    expect(events.at(-1)?.content).toBe("更新内容");
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("更新内容", expect.any(Number));
+  });
+
+  it("releases autosave when authoritative source replaces a composing Visual owner", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const render = (source: string) => <OrdinaryPastePage {...ordinaryPageProps({
+      format: "markdown", source, acceptedSource: source, autosaveAcceptedSource: source, lastSavedContent: source,
+      autosave, onSourceEvent: (event) => events.push(event), loadCrepeStyle: async () => undefined,
+    })} />;
+    const host = mount(render("first\n"));
+    await clickRole("tab", "Markdown");
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      ctx.get(editorViewCtx).dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    rerender(host, render("server"));
+    await React.act(async () => { await nextTask(); });
+
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["server"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("server", expect.any(Number));
+  });
+
+  it("keeps a local Visual composition when its parent rerenders with a lagging source", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const render = () => <OrdinaryPastePage {...ordinaryPageProps({
+      format: "markdown", source: "first\n", autosave,
+      onSourceEvent: (event) => events.push(event), loadCrepeStyle: async () => undefined,
+    })} />;
+    const host = mount(render());
+    await clickRole("tab", "Markdown");
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    replaceVisualDocument("local");
+    expect(events.some((event) => event.type === "crepe-change" && event.content === "local\n")).toBe(true);
+    let dom: HTMLElement | null = null;
+    React.act(() => crepeControls!.active!.editor.action((ctx) => {
+      dom = ctx.get(editorViewCtx).dom;
+      dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    }));
+    rerender(host, render());
+    React.act(() => dom!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+    await React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+
+    expect(events.filter((event) => event.type === "composition-end").map((event) => event.content)).toEqual(["local\n"]);
+    expect(autosave.compositionEnd).toHaveBeenCalledWith("local\n", expect.any(Number));
+  });
+
+  it("does not serialize unfinished visual composition on Source teardown", async () => {
+    markdownModes.state.useActual = true;
+    crepeControls = controlCrepe();
+    const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
+    const events: SourceEvent[] = [];
+    const host = mount(<RealMarkdownHarness autosave={autosave} onSourceEvent={(event) => events.push(event)} />);
+    await clickRole("tab", "Visual");
+    await waitForCrepe();
+    crepeControls.active!.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      expect(view.composing).toBe(true);
+    });
+    replaceVisualDocument("中");
+    await clickRole("tab", "Source");
+    await waitForMarkdownTab(host, "Source");
+
+    expect(events.map((event) => [event.type, event.content])).toEqual([["composition-start", "first"], ["composition-end", "first"]]);
+    expect(autosave.input).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("first");
+  });
+
   it("accepts a newer live-editor transaction after serializer failure and ignores its stale Retry", async () => {
     markdownModes.state.useActual = true;
     crepeControls = controlCrepe();
@@ -1100,7 +1857,7 @@ describe("MarkdownWorkbench real Crepe ownership", () => {
     expect(crepeControls.getMarkdownCalls).toBe(2);
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
     expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("visual\n");
-    expect(crepeControls.destroyCalls).toBe(1);
+    expect(crepeControls.destroyCalls).toBe(0);
 
     crepeControls.failGetMarkdown = false;
     await clickRole("button", "Retry");
@@ -1224,7 +1981,7 @@ describe("ordinary direct actions", () => {
     expect(states).toEqual([]);
   });
 });
-function AutosaveHarness({ identity, requests, onController }: { identity: string; requests: AutosaveSaveRequest[]; onController?(controller: AutosaveControllerApi): void }) {
+function AutosaveHarness({ identity, requests, onController, visible = true }: { identity: string; requests: AutosaveSaveRequest[]; onController?(controller: AutosaveControllerApi): void; visible?: boolean }) {
   const [source, setSource] = React.useState("first");
   const { controller } = useAutosave({
     pasteIdentity: identity,
@@ -1240,7 +1997,7 @@ function AutosaveHarness({ identity, requests, onController }: { identity: strin
     onCoalescedIntent: () => undefined,
   });
   React.useLayoutEffect(() => { onController?.(controller); }, [controller, onController]);
-  return <PlaintextEditor value={source} wrap="off" autosave={controller} onSourceEvent={(event) => setSource(event.content)} />;
+  return visible ? <PlaintextEditor value={source} wrap="off" autosave={controller} onSourceEvent={(event) => setSource(event.content)} /> : null;
 }
 
 function VisualAutosaveHarness({ requests }: { requests: AutosaveSaveRequest[] }) {
@@ -1272,14 +2029,16 @@ function VisualAutosaveHarness({ requests }: { requests: AutosaveSaveRequest[] }
 function RealMarkdownHarness({
   autosave,
   onSourceEvent,
+  initialSource = "first",
 }: {
   autosave: { input(content: string, eventAt: number): void; compositionStart(): void; compositionEnd(): void };
   onSourceEvent(event: SourceEvent): void;
+  initialSource?: string;
 }) {
-  const [source, setSource] = React.useState("first");
+  const [source, setSource] = React.useState(initialSource);
   return <MarkdownWorkbench
     source={source}
-    initialSource="first"
+    initialSource={initialSource}
     initialMarkdown={null}
     wrap="off"
     autosave={autosave}

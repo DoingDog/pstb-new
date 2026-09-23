@@ -625,6 +625,20 @@ describe("paste API", () => {
     expect(deletedReader).not.toHaveBeenCalled();
   });
 
+  it("accepts a browser-normalized empty 204 without content encoding but rejects nonempty bytes", async () => {
+    const empty = emptyStreamResponse(204);
+    const nonempty = emptyStreamResponse(204);
+    nonempty.arrayBuffer.mockResolvedValue(new Uint8Array([1]).buffer);
+
+    expect(await api(queuedFetch(empty).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() })).toEqual({
+      ok: true, status: 204, value: null, etag: null,
+    });
+    expect(empty.arrayBuffer).toHaveBeenCalledOnce();
+    expect(await api(queuedFetch(nonempty).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() })).toMatchObject({
+      ok: false, failure: { kind: "malformed", status: 204, mutationMayHaveApplied: true },
+    });
+  });
+
   it("accepts a browser-normalized empty gzip 204 and rejects nonempty gzip bodies", async () => {
     const empty = emptyStreamResponse(204, { "Content-Encoding": "gzip" });
     const nonempty = emptyStreamResponse(204, { "Content-Encoding": "gzip" });
@@ -636,21 +650,31 @@ describe("paste API", () => {
     expect(rejected).toMatchObject({ ok: false, failure: { kind: "malformed", status: 204, mutationMayHaveApplied: true } });
   });
 
-  it("review round 1: rejects present zero-length 304 and 204 streams", async () => {
+  it("accepts a browser-normalized empty 304 stream but rejects nonempty bytes", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const empty = emptyStreamResponse(304, { ETag: validator });
+    const nonempty = emptyStreamResponse(304, { ETag: validator });
+    nonempty.arrayBuffer.mockResolvedValue(new Uint8Array([1]).buffer);
+
+    expect(await api(queuedFetch(empty).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() })).toEqual({
+      kind: "not-modified", etag: validator,
+    });
+    expect(empty.arrayBuffer).toHaveBeenCalledOnce();
+    expect(await api(queuedFetch(nonempty).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() })).toMatchObject({
+      kind: "failure", failure: { kind: "malformed", status: 304, mutationMayHaveApplied: false },
+    });
+  });
+
+  it("rejects a browser-normalized 304 stream when its body cannot be read", async () => {
     const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
     const notModified = emptyStreamResponse(304, { ETag: validator });
-    const deleted = emptyStreamResponse(204);
-    const results = await Promise.all([
-      api(queuedFetch(notModified).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() }),
-      api(queuedFetch(deleted).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() }),
-    ]);
+    notModified.arrayBuffer.mockRejectedValue(new Error("Unreadable stream"));
+    const result = await api(queuedFetch(notModified).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() });
 
-    expect(results).toMatchObject([
-      { kind: "failure", failure: { kind: "malformed", status: 304, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false } },
-      { ok: false, failure: { kind: "malformed", status: 204, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: true } },
-    ]);
-    expect(notModified.arrayBuffer).not.toHaveBeenCalled();
-    expect(deleted.arrayBuffer).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      kind: "failure", failure: { kind: "malformed", status: 304, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false },
+    });
+    expect(notModified.arrayBuffer).toHaveBeenCalledOnce();
   });
 
   it("review round 1: rejects extra response media and cache tokens", async () => {

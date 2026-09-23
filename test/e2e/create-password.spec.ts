@@ -84,15 +84,10 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   await page.getByRole("tab", { name: "Edit", exact: true }).click();
   const editor = page.getByRole("textbox", { name: "Content", exact: true });
   await expect(editor).toHaveValue(initialContent);
-  let firstPatchStarted = false;
   const isFirstDebouncedPatch = (request: Request) => request.method() === "PATCH"
     && new URL(request.url()).pathname === apiPath
     && request.postDataJSON().content === debounceContent;
   const firstPatch = page.waitForRequest(isFirstDebouncedPatch);
-  const markFirstPatch = (request: Request) => {
-    if (isFirstDebouncedPatch(request)) firstPatchStarted = true;
-  };
-  page.on("request", markFirstPatch);
   await editor.evaluate((element) => {
     element.addEventListener("input", (event) => {
       (element as HTMLTextAreaElement & { e2eInputEventAt?: number }).e2eInputEventAt = performance.timeOrigin + event.timeStamp;
@@ -104,8 +99,6 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
     if (eventAt === undefined) throw new Error("Content input event was not observed");
     return eventAt;
   });
-  await page.waitForTimeout(900);
-  expect(firstPatchStarted).toBe(false);
   const firstRequest = await firstPatch;
   const firstResponse = await firstRequest.response();
   if (firstResponse === null) throw new Error("First debounced PATCH did not receive a response");
@@ -114,7 +107,6 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   const debounceTolerance = 250; // Allows Windows scheduler variance without admitting a two-second debounce.
   expect(debounceElapsed).toBeGreaterThanOrEqual(1_000);
   expect(debounceElapsed).toBeLessThanOrEqual(1_000 + debounceTolerance);
-  page.off("request", markFirstPatch);
   await expectSaved(page);
   await page.reload();
   await page.getByRole("tab", { name: "Edit", exact: true }).click();

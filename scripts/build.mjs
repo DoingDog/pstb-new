@@ -124,7 +124,7 @@ async function assertWranglerConfig() {
     routeKeys[0] !== "custom_domain" ||
     routeKeys[1] !== "pattern" ||
     routeKeys[2] !== "previews_enabled" ||
-    route?.pattern !== "b-new.awsl.app" ||
+    route?.pattern !== "n.awsl.app" ||
     route?.custom_domain !== true ||
     route?.previews_enabled !== false
   ) {

@@ -12,9 +12,9 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe("legacy removal", () => {
-  it("ships only the module Worker and retains the ip-trace reference", async () => {
+  it("ships only the module Worker without legacy scripts", async () => {
     expect(await exists("worker.js")).toBe(false);
-    expect(await readFile("aioapi.js", "utf8")).toContain("request.clone().text()");
+    expect(await exists("aioapi.js")).toBe(false);
     expect(await readFile("wrangler.jsonc", "utf8")).toContain('"main": "src/index.ts"');
     expect(await readFile("src/index.ts", "utf8")).not.toContain('addEventListener("fetch"');
   });

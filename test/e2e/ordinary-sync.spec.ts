@@ -89,6 +89,13 @@ async function waitForUnchangedAutosync(page: Page): Promise<void> {
   await expect(page.locator('[data-operation-record="autosync"]')).toContainText("Unchanged");
 }
 
+async function waitForNewUnchangedAutosync(page: Page, previous: string): Promise<void> {
+  await expect.poll(async () => page.locator('[data-operation-record="autosync"]').evaluate((record, old) => {
+    const checkedAt = record.querySelector("time")?.getAttribute("datetime");
+    return record.querySelector("dd > span")?.textContent === "Unchanged" && checkedAt !== null && checkedAt !== undefined && checkedAt !== old;
+  }, previous)).toBe(true);
+}
+
 async function loadResource(request: APIRequestContext, id: string): Promise<Resource> {
   const response = await request.get(resourcePath(id));
   expect(response.status()).toBe(200);
@@ -208,16 +215,97 @@ test("ordinary sync uses sequential conditional resource reads and applies a rea
   expect(remoteRead.status()).toBe(200);
   await expect(page.locator("[data-plain-view]")).toHaveText(remote);
   await expect(page.locator('[data-operation-record="autosync"]')).toContainText("Remote changes applied");
+  const autosyncTime = page.locator('[data-operation-record="autosync"] time');
+  const appliedAt = await autosyncTime.getAttribute("datetime");
+  expect(appliedAt).not.toBeNull();
 
   const resetResponse = waitForResourceResponse(page, id);
   await page.clock.fastForward(3_000);
-  await expectConditionalResourceResponse(await resetResponse, remoteRead.headers()["etag"]!);
+  const resetRead = await resetResponse;
+  expect(resetRead.request().headers()["if-none-match"]).toBe(remoteRead.headers()["etag"]);
+  await expectConditionalResourceResponse(resetRead, remoteRead.headers()["etag"]!);
+  await waitForNewUnchangedAutosync(page, appliedAt!);
+  const firstCheckedAt = await autosyncTime.getAttribute("datetime");
+  const secondUnchanged = waitForResourceResponse(page, id);
+  await page.clock.fastForward(3_000);
+  await expectConditionalResourceResponse(await secondUnchanged, remoteRead.headers()["etag"]!);
+  await waitForNewUnchangedAutosync(page, firstCheckedAt!);
   const reads = resourceReads(traffic, id);
   expect(reads.at(-1)?.headers["if-none-match"]).toBe(remoteRead.headers()["etag"]);
   expect(traffic.maxOpenResourceReads).toBe(1);
   expect(traffic.assets.every((asset) => isHashedAsset(asset.path))).toBe(true);
 
   await writer.close();
+});
+
+test("ordinary Edit keeps IME preedit and autosaves the committed Chinese text", async ({ page, request }) => {
+  const { id } = await createPaste(request, { content: "first" });
+  await openOrdinary(page, id, "first");
+  await page.getByRole("tab", { name: "Edit" }).click();
+
+  const preedit = await page.evaluate(() => {
+    const textarea = document.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    setter.call(textarea, "first中");
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    return textarea.value;
+  });
+  expect(preedit).toBe("first中");
+
+  await page.evaluate(() => {
+    const textarea = document.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    setter.call(textarea, "first中文");
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: false }));
+  });
+  await expect(page.getByRole("textbox", { name: "Content" })).toHaveValue("first中文");
+  const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === resourcePath(id));
+  await page.clock.runFor(1_100);
+  expect((await saved).status()).toBe(200);
+  await expect.poll(async () => (await (await request.get(resourcePath(id))).json() as { content: string }).content).toBe("first中文");
+});
+
+test("Markdown Visual composition pauses remote sync and resumes after commit", async ({ page, request }) => {
+  const { id } = await createPaste(request, { content: "first\n", format: "markdown" });
+  const traffic = watchTraffic(page, id);
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(clockPauseAt);
+  await page.goto(`/${id}`);
+  await page.waitForLoadState("networkidle");
+  await page.clock.runFor(300);
+  await page.getByRole("tab", { name: "Markdown" }).click();
+  await page.getByRole("tab", { name: "Visual" }).click();
+  await expect(page.locator(".ProseMirror")).toBeVisible();
+
+  await page.evaluate(() => document.querySelector(".ProseMirror")!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  await page.clock.fastForward(3_000);
+  expect(resourceReads(traffic, id)).toHaveLength(0);
+  await page.evaluate(() => document.querySelector(".ProseMirror")!.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+  await page.clock.runFor(50);
+  const resumed = waitForResourceResponse(page, id);
+  await page.clock.fastForward(3_000);
+  expect((await resumed).status()).toBe(200);
+});
+
+test("ordinary Edit resumes autosave after a mobile IME omits compositionend", async ({ page, request }) => {
+  const { id } = await createPaste(request, { content: "first" });
+  await openOrdinary(page, id, "first");
+  await page.getByRole("tab", { name: "Edit" }).click();
+  await page.evaluate(() => {
+    const textarea = document.querySelector("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    textarea.focus();
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    setter.call(textarea, "中文");
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    textarea.blur();
+  });
+  const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === resourcePath(id));
+  await page.clock.runFor(1_100);
+  expect((await saved).status()).toBe(200);
+  await expect.poll(async () => (await (await request.get(resourcePath(id))).json() as { content: string }).content).toBe("中文");
 });
 
 test("ordinary sync holds a real resource response without overlap and resumes from settlement", async ({ page, request }) => {

@@ -8,7 +8,7 @@
     {
       "localPath": "src/client/App.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/blocks/sidebar-11/page.tsx",
-      "sha256": "d877220dadd17e8b74396ebf9dd3247a944cd9093504e155f3657ef07e19b85b"
+      "sha256": "a8726cf7cd27546f066ebebdcf7edcd18da8111ba0d48d817bccb635e030f22a"
     },
     {
       "localPath": "src/client/components/app-sidebar.tsx",

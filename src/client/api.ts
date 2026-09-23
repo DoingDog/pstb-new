@@ -579,9 +579,15 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
           || !isNoStore(response.headers.get("cache-control"))
           || response.headers.has("content-type")
           || response.headers.has("content-length")
-          || response.headers.has("trailer")
-          || response.body !== null) {
+          || response.headers.has("trailer")) {
           return { kind: "failure", failure: malformed(304, false) };
+        }
+        if (response.body !== null) {
+          try {
+            if ((await response.arrayBuffer()).byteLength !== 0) return { kind: "failure", failure: malformed(304, false) };
+          } catch {
+            return { kind: "failure", failure: malformed(304, false) };
+          }
         }
         return { kind: "not-modified", etag };
       }
@@ -710,7 +716,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
       }
 
       let emptyBody = response.body === null;
-      if (!emptyBody && equalsAsciiIgnoreCase(response.headers.get("content-encoding") ?? "", "gzip")) {
+      if (!emptyBody) {
         try { emptyBody = (await response.arrayBuffer()).byteLength === 0; } catch { emptyBody = false; }
       }
       if (!isNoStore(response.headers.get("cache-control"))

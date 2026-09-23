@@ -17,6 +17,8 @@ const visual = vi.hoisted(() => {
 
   interface FakeEditorView {
     state: { doc: FakeDoc };
+    dom: EventTarget;
+    composing: boolean;
   }
 
   interface FakeDocumentPlugin {
@@ -37,6 +39,7 @@ const visual = vi.hoisted(() => {
     markdown = "";
     getMarkdownCalls = 0;
     private doc = fakeDocument("");
+    private readonly dom = new EventTarget();
     private documentPlugin: FakeDocumentPlugin | undefined;
     private documentView: ReturnType<NonNullable<FakeDocumentPlugin["spec"]["view"]>> | undefined;
     readonly editor = {
@@ -56,7 +59,7 @@ const visual = vi.hoisted(() => {
     }
 
     async create(): Promise<void> {
-      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
+      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc }, dom: this.dom, composing: false });
     }
 
     async destroy(): Promise<void> {}
@@ -71,12 +74,12 @@ const visual = vi.hoisted(() => {
       const previous = { doc: this.doc };
       this.markdown = markdown;
       this.doc = fakeDocument(markdown);
-      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
+      this.documentView?.update?.({ state: { doc: this.doc }, dom: this.dom, composing: false }, previous);
     }
 
     sameDocumentUpdate(): void {
       const previous = { doc: this.doc };
-      this.documentView?.update?.({ state: { doc: fakeDocument(this.markdown) } }, previous);
+      this.documentView?.update?.({ state: { doc: fakeDocument(this.markdown) }, dom: this.dom, composing: false }, previous);
     }
   }
 
@@ -712,6 +715,20 @@ describe("AutosaveController", () => {
     clock.advance(1_000);
 
     expect(save.calls).toEqual([]);
+  });
+
+  it("warns beforeunload while IME text has not been committed", () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    vi.stubGlobal("document", {});
+    vi.stubGlobal("addEventListener", addEventListener);
+    vi.stubGlobal("removeEventListener", removeEventListener);
+    const { clock, controller } = autosaveFixture();
+
+    controller.compositionStart();
+    expect(addEventListener).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+    controller.compositionEnd("first", clock.now());
+    expect(removeEventListener).toHaveBeenCalledWith("beforeunload", expect.any(Function));
   });
 
   it("registers beforeunload only while dirty or saving", async () => {

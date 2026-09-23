@@ -36,6 +36,7 @@ export interface ContentModesProps {
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
+  readSourceState?(): { source: string; revision: number; compositionId: number };
   onSurfaceMounted?(surface: DerivedSurface, mounted: boolean): void;
   locale?: Locale;
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
@@ -57,6 +58,7 @@ export function ContentModes({
   wrap,
   autosave,
   onSourceEvent,
+  readSourceState,
   onSurfaceMounted,
   locale = "en",
   importBrowserMarkdown,
@@ -76,6 +78,7 @@ export function ContentModes({
         wrap={wrap}
         autosave={autosave}
         onSourceEvent={onSourceEvent}
+        {...(readSourceState === undefined ? {} : { readSourceState })}
         locale={locale}
         preparedVisual={derivedVisual}
         preparedPreview={derivedPreview}

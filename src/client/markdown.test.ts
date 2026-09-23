@@ -8,6 +8,8 @@ const crepe = vi.hoisted(() => {
 
   interface FakeEditorView {
     state: { doc: FakeDoc };
+    dom: EventTarget;
+    composing: boolean;
   }
 
   interface FakeDocumentPlugin {
@@ -44,7 +46,9 @@ const crepe = vi.hoisted(() => {
     markdown: string;
     getMarkdownCalls = 0;
     destroyed = false;
-    private doc: FakeDoc;
+    private doc = fakeDocument("");
+    private readonly dom = new EventTarget();
+    readonly view: FakeEditorView = { state: { doc: this.doc }, dom: this.dom, composing: false };
     private readonly root: FakeVisualRoot;
     private readonly rootNode = {} as Node;
     private documentPlugin: FakeDocumentPlugin | undefined;
@@ -74,7 +78,8 @@ const crepe = vi.hoisted(() => {
     }
 
     async create(): Promise<void> {
-      this.documentView = this.documentPlugin?.spec.view?.({ state: { doc: this.doc } });
+      this.view.state = { doc: this.doc };
+      this.documentView = this.documentPlugin?.spec.view?.(this.view);
       state.onCreate?.();
       if (state.createWait !== undefined) await state.createWait;
       if (state.failCreate) throw new Error("Crepe failed to initialize");
@@ -97,7 +102,8 @@ const crepe = vi.hoisted(() => {
       const previous = { doc: this.doc };
       this.markdown = markdown;
       this.doc = fakeDocument(markdown);
-      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
+      this.view.state = { doc: this.doc };
+      this.documentView?.update?.(this.view, previous);
       if (this.markdownUpdated.length > 0) {
         setTimeout(() => this.markdownUpdated.forEach((callback) => callback()), 1_000);
       }
@@ -106,7 +112,8 @@ const crepe = vi.hoisted(() => {
     documentStateReplaced(): void {
       const previous = { doc: this.doc };
       this.doc = fakeDocument(this.markdown);
-      this.documentView?.update?.({ state: { doc: this.doc } }, previous);
+      this.view.state = { doc: this.doc };
+      this.documentView?.update?.(this.view, previous);
     }
 
     appendLateNode(): Node {
@@ -167,6 +174,7 @@ function fixture() {
   const onPreview = vi.fn();
   const onVisualError = vi.fn();
   const onModeChange = vi.fn();
+  const onVisualCompositionEnd = vi.fn();
   const modes = createMarkdownModes({
     source,
     visualRoot,
@@ -174,8 +182,9 @@ function fixture() {
     onPreview,
     onVisualError,
     onModeChange,
+    onVisualCompositionEnd,
   });
-  return { source, visualRoot, onDocumentChange, onPreview, onVisualError, onModeChange, modes };
+  return { source, visualRoot, onDocumentChange, onPreview, onVisualError, onModeChange, onVisualCompositionEnd, modes };
 }
 
 beforeEach(() => {
@@ -299,7 +308,25 @@ describe("createMarkdownModes", () => {
     expect(onDocumentChange).toHaveBeenCalledWith("# serialized\n");
   });
 
-  it("cleans up after dirty serialization fails and exposes a retry", async () => {
+  it("resumes serialization when ProseMirror clears a missing-end composition after the first fallback check", async () => {
+    const { source, onDocumentChange, onVisualCompositionEnd, modes } = fixture();
+    await modes.enterVisual();
+    const editor = crepe.state.instances[0]!;
+    vi.useFakeTimers();
+    editor.view.composing = true;
+    editor.view.dom.dispatchEvent(new Event("compositionstart"));
+    editor.documentChanged("中文");
+    vi.advanceTimersByTime(5_100);
+    expect(onVisualCompositionEnd).not.toHaveBeenCalled();
+
+    editor.view.composing = false;
+    vi.advanceTimersByTime(1_025);
+    expect(source.value).toBe("中文");
+    expect(onDocumentChange).toHaveBeenCalledWith("中文");
+    expect(onVisualCompositionEnd).toHaveBeenCalledWith("中文");
+  });
+
+  it("retains the dirty Visual editor until a failed Source teardown is retried", async () => {
     const { source, visualRoot, onDocumentChange, onModeChange, onVisualError, modes } = fixture();
     const lastValid = "# last valid  \n\n";
 
@@ -313,8 +340,8 @@ describe("createMarkdownModes", () => {
     expect(source.value).toBe(lastValid);
     expect(onDocumentChange).toHaveBeenCalledTimes(1);
     expect(onDocumentChange).toHaveBeenCalledWith(lastValid);
-    expect(editor.destroyed).toBe(true);
-    expect(visualRoot.childNodes).toEqual([]);
+    expect(editor.destroyed).toBe(false);
+    expect(visualRoot.childNodes).toHaveLength(1);
     expect(onModeChange).toHaveBeenLastCalledWith("source");
     expect(onVisualError).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Crepe failed to serialize" }),
@@ -323,11 +350,10 @@ describe("createMarkdownModes", () => {
     crepe.state.failGetMarkdown = false;
     await onVisualError.mock.calls[0]![0].retry();
 
-    expect(crepe.state.instances).toHaveLength(2);
-    expect(crepe.state.instances[0]!.destroyed).toBe(true);
-    expect(crepe.state.instances[1]!.markdown).toBe(lastValid);
-    expect(visualRoot.childNodes).toHaveLength(1);
-    expect(onModeChange).toHaveBeenLastCalledWith("visual");
+    expect(crepe.state.instances).toEqual([editor]);
+    expect(editor.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([]);
+    expect(onModeChange).toHaveBeenLastCalledWith("source");
   });
 
   it.each([
@@ -348,8 +374,8 @@ describe("createMarkdownModes", () => {
 
     expect(source.value).toBe(canonical);
     expect(onDocumentChange).toHaveBeenCalledTimes(1);
-    expect(editor.destroyed).toBe(true);
-    expect(visualRoot.childNodes).toEqual([]);
+    expect(editor.destroyed).toBe(false);
+    expect(visualRoot.childNodes).toHaveLength(1);
     expect(onPreview).not.toHaveBeenCalled();
     expect(preview.micromark).not.toHaveBeenCalled();
     expect(onModeChange).toHaveBeenLastCalledWith("source");
@@ -358,14 +384,13 @@ describe("createMarkdownModes", () => {
     );
 
     crepe.state.failGetMarkdown = false;
-    crepe.state.failDestroy = false;
-    crepe.state.preserveRootOnDestroy = false;
     await onVisualError.mock.calls[0]![0].retry();
 
-    expect(crepe.state.instances).toHaveLength(2);
-    expect(crepe.state.instances[1]!.markdown).toBe(canonical);
-    expect(visualRoot.childNodes).toHaveLength(1);
-    expect(onModeChange).toHaveBeenLastCalledWith("visual");
+    expect(crepe.state.instances).toEqual([editor]);
+    expect(editor.destroyed).toBe(true);
+    expect(visualRoot.childNodes).toEqual([]);
+    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ source: canonical }));
+    expect(onModeChange).toHaveBeenLastCalledWith("preview");
   });
 
   it.each([
@@ -489,7 +514,7 @@ describe("createMarkdownModes", () => {
     await retry();
 
     expect(source.value).toBe(canonical);
-    expect(editor.destroyed).toBe(true);
+    expect(editor.destroyed).toBe(false);
     expect(onDocumentChange).not.toHaveBeenCalled();
   });
 

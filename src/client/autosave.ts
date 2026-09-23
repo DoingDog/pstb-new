@@ -478,7 +478,7 @@ export class AutosaveController implements AutosaveControllerApi {
   private updateBeforeUnloadWarning(): void {
     if (typeof document === "undefined") return;
 
-    const needed = this.draft !== this.acceptedSource || this.inFlightContent !== null;
+    const needed = this.composing || this.draft !== this.acceptedSource || this.inFlightContent !== null;
     if (needed && !this.unloadRegistered) {
       globalThis.addEventListener("beforeunload", this.beforeUnload);
       this.unloadRegistered = true;

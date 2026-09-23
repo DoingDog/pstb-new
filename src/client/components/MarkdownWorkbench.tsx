@@ -22,6 +22,7 @@ export interface MarkdownWorkbenchProps {
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
+  readSourceState?(): { source: string; revision: number; compositionId: number };
   locale?: Locale;
   now?(): number;
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
@@ -49,12 +50,16 @@ type ModeOwner = {
   failedTarget: MarkdownMode | null;
   localAcknowledgement: string | null;
   pendingAutosave: { content: string; eventAt: number; request: number } | null;
+  visualComposing: boolean;
+  visualCompositionRevision: number | null;
+  visualCompositionId: number | null;
   preparedVisual: PreparedMarkdownVisual | null;
   controller: MarkdownModes;
 };
 type Ports = {
   autosave: MarkdownWorkbenchProps["autosave"];
   onSourceEvent: MarkdownWorkbenchProps["onSourceEvent"];
+  readSourceState: MarkdownWorkbenchProps["readSourceState"];
   now: NonNullable<MarkdownWorkbenchProps["now"]>;
   initialMarkdown: TrustedMarkdownHtml | null;
   initialSource: string;
@@ -84,6 +89,7 @@ export function MarkdownWorkbench({
   wrap,
   autosave,
   onSourceEvent,
+  readSourceState,
   locale = "en",
   now = browserNow,
   importBrowserMarkdown,
@@ -107,6 +113,7 @@ export function MarkdownWorkbench({
   const ports = React.useRef<Ports>({
     autosave,
     onSourceEvent,
+    readSourceState,
     now,
     initialMarkdown,
     initialSource,
@@ -129,7 +136,7 @@ export function MarkdownWorkbench({
       if (next !== "source") setMode(next);
       return;
     }
-    if (owner.failedTarget === next) return;
+    if (owner.failedTarget === next || (next === "visual" && owner.failedTarget !== null && owner.teardown?.editorGeneration)) return;
     owner.failedTarget = null;
 
     const request = ++requestGeneration.current;
@@ -139,7 +146,6 @@ export function MarkdownWorkbench({
       owner.editorGeneration = request;
       owner.editorSource = sourceAdapter.current.value;
       owner.readyEditorGeneration = 0;
-      owner.teardown = null;
     } else {
       owner.teardown = {
         request,
@@ -213,6 +219,7 @@ export function MarkdownWorkbench({
           publishFailure();
           return;
         }
+        owner.teardown = null;
         setMode("visual");
         return;
       }
@@ -226,12 +233,14 @@ export function MarkdownWorkbench({
         if (!current()) return;
         await owner.controller.enterSource();
         if (!current()) return;
-        owner.editorGeneration = 0;
-        owner.readyEditorGeneration = 0;
-        owner.teardown = null;
-        setPreview({ source: ports.current.initialSource, html: ports.current.initialMarkdown });
-        setMode("preview");
-        return;
+        if (sourceAdapter.current.value === ports.current.initialSource) {
+          owner.editorGeneration = 0;
+          owner.readyEditorGeneration = 0;
+          owner.teardown = null;
+          setPreview({ source: ports.current.initialSource, html: ports.current.initialMarkdown });
+          setMode("preview");
+          return;
+        }
       }
 
       await visualTeardown;
@@ -313,13 +322,16 @@ export function MarkdownWorkbench({
       }
 
       const target = owner.target;
+      const retainedVisual = owner.teardown !== null && owner.teardown.editorGeneration !== 0;
       const failedRequest = ++requestGeneration.current;
       const failedSource = sourceAdapter.current.value;
       owner.request = failedRequest;
       owner.target = "source";
-      owner.editorGeneration = 0;
-      owner.readyEditorGeneration = 0;
-      owner.teardown = null;
+      if (!retainedVisual) {
+        owner.editorGeneration = 0;
+        owner.readyEditorGeneration = 0;
+        owner.teardown = null;
+      }
       owner.failedTarget = target;
       owner.pendingAutosave = null;
       setMode("source");
@@ -358,12 +370,12 @@ export function MarkdownWorkbench({
         owner.editorGeneration === owner.request &&
         owner.readyEditorGeneration === owner.editorGeneration;
       const ownsTeardown =
-        (owner.target === "source" || owner.target === "preview") &&
         teardown !== null &&
-        teardown.request === owner.request &&
         teardown.editorGeneration !== 0 &&
-        teardown.editorGeneration === owner.editorGeneration &&
-        teardown.source === owner.editorSource;
+        teardown.source === owner.editorSource &&
+        ((owner.target === "source" || owner.target === "preview")
+          ? teardown.request === owner.request && teardown.editorGeneration === owner.editorGeneration
+          : owner.target === "visual" && owner.readyEditorGeneration === 0 && teardown.request < owner.request);
       if (!current() || !ownsSource || (!ownsVisual && !ownsTeardown)) return;
       ++owner.serializerGeneration;
       owner.failedTarget = null;
@@ -374,10 +386,34 @@ export function MarkdownWorkbench({
       owner.pendingAutosave = { content, eventAt, request: owner.request };
       sourceAdapter.current.value = content;
       ports.current.onSourceEvent({ type: "crepe-change", content, eventAt });
+      if (owner.visualComposing) owner.visualCompositionRevision = ports.current.readSourceState?.().revision ?? null;
       if (directAutosave) {
         owner.pendingAutosave = null;
         ports.current.autosave.input(content, eventAt);
       }
+    };
+    const onVisualCompositionStart = (): void => {
+      if (!current() || owner.visualComposing) return;
+      owner.visualComposing = true;
+      const eventAt = ports.current.now();
+      ports.current.onSourceEvent({ type: "composition-start", content: sourceAdapter.current.value, eventAt });
+      const state = ports.current.readSourceState?.();
+      owner.visualCompositionRevision = state?.revision ?? null;
+      owner.visualCompositionId = state?.compositionId ?? null;
+      ports.current.autosave.compositionStart();
+    };
+    const onVisualCompositionEnd = (content: string): void => {
+      if (!owner.visualComposing) return;
+      owner.visualComposing = false;
+      const state = ports.current.readSourceState?.();
+      if (state !== undefined && state.compositionId !== owner.visualCompositionId) return;
+      if (state === undefined && (owner.generation !== ownerGeneration.current || (owners.current !== owner && owners.current !== null))) return;
+      const superseded = owner.generation !== ownerGeneration.current || (owners.current !== owner && owners.current !== null)
+        || (state !== undefined && state.revision !== owner.visualCompositionRevision);
+      const committed = superseded ? state?.source ?? sourceAdapter.current.value : content;
+      const eventAt = ports.current.now();
+      ports.current.onSourceEvent({ type: "composition-end", content: committed, eventAt });
+      ports.current.autosave.compositionEnd(committed, eventAt);
     };
     const onPreview = (nextPreview: MarkdownPreview): void => {
       if (
@@ -411,12 +447,16 @@ export function MarkdownWorkbench({
         ...(ports.current.loadPreview === undefined ? {} : { loadPreview: ports.current.loadPreview }),
         onModeChange,
         onCrepeChange: (content, eventAt) => onCrepeChange(content, eventAt),
+        onVisualCompositionStart,
+        onVisualCompositionEnd,
         onPreview,
         onVisualError: ({ retry }) => fail(retry),
       })
       : (() => {
         stagedVisual.bind({
           onDocumentChange: (content) => onCrepeChange(content, ports.current.now(), true),
+          onVisualCompositionStart,
+          onVisualCompositionEnd,
           onModeChange,
           onPreview,
           onVisualError: ({ retry }) => fail(retry),
@@ -436,6 +476,9 @@ export function MarkdownWorkbench({
     owner.failedTarget = null;
     owner.localAcknowledgement = null;
     owner.pendingAutosave = null;
+    owner.visualComposing = false;
+    owner.visualCompositionRevision = null;
+    owner.visualCompositionId = null;
     owner.preparedVisual = stagedVisual;
     owner.controller = controller;
     owners.current = owner;
@@ -461,6 +504,7 @@ export function MarkdownWorkbench({
     ports.current = {
       autosave,
       onSourceEvent,
+      readSourceState,
       now,
       initialMarkdown,
       initialSource,
@@ -507,7 +551,7 @@ export function MarkdownWorkbench({
       return;
     }
     if (source === owner.source) {
-      sourceAdapter.current.value = source;
+      if (owner.localAcknowledgement === null) sourceAdapter.current.value = source;
       return;
     }
     if (owner.localAcknowledgement === source) {

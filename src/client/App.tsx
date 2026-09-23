@@ -168,7 +168,7 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
   return (
     <>
       <label htmlFor="document-locale" className="flex min-w-0 flex-col gap-1 text-xs">
-        <span>{copy.locale}</span>
+        <span className="sr-only">{copy.locale}</span>
         <select
           id="document-locale"
           className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -180,7 +180,7 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
         </select>
       </label>
       <label htmlFor="document-theme" className="flex min-w-0 flex-col gap-1 text-xs">
-        <span>{copy.theme}</span>
+        <span className="sr-only">{copy.theme}</span>
         <select
           id="document-theme"
           className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

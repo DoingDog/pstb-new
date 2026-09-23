@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-12-cloudflare-pastebin-rewrite-design.md`（binding authority）；视觉细化为 `docs/superpowers/specs/2026-09-13-pastebin-ui-direction.md`。
 
+**2026-09-23 发布覆盖：** 唯一生产 custom domain 改为 `n.awsl.app`，移除旧 `b-new.awsl.app`；删除旧 `aioapi.js`，公开前检查密钥，生产部署后以 Unlicense 创建公开的 `DoingDog/pstb-new` 并推送。下文此前的域名、保留 `aioapi.js` 和不推送要求均以此条为准。
+
 ## Global Constraints
 
 - 业务存储只有 `env.PASTE_DB` 一个 KV namespace；不增加 Durable Object、D1、R2、Queue、第二个 KV、Cache correctness layer、service binding、account、owner/session token、global auth、rate limit或其他协调服务。

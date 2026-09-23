@@ -22,6 +22,8 @@ export interface MarkdownModesOptions {
   source: Pick<HTMLTextAreaElement, "value">;
   visualRoot: Node;
   onDocumentChange(markdown: string): void;
+  onVisualCompositionStart?(): void;
+  onVisualCompositionEnd?(markdown: string): void;
   onModeChange?(mode: MarkdownMode): void;
   onPreview?(preview: MarkdownPreview): void;
   onVisualError?(error: { message: string; retry(): Promise<void> }): void;
@@ -38,6 +40,8 @@ export interface MarkdownModes {
 
 export interface PreparedMarkdownVisualBinding {
   onDocumentChange(markdown: string): void;
+  onVisualCompositionStart?(): void;
+  onVisualCompositionEnd?(markdown: string): void;
   onModeChange?(mode: MarkdownMode): void;
   onPreview?(preview: MarkdownPreview): void;
   onVisualError?(error: { message: string; retry(): Promise<void> }): void;
@@ -75,6 +79,8 @@ export async function prepareMarkdownVisual(sourceValue: string, ownerDocument: 
     source,
     visualRoot: root,
     onDocumentChange: (markdown) => binding.onDocumentChange(markdown),
+    onVisualCompositionStart: () => binding.onVisualCompositionStart?.(),
+    onVisualCompositionEnd: (markdown) => binding.onVisualCompositionEnd?.(markdown),
     onModeChange: (mode) => {
       ready = mode === "visual";
       binding.onModeChange?.(mode);
@@ -114,6 +120,9 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   let visualSession: HTMLElement | undefined;
   let visualSerialized = "";
   let visualDirty = false;
+  let visualCompositionActive = false;
+  let visualCompositionEnded = false;
+  let visualCompositionSerial = 0;
   let visualReady = false;
   let visualTransition = 0;
   let transition = 0;
@@ -162,25 +171,36 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   const leaveCurrentVisual = async (): Promise<void> => {
     const editor = visualEditor;
     const session = visualSession;
-    const wasDirty = visualDirty;
-    const serialized = visualSerialized;
+    const wasComposing = visualCompositionActive;
+    const compositionEnded = visualCompositionEnded;
+    if (editor !== undefined && wasComposing && compositionEnded) {
+      await new Promise<void>((resolve) => {
+        const deadline = setTimeout(resolve, 125);
+        requestAnimationFrame(() => setTimeout(() => {
+          clearTimeout(deadline);
+          resolve();
+        }, 25));
+      });
+    }
+    if (editor !== undefined && visualDirty && (!wasComposing || compositionEnded) && options.source.value === visualSerialized) {
+      const markdown = editor.getMarkdown();
+      if (markdown !== options.source.value) {
+        options.source.value = markdown;
+        options.onDocumentChange(markdown);
+      }
+    }
     visualEditor = undefined;
     visualSession = undefined;
     visualDirty = false;
+    visualCompositionActive = false;
+    visualCompositionEnded = false;
     visualReady = false;
     visualSerialized = "";
     visualTransition = 0;
 
     if (editor === undefined) return;
-
     try {
-      if (wasDirty && options.source.value === serialized) {
-        const markdown = editor.getMarkdown();
-        if (markdown !== options.source.value) {
-          options.source.value = markdown;
-          options.onDocumentChange(markdown);
-        }
-      }
+      if (wasComposing) options.onVisualCompositionEnd?.(options.source.value);
     } finally {
       await destroyEditor(editor, session);
     }
@@ -191,18 +211,18 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
       try {
         await leaveCurrentVisual();
       } catch (error) {
-        reportVisualError(id, error);
+        reportVisualError(id, error, enterSource);
         return;
       }
       if (current(id)) setMode("source");
     });
 
-  const reportVisualError = (id: number, error: unknown): void => {
+  const reportVisualError = (id: number, error: unknown, retry: () => Promise<void> = enterVisual): void => {
     if (!current(id)) return;
     setMode("source");
     options.onVisualError?.({
       message: error instanceof Error ? error.message : "Unable to start visual editor",
-      retry: enterVisual,
+      retry,
     });
   };
 
@@ -217,20 +237,24 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
   };
 
   const enterVisual = (): Promise<void> => {
-    if (visualReady && visualEditor !== undefined && visualTransition === transition) return Promise.resolve();
+    if (visualReady && visualEditor !== undefined && visualTransition === transition) {
+      setMode("visual");
+      return Promise.resolve();
+    }
 
     const id = ++transition;
-    const visualSourceSnapshot = options.source.value;
+    const requestedSource = options.source.value;
+    const pendingCompositionCommit = visualCompositionActive && visualCompositionEnded;
 
     return useVisualRoot(async () => {
-      if (!current(id) || visualEditor !== undefined) return false;
-      if (options.source.value !== visualSourceSnapshot) {
+      if (!current(id) || visualEditor !== undefined) return null;
+      if (!pendingCompositionCommit && options.source.value !== requestedSource) {
         setMode("source");
-        return false;
+        return null;
       }
-      return true;
-    }).then(async (canMount) => {
-      if (!canMount) return;
+      return options.source.value;
+    }).then(async (visualSourceSnapshot) => {
+      if (visualSourceSnapshot === null) return;
 
       let modules: MarkdownVisualModules;
       try {
@@ -265,44 +289,89 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
           editor = new Crepe({ root: mountedSession, defaultValue: visualSourceSnapshot });
           const mountedEditor = editor;
           let serializationAttempt = 0;
-          const serializeVisualDocument = (): void => {
-            if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return;
+          const serializeVisualDocument = (skipUnchanged = false): boolean => {
+            if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession) return false;
             const attempt = ++serializationAttempt;
             try {
               const markdown = mountedEditor.getMarkdown();
-              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return;
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return false;
+              if (skipUnchanged && markdown === visualSerialized) return true;
               visualSerialized = markdown;
               options.source.value = markdown;
               options.onDocumentChange(markdown);
+              return true;
             } catch (error) {
-              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return;
+              if (!ready || !current(id) || visualEditor !== mountedEditor || visualSession !== mountedSession || attempt !== serializationAttempt) return false;
               options.onVisualError?.({
                 message: error instanceof Error ? error.message : String(error),
                 retry: async () => {
-                  if (attempt === serializationAttempt) serializeVisualDocument();
+                  if (attempt !== serializationAttempt || !serializeVisualDocument() || !visualCompositionActive || !visualCompositionEnded) return;
+                  visualCompositionActive = false;
+                  visualCompositionEnded = false;
+                  options.onVisualCompositionEnd?.(options.source.value);
                 },
               });
+              return false;
             }
           };
           mountedEditor.editor.config((ctx) => {
             ctx.update(prosePluginsCtx, (plugins) =>
               plugins.concat(
                 new Plugin({
-                  view: () => ({
-                    update: (view, previous) => {
-                      if (
-                        !ready ||
-                        !current(id) ||
-                        view.state.doc.eq(previous.doc) ||
-                        visualEditor !== mountedEditor ||
-                        visualSession !== mountedSession
-                      ) {
-                        return;
+                  view: (view) => {
+                    const stillCurrent = () => ready && current(id) && visualEditor === mountedEditor && visualSession === mountedSession;
+                    const finish = () => {
+                      if (!stillCurrent() || !visualCompositionActive || visualCompositionEnded) return;
+                      visualCompositionEnded = true;
+                      const serial = visualCompositionSerial;
+                      // ProseMirror completes the composition DOM flush after its own 20 ms timer.
+                      setTimeout(() => {
+                        if (!stillCurrent() || !visualCompositionActive || !visualCompositionEnded || serial !== visualCompositionSerial) return;
+                        if (visualDirty && !serializeVisualDocument(true)) return;
+                        visualCompositionActive = false;
+                        visualCompositionEnded = false;
+                        options.onVisualCompositionEnd?.(options.source.value);
+                      }, 25);
+                    };
+                    const start = () => {
+                      if (!stillCurrent() || (visualCompositionActive && !visualCompositionEnded)) return;
+                      const serial = ++visualCompositionSerial;
+                      visualCompositionEnded = false;
+                      if (!visualCompositionActive) {
+                        visualCompositionActive = true;
+                        options.onVisualCompositionStart?.();
                       }
-                      visualDirty = true;
-                      serializeVisualDocument();
-                    },
-                  }),
+                      const check = () => {
+                        if (!stillCurrent() || !visualCompositionActive || visualCompositionEnded || serial !== visualCompositionSerial) return;
+                        if (!view.composing) finish();
+                        else setTimeout(check, 1_000);
+                      };
+                      setTimeout(check, 5_100);
+                    };
+                    const onInput = (event: Event) => {
+                      if (event instanceof InputEvent && !event.isComposing) finish();
+                    };
+                    view.dom.addEventListener("compositionstart", start, true);
+                    view.dom.addEventListener("compositionend", finish, true);
+                    view.dom.addEventListener("focusout", finish, true);
+                    view.dom.addEventListener("input", onInput, true);
+                    return {
+                      update: (next, previous) => {
+                        if (!ready || visualEditor !== mountedEditor || visualSession !== mountedSession || next.state.doc.eq(previous.doc)) return;
+                        if (!stillCurrent() && !(visualCompositionActive && visualCompositionEnded)) return;
+                        visualDirty = true;
+                        if (!stillCurrent()) return;
+                        if (next.composing && !visualCompositionActive) start();
+                        if (!visualCompositionActive) serializeVisualDocument();
+                      },
+                      destroy: () => {
+                        view.dom.removeEventListener("compositionstart", start, true);
+                        view.dom.removeEventListener("compositionend", finish, true);
+                        view.dom.removeEventListener("focusout", finish, true);
+                        view.dom.removeEventListener("input", onInput, true);
+                      },
+                    };
+                  },
                 }),
               ),
             );
@@ -362,7 +431,7 @@ export function createMarkdownModes(options: MarkdownModesOptions): MarkdownMode
       try {
         await leaveCurrentVisual();
       } catch (error) {
-        reportVisualError(id, error);
+        reportVisualError(id, error, enterPreview);
         return false;
       }
       if (current(id)) setMode("source");
