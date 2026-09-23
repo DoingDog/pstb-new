@@ -13,12 +13,12 @@
     {
       "localPath": "src/client/components/app-sidebar.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/blocks/sidebar-11/components/app-sidebar.tsx",
-      "sha256": "fc8eb22017dcfc98d217d680649f7fbd5a1ffa90130c561cca6fed94d3254c58"
+      "sha256": "756e2bfa760dbecb0f4734e13164cf92669b69508ede9f16382526f226baf831"
     },
     {
       "localPath": "src/client/components/ui/sidebar.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
-      "sha256": "b943647eca8d6add6e9a84a2f8cf4f6e75d79755f8eb9522717a62c331363768"
+      "sha256": "e433f4b0a8512f54e0b6f2e3ca573abb10ab3a2c731390fa00fda20488d2ee88"
     },
     {
       "localPath": "src/client/components/ui/sheet.tsx",
@@ -48,7 +48,7 @@
     {
       "localPath": "src/client/components/ui/tabs.tsx",
       "upstreamPath": "apps/v4/registry/new-york-v4/ui/tabs.tsx",
-      "sha256": "f6a47bebc5c8d72f88eab00cbb6b323082fbb21fe9736bb3dd5104f62ee1139f"
+      "sha256": "dc2d364141ed6b00ca64adf525ccdb638a0652700e2d745e7fa285574e1874c7"
     },
     {
       "localPath": "src/client/components/ui/field.tsx",

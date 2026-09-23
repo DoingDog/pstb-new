@@ -37,7 +37,9 @@ type SidebarContextProps = {
   open: boolean
   setOpen: (open: boolean) => void
   openMobile: boolean
-  setOpenMobile: (open: boolean) => void
+  setOpenMobile: React.Dispatch<React.SetStateAction<boolean>>
+  closeMobileForNavigation: () => void
+  mobileCloseTarget: () => HTMLElement | null
   isMobile: boolean
   toggleSidebar: () => void
 }
@@ -67,7 +69,24 @@ function SidebarProvider({
   onOpenChange?: (open: boolean) => void
 }) {
   const isMobile = useIsMobile()
-  const [openMobile, setOpenMobile] = React.useState(false)
+  const [openMobile, setOpenMobileState] = React.useState(false)
+  const mobileOpener = React.useRef<HTMLElement | null>(null)
+  const restoreMobileFocus = React.useRef(false)
+  const setOpenMobile = React.useCallback<React.Dispatch<React.SetStateAction<boolean>>>((value) => {
+    setOpenMobileState((current) => {
+      const next = typeof value === "function" ? value(current) : value
+      if (!current && next) {
+        mobileOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        restoreMobileFocus.current = true
+      }
+      return next
+    })
+  }, [])
+  const closeMobileForNavigation = React.useCallback(() => {
+    restoreMobileFocus.current = false
+    setOpenMobile(false)
+  }, [setOpenMobile])
+  const mobileCloseTarget = React.useCallback(() => restoreMobileFocus.current ? mobileOpener.current : null, [])
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -121,9 +140,11 @@ function SidebarProvider({
       isMobile,
       openMobile,
       setOpenMobile,
+      closeMobileForNavigation,
+      mobileCloseTarget,
       toggleSidebar,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, closeMobileForNavigation, mobileCloseTarget, toggleSidebar]
   )
 
   return (
@@ -163,7 +184,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile, mobileCloseTarget } = useSidebar()
 
   if (collapsible === "none") {
     return (
@@ -187,6 +208,10 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            mobileCloseTarget()?.focus()
+          }}
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
             {
@@ -204,6 +229,10 @@ function Sidebar({
       </Sheet>
     )
   }
+
+  const desktopChildren = React.Children.toArray(children)
+  const railIndex = desktopChildren.findIndex((child) => React.isValidElement(child) && child.type === SidebarRail)
+  const rail = railIndex === -1 ? null : desktopChildren.splice(railIndex, 1)[0]
 
   return (
     <div
@@ -244,10 +273,13 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
+          aria-hidden={state === "collapsed" && collapsible === "offcanvas" ? true : undefined}
+          inert={state === "collapsed" && collapsible === "offcanvas" ? true : undefined}
           className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm"
         >
-          {children}
+          {desktopChildren}
         </div>
+        {rail}
       </div>
     </div>
   )
@@ -258,7 +290,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, isMobile, open, openMobile } = useSidebar()
 
   return (
     <Button
@@ -272,6 +304,7 @@ function SidebarTrigger({
         toggleSidebar()
       }}
       {...props}
+      aria-expanded={isMobile ? openMobile : open}
     >
       <PanelLeftIcon />
       <span className="sr-only">Toggle Sidebar</span>

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "releaseDate": "2026-09-23",
+  "product": "Edge",
+  "slot": "previous",
+  "environment": "windows-edge-previous",
+  "capturedAt": "2026-09-23T03:55:51.876Z",
+  "target": {
+    "sourceArtifact": "test/e2e/evidence/browser-target-sources/edge-stable.json",
+    "sourceSha256": "51576c4bd64dac9443db39ec1de9aba5010b04a68eb9f984f10ee458f93d6b04",
+    "exactVersion": "152.0.4191.96",
+    "major": 152
+  },
+  "binaryProvenance": {
+    "extractionMethod": "windows-powershell-authenticode-fileversion-v1",
+    "path": "C:\\Users\\user\\Downloads\\cf-pastebin-browser-evidence\\uniextract\\edge-152.0.4191.96\\stage\\browser\\Chrome-bin\\152.0.4191.96\\msedge.exe",
+    "productName": "Microsoft Edge",
+    "productVersion": "152.0.4191.96",
+    "authenticodeStatus": "Valid",
+    "publisher": "Microsoft Corporation",
+    "bytes": 5366600,
+    "sha256": "bc9faa458ea30b4ac475b5b4fade3595943624b7f9cc400c17c5a89ba0b34bb8"
+  },
+  "observed": {
+    "exactVersion": "152.0.4191.96",
+    "major": 152
+  }
+}

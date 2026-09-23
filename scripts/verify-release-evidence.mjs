@@ -307,6 +307,29 @@ async function verifierSelfTest() {
     await refreshChromeCaptureHashChain(directory);
     await expectReject(() => verifyReleaseEvidence({ repoRoot: directory, clock }), "wrong capture branded tuple");
 
+    for (const [name, change] of [
+      ["wrong binary extraction method", (binary) => { binary.extractionMethod = "direct-version-output"; }],
+      ["relative binary path", (binary) => { binary.path = "chrome.exe"; }],
+      ["root-relative binary path", (binary) => { binary.path = "\\chrome.exe"; }],
+      ["wrong binary product", (binary) => { binary.productName = "Microsoft Edge"; }],
+      ["wrong binary version", (binary) => { binary.productVersion = "121.0.0.0"; }],
+      ["invalid Authenticode status", (binary) => { binary.authenticodeStatus = "NotSigned"; }],
+      ["wrong binary publisher", (binary) => { binary.publisher = "Wrong Publisher"; }],
+      ["missing binary byte length", (binary) => { delete binary.bytes; }],
+      ["uppercase binary SHA-256", (binary) => { binary.sha256 = "A".repeat(64); }],
+      ["unknown binary provenance field", (binary) => { binary.signer = "unexpected"; }],
+    ]) {
+      await fresh(directory);
+      await mutate(directory, chrome.capture, (capture) => { change(capture.binaryProvenance); });
+      await refreshChromeCaptureHashChain(directory);
+      await expectReject(() => verifyReleaseEvidence({ repoRoot: directory, clock }), name);
+    }
+
+    await fresh(directory);
+    await mutate(directory, chrome.capture, (capture) => { capture.rawVersionOutput = { stdout: "Google Chrome 120.1.0\n", stderr: "" }; });
+    await refreshChromeCaptureHashChain(directory);
+    await expectReject(() => verifyReleaseEvidence({ repoRoot: directory, clock }), "Windows capture cannot add direct version output");
+
     await fresh(directory);
     await mutate(directory, chrome.smoke, (smoke) => { smoke.environment = "windows-chrome-previous"; });
     await refreshChromeCaptureHashChain(directory);

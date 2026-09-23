@@ -5,6 +5,7 @@ import type { MarkdownPreview } from "../markdown";
 import type { DerivedSurface } from "../surface-apply";
 import { LocalActions, type ClipboardPort, type DownloadPort, type LocalActionState, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
+import { useOverflowFocus } from "../components/useOverflowFocus";
 import { Button } from "@/components/ui/button";
 
 export interface LocalOnlyPastePageProps {
@@ -39,6 +40,8 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
   const copy = labels(locale);
   const canChooseConsumedSource = phase === "consumed" && consumedSource !== null && consumedSource !== source;
   const [wrap, setWrap] = React.useState(false);
+  const previewOverflow = useOverflowFocus(!wrap, source);
+  const fallbackOverflow = useOverflowFocus(!wrap, source);
   const [sourceVisible, setSourceVisible] = React.useState(false);
   const [preview, setPreview] = React.useState<TrustedMarkdownHtml | null>(initialMarkdown);
   const [previewFailure, setPreviewFailure] = React.useState<string | null>(null);
@@ -107,18 +110,18 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
 
   const displayedPreview = (derivedPreview?.source === source ? derivedPreview.html as TrustedMarkdownHtml : undefined) ?? preview;
   const previewNode = displayedPreview === null
-    ? <pre data-local-view="true" className={wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>
-    : <div className={wrap ? "break-words" : "overflow-x-auto"}><SafeMarkdown html={displayedPreview} /></div>;
+    ? <pre ref={previewOverflow.ref} data-local-view="true" className={wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"} tabIndex={previewOverflow.tabIndex}>{source}</pre>
+    : <SafeMarkdown html={displayedPreview} wrap={wrap} />;
 
   return (
     <section className="flex min-w-0 flex-col gap-4" aria-label={phaseLabel(locale, phase)}>
       {phase === "delete-uncertain"
         ? <p role="alert">{phaseLabel(locale, phase)}</p>
         : <p>{phaseLabel(locale, phase)}</p>}
-      {canChooseConsumedSource && <div className="flex flex-wrap gap-2"><Button type="button" onClick={onUseConsumedResponse}>{copy.useRemote}</Button><Button type="button" variant="outline" onClick={onKeepCurrent}>{copy.keepCurrent}</Button></div>}
+      {canChooseConsumedSource && <div className="flex flex-wrap gap-2"><Button type="button" className="min-h-11 min-w-11" onClick={onUseConsumedResponse}>{copy.useRemote}</Button><Button type="button" variant="outline" className="min-h-11 min-w-11" onClick={onKeepCurrent}>{copy.keepCurrent}</Button></div>}
       {previewFailure !== null && <p role="alert">{previewFailure}</p>}
       <div ref={previewHost} data-terminal-preview-host="true">
-        {fallback?.surface === "preview" && fallback.source === source && <div data-derived-fallback="preview" data-derived-generation={String(fallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.("preview")}>{copy.retry}</Button></div>}
+        {fallback?.surface === "preview" && fallback.source === source && <div data-derived-fallback="preview" data-derived-generation={String(fallback.generation)} className="flex flex-wrap items-center gap-2"><pre ref={fallbackOverflow.ref} className={wrap ? "max-w-full whitespace-pre-wrap break-words" : "max-w-full whitespace-pre"} tabIndex={fallbackOverflow.tabIndex}>{source}</pre><Button type="button" variant="outline" className="min-h-11 min-w-11" onClick={() => onRetrySurface?.("preview")}>{copy.retry}</Button></div>}
         <LocalActions
           actionScope={`local:${phase}:${source}`}
           source={source}
@@ -139,8 +142,8 @@ export function LocalOnlyPastePage({ locale, phase, source, consumedSource = nul
       </div>
       {initialMarkdown !== null && <Button type="button" variant="outline" data-action="recompute-preview" className="min-h-11 self-start" onClick={() => void recomputePreview()}>{copy.preview}</Button>}
       <div className="flex flex-wrap gap-3">
-        {(phase === "not-found" || phase === "delete-uncertain") && <a data-action="full-refresh" href={location.href} className="text-primary underline-offset-4 hover:underline">{copy.fullRefresh}</a>}
-        <a data-action="create-new" href="/" className="text-primary underline-offset-4 hover:underline">{copy.createNew}</a>
+        {(phase === "not-found" || phase === "delete-uncertain") && <a data-action="full-refresh" href={location.href} className="inline-flex min-h-11 min-w-11 items-center text-primary underline-offset-4 hover:underline">{copy.fullRefresh}</a>}
+        <a data-action="create-new" href="/" className="inline-flex min-h-11 min-w-11 items-center text-primary underline-offset-4 hover:underline">{copy.createNew}</a>
       </div>
     </section>
   );

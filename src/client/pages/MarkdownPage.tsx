@@ -33,7 +33,7 @@ export function MarkdownPage({ locale, title, source, initialMarkdown, clipboard
           sourcePreview: {
             sourceVisible,
             onSourceVisibleChange: setSourceVisible,
-            preview: <div className={wrap ? "break-words" : "overflow-x-auto"}><SafeMarkdown html={initialMarkdown} /></div>,
+            preview: <SafeMarkdown html={initialMarkdown} wrap={wrap} />,
           },
         }}
         {...(clipboard === undefined ? {} : { clipboard })}

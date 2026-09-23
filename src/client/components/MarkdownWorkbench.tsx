@@ -13,6 +13,7 @@ import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PlaintextEditor, type EditorWrap } from "./PlaintextEditor";
 import { SafeMarkdown } from "./SafeMarkdown";
+import { useOverflowFocus } from "./useOverflowFocus";
 
 export interface MarkdownWorkbenchProps {
   source: string;
@@ -94,6 +95,8 @@ export function MarkdownWorkbench({
   onSurfaceMounted,
 }: MarkdownWorkbenchProps) {
   const copy = labels(locale);
+  const previewOverflow = useOverflowFocus(wrap !== "soft", source);
+  const fallbackOverflow = useOverflowFocus(wrap !== "soft", source);
   const [visualRoot, setVisualRoot] = React.useState<HTMLDivElement | null>(null);
   const pendingMode = React.useRef<MarkdownMode | null>(null);
   const sourceAdapter = React.useRef<Pick<HTMLTextAreaElement, "value">>({ value: source });
@@ -549,14 +552,14 @@ export function MarkdownWorkbench({
           <div ref={setVisualRoot} data-markdown-visual-host="true" />
         </TabsContent>
         <TabsContent value="preview" forceMount hidden={mode !== "preview"}>
-          {preview === null ? <pre className="overflow-x-auto whitespace-pre-wrap">{source}</pre> : <SafeMarkdown html={preview.html as TrustedMarkdownHtml} />}
+          {preview === null ? <pre ref={previewOverflow.ref} className={wrap === "soft" ? "whitespace-pre-wrap break-words" : "whitespace-pre"} tabIndex={previewOverflow.tabIndex}>{source}</pre> : <SafeMarkdown html={preview.html as TrustedMarkdownHtml} wrap={wrap === "soft"} />}
         </TabsContent>
       </Tabs>
-      {derivedFallback !== null && ((mode === "visual" && derivedFallback.surface === "visual") || (mode === "preview" && derivedFallback.surface === "preview")) && <div data-derived-fallback={derivedFallback.surface} data-derived-generation={String(derivedFallback.generation)} className="flex flex-wrap items-center gap-2"><pre className="max-w-full overflow-x-auto whitespace-pre">{source}</pre><Button type="button" variant="outline" onClick={() => onRetrySurface?.(derivedFallback.surface)}>{copy.retry}</Button></div>}
+      {derivedFallback !== null && ((mode === "visual" && derivedFallback.surface === "visual") || (mode === "preview" && derivedFallback.surface === "preview")) && <div data-derived-fallback={derivedFallback.surface} data-derived-generation={String(derivedFallback.generation)} className="flex flex-wrap items-center gap-2"><pre ref={fallbackOverflow.ref} className={wrap === "soft" ? "max-w-full whitespace-pre-wrap break-words" : "max-w-full whitespace-pre"} tabIndex={fallbackOverflow.tabIndex}>{source}</pre><Button type="button" variant="outline" className="min-h-11 min-w-11" onClick={() => onRetrySurface?.(derivedFallback.surface)}>{copy.retry}</Button></div>}
       {failure !== null && (
         <div role="alert" className="flex items-center gap-2">
           <span>{errorMessage(locale, "INTERNAL_ERROR")}</span>
-          <Button type="button" variant="outline" onClick={() => failure.retry()}>{copy.retry}</Button>
+          <Button type="button" variant="outline" className="min-h-11 min-w-11" onClick={() => failure.retry()}>{copy.retry}</Button>
         </div>
       )}
     </section>

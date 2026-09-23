@@ -454,6 +454,17 @@ describe("AutosaveController", () => {
     ]);
   });
 
+  it("retries a dirty draft explicitly after another action pauses Autosave for a credential", () => {
+    const { clock, controller, save } = autosaveFixture();
+    controller.input("unsaved draft", clock.now());
+    controller.applyAuthoritative({ kind: "pause", state: "password-required", failureStatus: 403 });
+    expect(controller.snapshot()).toMatchObject({ state: "password-required", requiresExplicitRetry: false });
+    clock.advance(1_000);
+    expect(save.calls).toHaveLength(0);
+    controller.retry();
+    expect(save.calls).toEqual([{ action: "save-retry", content: "unsaved draft", version: "g.1" }]);
+  });
+
   it.each([413, 422])("does not rearm after %i until explicit retry", async (status) => {
     const { clock, controller, save, states } = autosaveFixture();
 

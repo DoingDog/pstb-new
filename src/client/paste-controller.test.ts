@@ -708,6 +708,18 @@ describe("PasteController metadata, passwords, and delete", () => {
     expect(controller.effects().some((effect) => effect.type === "root-handoff")).toBe(rootHandoff);
   });
 
+  it.each([204, 403, 409] as const)("does not treat an uncertain delete status %i as proven", (status) => {
+    const { controller } = pasteControllerFixture();
+    const deletion = dispatch(controller, { kind: "delete", action: "delete", authorizationPassword: null });
+
+    controller.acceptDeleteMutation(deletion.token, { status, mutationMayHaveApplied: true }, 1);
+
+    expect(snapshot(controller).phase).toBe("delete-uncertain");
+    expect(snapshot(controller).serverCapabilities).toBe(false);
+    expect(snapshot(controller).lastAction).toMatchObject({ state: "failed", key: "delete" });
+    expect(controller.effects().some((effect) => effect.type === "root-handoff")).toBe(false);
+  });
+
   it("does not commit a pending credential on delete 204, 409, 404, or uncertain outcome", () => {
     for (const status of [204, 409, 404, 503] as const) {
       const { controller } = pasteControllerFixture();

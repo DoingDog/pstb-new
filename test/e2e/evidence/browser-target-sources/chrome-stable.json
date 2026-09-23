@@ -1,19 +1,28 @@
 {
   "schemaVersion": 1,
-  "releaseDate": "2026-09-22",
+  "releaseDate": "2026-09-23",
   "product": "Chrome",
   "channel": "stable",
   "source": {
     "id": "google-chrome-versionhistory-win-stable",
     "url": "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction%3D1&order_by=starttime%20desc&page_size=1000",
     "responseCount": 2,
-    "responseSha256": "c1559b78c050059b35b45cf0e6ccc1d9285c9e9d9d1ff534b6320c0f21bfd768"
+    "responseSha256": "fed5e3f228d61b7fe491cbbc1b960ee63792f8b072c3b292e8d22983680a92e7"
   },
-  "retrievedAt": "2026-09-22T10:28:27.511Z",
+  "retrievedAt": "2026-09-23T03:35:46.154Z",
   "releases": [
     {
       "sourceReleaseIds": [
-        "chrome/platforms/win/channels/stable/versions/153.0.8010.53/releases/1789670979"
+        "chrome/platforms/win/channels/stable/versions/154.0.8037.58/releases/1790100520"
+      ],
+      "exactVersion": "154.0.8037.58",
+      "major": 154,
+      "releasedAt": "2026-09-22T18:08:40.926Z"
+    },
+    {
+      "sourceReleaseIds": [
+        "chrome/platforms/win/channels/stable/versions/153.0.8010.53/releases/1789670979",
+        "chrome/platforms/win/channels/stable/versions/153.0.8010.53/releases/1790099740"
       ],
       "exactVersion": "153.0.8010.53",
       "major": 153,

@@ -103,6 +103,25 @@ afterEach(async () => {
 });
 
 describe("history lazy load", () => {
+  it("keeps history loading non-live but announces diff computation", async () => {
+    await page.viewport(1280, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const props = { active: true, openHistory: vi.fn(), selectRevision: vi.fn(), computeDiff: vi.fn(), back: vi.fn() };
+    const fixture = await mount(history(
+      <HistoryPanel
+        {...props}
+        state={historyState({ listState: "loading", list: null, snapshotState: "loading", selected: null, diff: { state: "idle", lines: [] } })}
+      />,
+    ));
+    const statusCounts = [fixture.element.querySelectorAll('[role="status"], [aria-live]').length];
+
+    await fixture.render(history(
+      <HistoryPanel {...props} state={historyState({ diff: { state: "computing", lines: [] } })} />,
+    ));
+    statusCounts.push(fixture.element.querySelectorAll('[role="status"], [aria-live]').length);
+    expect(statusCounts).toEqual([0, 1]);
+  });
+
   it("loads history only after the History destination opens", async () => {
     const openHistory = vi.fn();
     const fixture = await mount(<HistoryPanel active={false} state={historyState()} openHistory={openHistory} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} />);
@@ -176,14 +195,21 @@ describe("history lazy load", () => {
     expect(document.body.textContent).toContain("Large differences are computed separately from the editor.");
   });
 
-  it("keeps the list layout on mobile until a revision is selected, then returns with Back", async () => {
+  it("focuses mobile Back on detail and restores the exact revision on return", async () => {
     await page.viewport(375, 720);
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     const back = vi.fn();
+    const list = {
+      ...historyState().list!,
+      revisions: [
+        { revision: 1, savedAt: "2026-09-13T07:00:00.000Z", supersededAt: "2026-09-13T08:00:00.000Z", byteLength: 10 },
+        ...historyState().list!.revisions,
+      ],
+    };
     const fixture = await mount(history(
       <HistoryPanel
         active
-        state={historyState({ snapshotState: "idle", selected: null, diff: { state: "idle", lines: [] } })}
+        state={historyState({ list, snapshotState: "idle", selected: null, diff: { state: "idle", lines: [] } })}
         openHistory={vi.fn()}
         selectRevision={vi.fn()}
         computeDiff={vi.fn()}
@@ -193,14 +219,143 @@ describe("history lazy load", () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     expect(fixture.element.querySelector("[data-history-list]")).not.toBeNull();
     expect(fixture.element.querySelector("[data-history-detail]")).toBeNull();
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2")!);
+    const revision = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Revision 2")!;
+    React.act(() => revision.focus());
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
 
     await fixture.render(history(
-      <HistoryPanel active state={historyState()} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} back={back} />,
+      <HistoryPanel active state={historyState({ list })} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} back={back} />,
     ));
     expect(fixture.element.querySelector("[data-history-detail]")).not.toBeNull();
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Back")!);
+    const backControl = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Back")!;
+    expect(document.activeElement).toBe(backControl);
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
     expect(back).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2"));
+  });
+
+  it("keeps a 2,000-character mobile revision in a keyboard-scrollable detail view", async () => {
+    await page.viewport(320, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const longLine = "W".repeat(2_000);
+    const state = historyState({
+      selected: { ...historyState().selected!, content: longLine },
+      diff: { state: "ready", lines: [{ kind: "add", text: longLine }] },
+    });
+    const props = { active: true, openHistory: vi.fn(), selectRevision: vi.fn(), computeDiff: vi.fn(), back: vi.fn() };
+    const fixture = await mount(history(<HistoryPanel {...props} state={state} />));
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2")!);
+
+    const detail = fixture.element.querySelector<HTMLElement>("[data-history-detail]")!;
+    const diff = detail.querySelector<HTMLPreElement>('pre[aria-label="Selected revision"]')!;
+    const snapshotTab = Array.from(detail.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Full snapshot")!;
+    expect(detail.getBoundingClientRect().width).toBeLessThanOrEqual(320);
+    expect(diff.clientWidth).toBeGreaterThan(0);
+    expect(diff.clientWidth).toBeLessThanOrEqual(320);
+    expect(diff.scrollWidth).toBeGreaterThan(diff.clientWidth);
+    expect(snapshotTab.getBoundingClientRect().right).toBeLessThanOrEqual(320);
+    await vi.waitFor(() => expect(diff.style.overflowX).toBe("auto"));
+    expect(diff.tabIndex).toBe(0);
+    React.act(() => diff.focus());
+    await userEvent.keyboard("{ArrowRight}");
+    await vi.waitFor(() => expect(diff.scrollLeft).toBeGreaterThan(0));
+
+    await React.act(async () => { await userEvent.click(snapshotTab); });
+    const snapshot = detail.querySelector<HTMLPreElement>('[data-slot="tabs-content"][data-state="active"] pre')!;
+    expect(snapshot.textContent).toBe(longLine);
+    expect(snapshot.clientWidth).toBeGreaterThan(0);
+    expect(snapshot.clientWidth).toBeLessThanOrEqual(320);
+    expect(snapshot.scrollWidth).toBeGreaterThan(snapshot.clientWidth);
+    await vi.waitFor(() => expect(snapshot.style.overflowX).toBe("auto"));
+    expect(snapshot.tabIndex).toBe(0);
+    React.act(() => snapshot.focus());
+    await userEvent.keyboard("{ArrowRight}");
+    await vi.waitFor(() => expect(snapshot.scrollLeft).toBeGreaterThan(0));
+
+    await React.act(async () => {
+      await page.viewport(1280, 720);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    await fixture.render(history(<HistoryPanel {...props} state={historyState()} />));
+    await vi.waitFor(() => expect(fixture.element.querySelector("[data-history-list]")).not.toBeNull());
+    expect(snapshotTab.getBoundingClientRect().right).toBeLessThanOrEqual(1280);
+    expect(snapshot.textContent).toBe("selected source\n");
+    await vi.waitFor(() => expect(snapshot.hasAttribute("tabindex")).toBe(false));
+    expect(snapshot.style.overflowX).toBe("");
+  });
+
+  it("keeps keyboard focus on Back when a delayed mobile snapshot becomes ready", async () => {
+    await page.viewport(320, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const back = vi.fn();
+    const props = { active: true, openHistory: vi.fn(), selectRevision: vi.fn(), computeDiff: vi.fn(), back };
+    const fixture = await mount(history(
+      <HistoryPanel {...props} state={historyState({ snapshotState: "idle", selected: null })} />,
+    ));
+    const revision = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Revision 2")!;
+    React.act(() => revision.focus());
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
+    await fixture.render(history(<HistoryPanel {...props} state={historyState({ snapshotState: "loading", selected: null })} />));
+    const loadingBack = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Back")!;
+    expect(document.activeElement).toBe(loadingBack);
+
+    await fixture.render(history(<HistoryPanel {...props} state={historyState()} />));
+    const readyBack = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Back")!;
+    expect(readyBack).not.toBe(loadingBack);
+    expect(document.activeElement).toBe(readyBack);
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
+    expect(back).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2"));
+  });
+
+  it("transfers the focused desktop revision to mobile Back on resize", async () => {
+    await page.viewport(1280, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const selectRevision = vi.fn();
+    const props = { active: true, openHistory: vi.fn(), selectRevision, computeDiff: vi.fn(), back: vi.fn() };
+    const fixture = await mount(history(<HistoryPanel {...props} state={historyState()} />));
+    const revision = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Revision 2")!;
+    expect(fixture.element.querySelector("[data-history-list]")).not.toBeNull();
+    expect(fixture.element.querySelector("[data-history-detail]")).not.toBeNull();
+    React.act(() => revision.focus());
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
+    expect(selectRevision).toHaveBeenCalledWith(2);
+    expect(document.activeElement).toBe(revision);
+
+    await React.act(async () => {
+      await page.viewport(320, 720);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    await vi.waitFor(() => expect(fixture.element.querySelector("[data-history-list]")).toBeNull());
+    expect(fixture.element.querySelector("[data-history-detail]")).not.toBeNull();
+    expect(document.activeElement).toBe(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Back"));
+  });
+
+  it("transfers the focused mobile Back to its exact desktop revision on resize", async () => {
+    await page.viewport(320, 720);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const list = {
+      ...historyState().list!,
+      revisions: [
+        { revision: 1, savedAt: "2026-09-13T07:00:00.000Z", supersededAt: "2026-09-13T08:00:00.000Z", byteLength: 10 },
+        ...historyState().list!.revisions,
+      ],
+    };
+    const props = { active: true, openHistory: vi.fn(), selectRevision: vi.fn(), computeDiff: vi.fn(), back: vi.fn() };
+    const fixture = await mount(history(<HistoryPanel {...props} state={historyState({ list })} />));
+    const revision = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Revision 2")!;
+    React.act(() => revision.focus());
+    await React.act(async () => { await userEvent.keyboard("{Enter}"); });
+    const back = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Back")!;
+    expect(document.activeElement).toBe(back);
+
+    await React.act(async () => {
+      await page.viewport(1280, 720);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    await vi.waitFor(() => expect(fixture.element.querySelector("[data-history-list]")).not.toBeNull());
+    expect(fixture.element.querySelector("[data-history-detail]")).not.toBeNull();
+    expect(document.activeElement).toBe(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Revision 2"));
   });
 
   it("shows loading, empty, and failure states without changing the surrounding draft", async () => {
@@ -217,6 +372,17 @@ describe("history lazy load", () => {
     await fixture.render(<Fixture state={historyState({ listState: "failed", list: null, selected: null, snapshotState: "failed", failure: { target: "list", value: { status: 503, code: "STORAGE_READ_FAILED" } }, diff: { state: "idle", lines: [] } })} />);
     expect(draft.value).toBe("exact draft");
     expect(fixture.element.textContent).toContain("Storage could not be read. Retry the request.");
+  });
+
+  it("announces diff computation while the History tab remains focused", async () => {
+    await page.viewport(1280, 720);
+    const props = { active: true, openHistory: vi.fn(), selectRevision: vi.fn(), computeDiff: vi.fn(), back: vi.fn() };
+    const fixture = await mount(history(<HistoryPanel {...props} state={historyState()} />));
+    const tab = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((button) => button.textContent === "Unified diff")!;
+    React.act(() => tab.focus());
+    await fixture.render(history(<HistoryPanel {...props} state={historyState({ diff: { state: "computing", lines: [] } })} />));
+    expect(document.activeElement).toBe(tab);
+    expect(fixture.element.querySelector('[data-history-detail] [role="status"]')?.textContent).toBe("Compute diff");
   });
 });
 
@@ -319,6 +485,288 @@ describe("settings result table", () => {
     click(viewOnce);
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save view once")!);
     expect(saveViewOnce).toHaveBeenCalledWith(true);
+  });
+
+  it("submits the specified 360-day one-year expiration from Settings", async () => {
+    const saveExpiration = vi.fn();
+    const fixture = await mount(<SettingsPanel state={settingsState()} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={saveExpiration} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />);
+    const select = fixture.element.querySelector('select[name="expiration"]') as unknown as HTMLSelectElement;
+    const oneYear = Array.from(select.options).find((option) => option.textContent === "1 year");
+    expect(oneYear?.value).toBe("31104000");
+    change(select, "31104000");
+    click(fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="expiration"]')!);
+    expect(saveExpiration).toHaveBeenCalledWith(31_104_000);
+  });
+
+  it("keeps each field outcome on its originating button until that field changes", async () => {
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const titlePending = { field: "title" as const, state: "pending" as const, message: null };
+    const fixture = await mount(<SettingsPanel state={settingsState({ result: titlePending })} {...props} />);
+    const outcome = (field: string) => fixture.element.querySelector<HTMLButtonElement>(`button[data-settings-field="${field}"]`)!;
+
+    expect(outcome("title").dataset.settingsActionResult).toBe("pending");
+    expect(outcome("title").textContent).toBe("Saving title");
+
+    await fixture.render(<SettingsPanel state={settingsState({ result: { field: "title", state: "succeeded", message: "Title saved by server." } })} {...props} />);
+    expect(outcome("title").dataset.settingsActionResult).toBe("succeeded");
+    expect(outcome("title").textContent).toBe("Title saved");
+
+    await fixture.render(<SettingsPanel state={settingsState({ result: { field: "format", state: "succeeded", message: "Format saved by server." } })} {...props} />);
+    expect(outcome("title").textContent).toBe("Title saved");
+    expect(outcome("format").dataset.settingsActionResult).toBe("succeeded");
+    expect(outcome("format").textContent).toBe("Format saved");
+
+    await fixture.render(<SettingsPanel state={settingsState({ result: { field: "title", state: "retryable", message: "Storage write failed." } })} {...props} />);
+    expect(outcome("title").dataset.settingsActionResult).toBe("failed");
+    expect(outcome("title").textContent).toBe("Title failed");
+    expect(outcome("format").textContent).toBe("Format saved");
+  });
+
+  it("keeps a Retry attempt on its recovery button and resets the matching field button", async () => {
+    const retry = vi.fn();
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry,
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const fixture = await mount(
+      <SettingsPanel state={settingsState({ result: { field: "title", state: "retryable", message: "Storage write failed." } })} {...props} />,
+    );
+    const title = () => fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="title"]')!;
+
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!);
+    expect(retry).toHaveBeenCalledWith(null);
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({ result: { field: "title", state: "pending", message: null, action: "settings-title" } })}
+        {...props}
+      />,
+    );
+
+    const recovery = fixture.element.querySelector<HTMLButtonElement>('[data-settings-recovery-action="settings-title"]');
+    expect(title().textContent).toBe("Save title");
+    expect(recovery).not.toBeNull();
+    expect(recovery!.textContent).toBe("Saving title");
+    expect(recovery!.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({ result: { field: "title", state: "succeeded", message: null, action: "settings-title" } })}
+        {...props}
+      />,
+    );
+    expect(title().textContent).toBe("Save title");
+    expect(fixture.element.querySelector<HTMLButtonElement>('[data-settings-recovery-action="settings-title"]')?.textContent).toBe("Title saved");
+  });
+
+  it("maps relative-expiration reconciliation to settings-reconcile on its recovery button", async () => {
+    const reconcile = vi.fn();
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile,
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const initial = settingsState({
+      reconciliationOwner: "expiration",
+      result: { field: "expiration", state: "reconciliation-required", message: null, reconciliationIntent: "relative" },
+    });
+    const fixture = await mount(<SettingsPanel state={initial} {...props} />);
+    click(fixture.element.querySelector('[data-settings-recovery-action="settings-reconcile"]')!);
+    expect(reconcile).toHaveBeenCalledOnce();
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({
+          reconciliationOwner: "expiration",
+          reconciliationRequestPending: true,
+          result: { field: "expiration", state: "pending", message: null, action: "settings-reconcile" },
+        })}
+        {...props}
+      />,
+    );
+    const recovery = fixture.element.querySelector<HTMLButtonElement>('[data-settings-recovery-action="settings-reconcile"]');
+    expect(recovery).not.toBeNull();
+    expect(recovery!.textContent).toBe("Reconciling settings");
+    expect(recovery!.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="expiration"]')?.textContent).toBe("Save expiration");
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({
+          reconciliationOwner: "expiration",
+          result: { field: "expiration", state: "succeeded", message: null, action: "settings-reconcile" },
+        })}
+        {...props}
+      />,
+    );
+    expect(fixture.element.querySelector<HTMLButtonElement>('[data-settings-recovery-action="settings-reconcile"]')?.textContent).toBe("Settings reconciled");
+  });
+
+  it("retains pending, failed, and succeeded Reload outcomes on its originating Settings button", async () => {
+    const reload = vi.fn();
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload,
+      discard: vi.fn(),
+    };
+    const fixture = await mount(
+      <SettingsPanel state={settingsState({ versionUsable: false, result: { field: "title", state: "conflict", message: null } })} {...props} />,
+    );
+    const originatingButton = Array.from(fixture.element.querySelectorAll("button")).find((value) => value.textContent === "Reload")!;
+    click(originatingButton);
+    expect(reload).toHaveBeenCalledOnce();
+
+    await fixture.render(
+      <SettingsPanel state={settingsState({ versionUsable: false, result: { field: null, state: "pending", message: null, action: "reload-server", attempt: 1 } })} {...props} />,
+    );
+    const outcome = () => fixture.element.querySelector<HTMLButtonElement>('[data-settings-recovery-action="reload-server"]');
+    expect(outcome()).toBe(originatingButton);
+    expect(outcome()?.textContent).toBe("Reloading");
+    expect(outcome()?.disabled).toBe(true);
+    expect(outcome()?.getAttribute("aria-busy")).toBe("true");
+
+    await fixture.render(
+      <SettingsPanel state={settingsState({ versionUsable: false, result: { field: null, state: "conflict", message: null, action: "reload-server", attempt: 1 } })} {...props} />,
+    );
+    expect(outcome()).toBe(originatingButton);
+    expect(outcome()?.textContent).toBe("Reload failed");
+    expect(outcome()?.disabled).toBe(false);
+    expect(outcome()?.hasAttribute("aria-busy")).toBe(false);
+    click(outcome()!);
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    await fixture.render(
+      <SettingsPanel state={settingsState({ versionUsable: true, result: { field: null, state: "succeeded", message: null, action: "reload-server", attempt: 2 } })} {...props} />,
+    );
+    expect(outcome()).toBe(originatingButton);
+    expect(outcome()?.textContent).toBe("Reloaded");
+    expect(outcome()?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(fixture.element.querySelector("[aria-live], [role=status]")).toBeNull();
+  });
+
+  it("retains field outcomes through Discard and clears them when paste identity changes", async () => {
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const fixture = await mount(
+      <SettingsPanel state={settingsState({ result: { field: "title", state: "succeeded", message: null } })} {...props} />,
+    );
+    const outcome = (field: string) => fixture.element.querySelector<HTMLButtonElement>(`button[data-settings-field="${field}"]`)!;
+
+    await fixture.render(
+      <SettingsPanel state={settingsState({ result: { field: "format", state: "succeeded", message: null } })} {...props} />,
+    );
+    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(outcome("title").textContent).toBe("Title saved");
+    expect(outcome("format").textContent).toBe("Format saved");
+
+    await fixture.render(
+      <SettingsPanel
+        state={settingsState({
+          accepted: { id: "other", title: "Other title", format: "text", expiration: null, viewOnce: false },
+        })}
+        {...props}
+      />,
+    );
+    expect(outcome("title").textContent).toBe("Save title");
+    expect(outcome("format").textContent).toBe("Save format");
+  });
+
+  it("does not commit a prior paste outcome during an identity transition", async () => {
+    const committedLabels: string[] = [];
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    function IdentityProbe({ state }: { state: SettingsPanelState }) {
+      const host = React.useRef<HTMLDivElement>(null);
+      React.useLayoutEffect(() => {
+        committedLabels.push(host.current!.querySelector<HTMLButtonElement>('button[data-settings-field="title"]')!.textContent ?? "");
+      }, [state.accepted.id]);
+      return <div ref={host}><SettingsPanel state={state} {...props} /></div>;
+    }
+    const fixture = await mount(
+      <IdentityProbe state={settingsState({ result: { field: "title", state: "succeeded", message: null } })} />,
+    );
+
+    await fixture.render(
+      <IdentityProbe
+        state={settingsState({ accepted: { id: "other", title: "Other title", format: "text", expiration: null, viewOnce: false } })}
+      />,
+    );
+    expect(committedLabels).toEqual(["Title saved", "Save title"]);
+  });
+
+  it("keeps button outcomes non-live and announces blocking errors", async () => {
+    const props = {
+      onActivity: vi.fn(),
+      saveTitle: vi.fn(),
+      saveFormat: vi.fn(),
+      saveExpiration: vi.fn(),
+      saveViewOnce: vi.fn(),
+      retry: vi.fn(),
+      reconcile: vi.fn(),
+      reload: vi.fn(),
+      discard: vi.fn(),
+    };
+    const fixture = await mount(
+      <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: null } })} {...props} />,
+    );
+    const title = fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="title"]')!;
+
+    expect(title.textContent).toBe("Saving title");
+    expect(title.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(title.querySelector("[aria-live], [role=status]")).toBeNull();
+
+    await fixture.render(
+      <SettingsPanel state={settingsState({ result: { field: "title", state: "retryable", message: "Storage write failed." } })} {...props} />,
+    );
+    expect(title.textContent).toBe("Title failed");
+    expect(fixture.element.textContent).toContain("Storage write failed.");
+    expect(fixture.element.querySelector('[role="alert"]')?.textContent).toBe("Storage write failed.");
   });
 
   it("renders inline validation and credential results without changing accepted drafts", async () => {
@@ -447,7 +895,7 @@ describe("reconciliation ownership", () => {
       />,
     );
 
-    expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Save title")?.disabled).toBe(true);
+    expect(fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="title"]')?.disabled).toBe(true);
     const recovery = fixture.element.querySelector("[data-settings-result]")!;
     click(Array.from(recovery.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
@@ -990,7 +1438,7 @@ describe("management hardening regressions", () => {
 
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
     expect(discard).toHaveBeenCalledOnce();
-    const saves = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent?.startsWith("Save "));
+    const saves = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button[data-settings-field]"));
     expect(saves).toHaveLength(4);
     for (const save of saves) {
       expect(save.disabled).toBe(true);
@@ -1028,7 +1476,7 @@ describe("management hardening regressions", () => {
       />,
     );
 
-    const result = () => fixture.element.querySelector("[data-settings-result]")?.getAttribute("data-settings-result");
+    const result = () => fixture.element.querySelector("[data-settings-action-result]")?.getAttribute("data-settings-action-result");
     const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
     expect(result()).toBe("pending");
     expect(discardButton.disabled).toBe(true);
@@ -1041,7 +1489,7 @@ describe("management hardening regressions", () => {
     expect(discard).not.toHaveBeenCalled();
     expect(result()).toBe("pending");
 
-    const saves = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent?.startsWith("Save "));
+    const saves = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button[data-settings-field]"));
     expect(saves).toHaveLength(4);
     for (const save of saves) {
       expect(save.disabled).toBe(true);
@@ -1441,7 +1889,16 @@ describe("management hardening regressions", () => {
     expect(resultButtons().some((button) => button.textContent === "Save expiration")).toBe(false);
   });
 
-  it("uses status for pending and success, and alerts only for blocking failures", async () => {
+  it("announces credential, conflict, and retryable Settings errors", async () => {
+    const props = { onActivity: vi.fn(), saveTitle: vi.fn(), saveFormat: vi.fn(), saveExpiration: vi.fn(), saveViewOnce: vi.fn(), retry: vi.fn(), reconcile: vi.fn(), reload: vi.fn(), discard: vi.fn() };
+    const fixture = await mount(<SettingsPanel state={settingsState()} {...props} />);
+    for (const [state, message] of [["credential-required", "Password required"], ["conflict", "Version conflict"], ["retryable", "Storage write failed"]] as const) {
+      await fixture.render(<SettingsPanel state={settingsState({ result: { field: "title", state, message } })} {...props} />);
+      expect(fixture.element.querySelector('[data-settings-result] [role="alert"]')?.textContent).toBe(message);
+    }
+  });
+
+  it("keeps button outcomes out of live regions and alerts for blocking validation", async () => {
     const fixture = await mount(
       <>
         <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
@@ -1450,7 +1907,7 @@ describe("management hardening regressions", () => {
         <SettingsPanel state={settingsState({ result: { field: "title", state: "validation-error", message: "Title is too long." } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
       </>,
     );
-    expect(fixture.element.querySelectorAll('[role="status"]')).toHaveLength(3);
+    expect(fixture.element.querySelectorAll('[role="status"]')).toHaveLength(2);
     expect(fixture.element.querySelectorAll('[role="alert"]')).toHaveLength(1);
   });
 

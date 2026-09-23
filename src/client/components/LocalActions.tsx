@@ -1,6 +1,7 @@
 import * as React from "react";
 import { dictionaries, labels, type Locale } from "../../i18n";
 import { Button } from "@/components/ui/button";
+import { useOverflowFocus } from "./useOverflowFocus";
 
 export interface ClipboardPort {
   writeText(value: string): Promise<void>;
@@ -127,6 +128,7 @@ export function LocalActions({
   callback.current = onActionState;
   const copy = labels(locale);
   const html = capabilities.html;
+  const sourceOverflow = useOverflowFocus(!capabilities.wrap?.value, source);
 
   React.useLayoutEffect(() => {
     if (scope.current === actionScope) return;
@@ -233,7 +235,7 @@ export function LocalActions({
       </div>
       {capabilities.sourcePreview !== undefined && (
         capabilities.sourcePreview.sourceVisible
-          ? <pre data-local-source="true" className={capabilities.wrap?.value ? "whitespace-pre-wrap break-words" : "overflow-x-auto whitespace-pre"}>{source}</pre>
+          ? <pre ref={sourceOverflow.ref} data-local-source="true" className={capabilities.wrap?.value ? "whitespace-pre-wrap break-words" : "whitespace-pre"} tabIndex={sourceOverflow.tabIndex}>{source}</pre>
           : capabilities.sourcePreview.preview
       )}
     </section>

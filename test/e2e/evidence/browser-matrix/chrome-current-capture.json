@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "releaseDate": "2026-09-23",
+  "product": "Chrome",
+  "slot": "current",
+  "environment": "windows-chrome-current",
+  "capturedAt": "2026-09-23T03:55:42.164Z",
+  "target": {
+    "sourceArtifact": "test/e2e/evidence/browser-target-sources/chrome-stable.json",
+    "sourceSha256": "9e1cb24b7472bf71cd4fa3648b87a494119a5c0545761a18a8459e21d7a7af94",
+    "exactVersion": "154.0.8037.58",
+    "major": 154
+  },
+  "binaryProvenance": {
+    "extractionMethod": "windows-powershell-authenticode-fileversion-v1",
+    "path": "C:\\Users\\user\\Downloads\\cf-pastebin-browser-evidence\\extracted\\chrome-154.0.8037.58\\Chrome-bin\\chrome.exe",
+    "productName": "Google Chrome",
+    "productVersion": "154.0.8037.58",
+    "authenticodeStatus": "Valid",
+    "publisher": "Google LLC",
+    "bytes": 4538520,
+    "sha256": "96512cf816b5c7d6d82b53aeb314f6c95cd971c0288202852ba56cbaec8a842a"
+  },
+  "observed": {
+    "exactVersion": "154.0.8037.58",
+    "major": 154
+  }
+}

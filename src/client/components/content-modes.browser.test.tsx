@@ -442,6 +442,21 @@ it("keeps canonical draft editors separate from the committed derived view", () 
   expect(host.querySelector("textarea")?.value).toBe("draft");
 });
 
+it("keeps nonoverflowing plain views out of the Tab order", async () => {
+  const host = mount(<ContentModes
+    mode="view"
+    format="text"
+    source="short"
+    initialMarkdown={null}
+    wrap="off"
+    autosave={{ input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() }}
+    onSourceEvent={vi.fn()}
+  />);
+
+  await nextTask();
+  expect(host.querySelector("[data-plain-view]")?.hasAttribute("tabindex")).toBe(false);
+});
+
 describe("Tabs keyboard", () => {
   it("uses automatic activation, roving focus, wrapping, Home, End, and normal Tab exit", async () => {
     const host = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);

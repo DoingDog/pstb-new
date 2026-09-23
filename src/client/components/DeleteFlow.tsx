@@ -64,7 +64,7 @@ export function DeleteFlow({ state, deletePaste, retry, reload, onActivity, loca
   };
   const resultRole = state.result.state === "pending" || state.result.state === "succeeded" ? "status" : "alert";
   return (
-    <section aria-label={copy.delete} data-server-controls="true" className="flex flex-wrap items-center gap-2">
+    <section aria-label={copy.delete} data-server-controls="true" className="flex flex-wrap items-center gap-2 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11">
       <Dialog open={open} onOpenChange={(next) => setOpen(next && !blocked)}>
         <DialogTrigger asChild><Button ref={trigger} type="button" variant="destructive" disabled={blocked}>{copy.delete}</Button></DialogTrigger>
         <DialogContent
@@ -76,8 +76,8 @@ export function DeleteFlow({ state, deletePaste, retry, reload, onActivity, loca
         >
           <DialogHeader><DialogTitle>{copy.delete}</DialogTitle><DialogDescription>{dictionaries[locale].validation.deleteDescription}</DialogDescription></DialogHeader>
           <DialogFooter>
-            <DialogClose asChild><Button ref={cancel} type="button" variant="outline">{copy.cancel}</Button></DialogClose>
-            <Button type="button" variant="destructive" disabled={blocked} onClick={confirm}>{copy.delete}</Button>
+            <DialogClose asChild><Button ref={cancel} type="button" variant="outline" className="min-h-11 min-w-11">{copy.cancel}</Button></DialogClose>
+            <Button type="button" variant="destructive" className="min-h-11 min-w-11" disabled={blocked} onClick={confirm}>{copy.delete}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

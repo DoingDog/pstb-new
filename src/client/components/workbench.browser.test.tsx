@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import type { ReactNode } from "react";
@@ -7,10 +7,13 @@ import { dictionaries } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { OperationRecords } from "../contracts";
 import { App } from "../App";
+import { LocalOnlyPastePage } from "../pages/LocalOnlyPastePage";
 import { HelpProvider, HelpTrigger } from "./HelpTrigger";
+import { HistoryPanel } from "./HistoryPanel";
 import { LocalActions, type LocalActionCapabilities, type LocalActionsProps } from "./LocalActions";
 import { OperationStatus } from "./OperationStatus";
 import { SafeMarkdown } from "./SafeMarkdown";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { WorkbenchShell } from "./WorkbenchShell";
 import "../index.css";
 
@@ -269,6 +272,113 @@ describe("local workbench boundaries", () => {
     expect(rendered.querySelector("strong")?.textContent).toBe("trusted");
   });
 
+  it("keeps terminal plaintext and its fallback locally scrollable at 320 CSS pixels", async () => {
+    await page.viewport(320, 720);
+    const source = "terminal-long-line ".repeat(120);
+    const rendered = mount(
+      <div style={{ width: "320px" }}>
+        <LocalOnlyPastePage
+          locale="en"
+          phase="not-found"
+          source={source}
+          initialMarkdown={null}
+          fallback={{ surface: "preview", source, generation: 1 }}
+        />
+      </div>,
+    );
+
+    await nextFrame();
+    const scrollers = [
+      rendered.querySelector<HTMLElement>("[data-local-view]"),
+      rendered.querySelector<HTMLElement>("[data-derived-fallback=preview] pre"),
+    ];
+    for (const scroller of scrollers) {
+      expect(scroller).not.toBeNull();
+      expect(scroller!.scrollWidth).toBeGreaterThan(scroller!.clientWidth);
+      expect(getComputedStyle(scroller!).overflowX).toBe("auto");
+      expect(scroller!.tabIndex).toBe(0);
+      scroller!.scrollLeft = 64;
+      expect(scroller!.scrollLeft).toBeGreaterThan(0);
+    }
+    expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
+  });
+
+  it("keeps no-wrap fenced code locally scrollable and makes wrapped code fit", async () => {
+    await page.viewport(320, 720);
+    const code = "long-code ".repeat(120);
+    const html = `<pre><code>${code}</code></pre>` as TrustedMarkdownHtml;
+    const rendered = mount(<div style={{ width: "320px" }}><SafeMarkdown html={html} /></div>);
+    const markdown = rendered.querySelector<HTMLElement>("[data-safe-markdown]")!;
+    const noWrapPre = markdown.querySelector<HTMLElement>("pre")!;
+
+    await nextFrame();
+    expect(markdown.tabIndex).toBe(0);
+    expect(getComputedStyle(markdown).overflowX).toBe("auto");
+    expect(markdown.scrollWidth).toBeGreaterThan(markdown.clientWidth);
+
+    rerender(rendered, <div style={{ width: "320px" }}>{React.createElement(SafeMarkdown, { html, wrap: true } as never)}</div>);
+    await nextFrame();
+    expect(markdown.hasAttribute("tabindex")).toBe(false);
+    expect(getComputedStyle(noWrapPre).whiteSpace).toBe("pre-wrap");
+    expect(noWrapPre.getBoundingClientRect().width).toBeLessThanOrEqual(markdown.getBoundingClientRect().width);
+  });
+
+  it("wraps ordinary unbroken Markdown text within 320 CSS pixels", async () => {
+    await page.viewport(320, 720);
+    const html = `<p>${"unbroken".repeat(80)}</p>` as TrustedMarkdownHtml;
+    const rendered = mount(<div style={{ width: "320px" }}><SafeMarkdown html={html} wrap /></div>);
+    const markdown = rendered.querySelector<HTMLElement>("[data-safe-markdown]")!;
+
+    await nextFrame();
+    expect(markdown.scrollWidth).toBeLessThanOrEqual(markdown.clientWidth);
+    expect(markdown).not.toHaveAttribute("tabindex");
+  });
+
+  it("keeps a wrapped wide Markdown table in a local keyboard scroller", async () => {
+    await page.viewport(320, 720);
+    const cells = Array.from({ length: 20 }, (_, index) => `<td>column ${index}</td>`).join("");
+    const html = `<table><tbody><tr>${cells}</tr></tbody></table>` as TrustedMarkdownHtml;
+    const rendered = mount(<div style={{ width: "320px" }}><SafeMarkdown html={html} wrap /></div>);
+    const markdown = rendered.querySelector<HTMLElement>("[data-safe-markdown]")!;
+
+    await nextFrame();
+    expect(markdown.scrollWidth).toBeGreaterThan(markdown.clientWidth);
+    expect(getComputedStyle(markdown).overflowX).toBe("auto");
+    expect(markdown.tabIndex).toBe(0);
+  });
+
+  it("keeps short static Markdown out of the Tab order", async () => {
+    const rendered = mount(<div style={{ width: "320px" }}><SafeMarkdown html={"<pre><code>short</code></pre>" as TrustedMarkdownHtml} /></div>);
+    const markdown = rendered.querySelector<HTMLElement>("[data-safe-markdown]")!;
+
+    await nextFrame();
+    expect(markdown.scrollWidth).toBeLessThanOrEqual(markdown.clientWidth);
+    expect(markdown.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("adds Markdown to Tab order only while no-wrap content overflows", async () => {
+    await page.viewport(320, 720);
+    const short = "short" as TrustedMarkdownHtml;
+    const long = `<pre><code>${"long-code ".repeat(80)}</code></pre>` as TrustedMarkdownHtml;
+    const rendered = mount(<div style={{ width: "320px" }}><SafeMarkdown html={short} /></div>);
+    const markdown = rendered.querySelector<HTMLElement>("[data-safe-markdown]")!;
+
+    await nextFrame();
+    expect(markdown).not.toHaveAttribute("tabindex");
+
+    rerender(rendered, <div style={{ width: "320px" }}><SafeMarkdown html={long} /></div>);
+    await nextFrame();
+    expect(markdown.tabIndex).toBe(0);
+
+    rerender(rendered, <div style={{ width: "320px" }}><SafeMarkdown html={long} wrap /></div>);
+    await nextFrame();
+    expect(markdown).not.toHaveAttribute("tabindex");
+
+    rerender(rendered, <div style={{ width: "320px" }}><SafeMarkdown html={short} /></div>);
+    await nextFrame();
+    expect(markdown).not.toHaveAttribute("tabindex");
+  });
+
   it("copies, downloads exact UTF-8 source, and navigates to local HTML without a request", async () => {
     const calls: Array<{ key: string; state: string }> = [];
     const urls: Blob[] = [];
@@ -354,6 +464,24 @@ async function settle(): Promise<void> {
 }
 
 describe("LocalActions regressions", () => {
+  it("keeps short source text out of the Tab order", async () => {
+    const rendered = mount(localActions({
+      source: "short",
+      locale: "en",
+      filename: "document.txt",
+      capabilities: {
+        sourcePreview: {
+          sourceVisible: true,
+          onSourceVisibleChange: vi.fn(),
+          preview: null,
+        },
+      },
+    }));
+
+    await nextFrame();
+    expect(rendered.querySelector("[data-local-source]")?.hasAttribute("tabindex")).toBe(false);
+  });
+
   it("renders only requested capabilities and delegates controlled source controls", () => {
     const wrapped: boolean[] = [];
     const sourceVisible: boolean[] = [];
@@ -679,7 +807,29 @@ describe("AppSidebar regressions", () => {
     expect(document.querySelectorAll("[data-slot=collapsible]")).toHaveLength(3);
   });
 
-  it("centers the 44 px rail and divider on the sidebar edge when expanded and collapsed", async () => {
+  it("keeps the collapsed desktop rail outside the inert subtree and fully inside the viewport", async () => {
+    await page.viewport(1024, 768);
+    const rendered = mount(
+      <WorkbenchShell locale="en" breadcrumb={["Paste"]} headingId="document-heading" destinationGroups={[]}>
+        <h1 id="document-heading">Paste</h1>
+      </WorkbenchShell>,
+    );
+    const sidebar = rendered.querySelector<HTMLElement>('[data-slot="sidebar"][data-state]')!;
+    const rail = rendered.querySelector<HTMLButtonElement>("[data-sidebar=rail]")!;
+
+    click(rendered.querySelector("[data-sidebar=trigger]")!);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const box = rail.getBoundingClientRect();
+    expect(rail.closest("[inert]")).toBeNull();
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(document.documentElement.clientWidth);
+
+    await React.act(async () => { await userEvent.click(rail); });
+    expect(sidebar.dataset.state).toBe("expanded");
+  });
+
+  it("centers the expanded rail and keeps the collapsed rail inside the viewport", async () => {
     await page.viewport(1024, 768);
     const rendered = mount(
       <WorkbenchShell locale="en" breadcrumb={["Paste"]} headingId="document-heading" destinationGroups={[]}>
@@ -699,10 +849,134 @@ describe("AppSidebar regressions", () => {
     click(rendered.querySelector("[data-sidebar=trigger]")!);
     await new Promise((resolve) => setTimeout(resolve, 250));
     const collapsed = rail.getBoundingClientRect();
-    const collapsedContainer = container.getBoundingClientRect();
     expect(collapsed.width).toBe(44);
-    expect(collapsed.left + collapsed.width / 2).toBeCloseTo(collapsedContainer.right, 1);
-    expect(collapsed.left + Number.parseFloat(getComputedStyle(rail, "::after").left)).toBeCloseTo(collapsedContainer.right, 1);
+    expect(collapsed.left).toBeCloseTo(0, 1);
+    expect(collapsed.right).toBeCloseTo(44, 1);
+    expect(collapsed.left + Number.parseFloat(getComputedStyle(rail, "::after").left)).toBeCloseTo(0, 1);
+  });
+});
+
+describe("Sidebar focus ownership regressions", () => {
+  it("makes only collapsed desktop offcanvas content inert and hidden", async () => {
+    await page.viewport(1024, 768);
+    const rendered = mount(
+      <WorkbenchShell locale="en" breadcrumb={["Paste"]} headingId="document-heading" destinationGroups={[]}>
+        <h1 id="document-heading" tabIndex={-1}>Paste</h1>
+      </WorkbenchShell>,
+    );
+    const trigger = rendered.querySelector<HTMLButtonElement>("#workbench-sidebar-trigger")!;
+    const hiddenContent = rendered.querySelector<HTMLElement>("[data-slot=sidebar-inner]")!;
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    click(trigger);
+    await nextFrame();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(hiddenContent.getAttribute("aria-hidden")).toBe("true");
+    expect((hiddenContent as HTMLElement & { inert: boolean }).inert).toBe(true);
+
+    click(trigger);
+    await nextFrame();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(hiddenContent.hasAttribute("aria-hidden")).toBe(false);
+    expect((hiddenContent as HTMLElement & { inert: boolean }).inert).toBe(false);
+  });
+
+  it("returns mobile close focus to its opener and leaves destination focus with the heading", async () => {
+    await page.viewport(320, 720);
+    const rendered = mount(
+      <>
+        <button type="button" data-sidebar="trigger">Decoy trigger</button>
+        <input aria-label="Sidebar shortcut opener" />
+        <WorkbenchShell
+          locale="en"
+          breadcrumb={["Paste"]}
+          headingId="document-heading"
+          destinationGroups={[{ id: "destinations", label: "Destinations", destinations: [{ id: "destination", label: "Destination", selected: false, headingId: "document-heading" }] }]}
+        >
+          <h1 id="document-heading" tabIndex={-1}>Paste</h1>
+        </WorkbenchShell>
+      </>,
+    );
+    await nextFrame();
+    const trigger = rendered.querySelector<HTMLButtonElement>("#workbench-sidebar-trigger")!;
+    const shortcutOpener = rendered.querySelector<HTMLInputElement>("[aria-label='Sidebar shortcut opener']")!;
+    const heading = rendered.querySelector<HTMLElement>("#document-heading")!;
+
+    React.act(() => trigger.focus());
+    click(trigger);
+    await nextFrame();
+    expect(document.querySelector('[data-sidebar="sidebar"][data-mobile="true"]')).not.toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await React.act(async () => { await userEvent.keyboard("{Escape}"); });
+    await nextFrame();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    React.act(() => shortcutOpener.focus());
+    await React.act(async () => { await userEvent.keyboard("{Control>}b{/Control}"); });
+    await nextFrame();
+    expect(document.querySelector('[data-sidebar="sidebar"][data-mobile="true"]')).not.toBeNull();
+    await React.act(async () => { await userEvent.keyboard("{Escape}"); });
+    await nextFrame();
+    expect(document.activeElement).toBe(shortcutOpener);
+
+    React.act(() => trigger.focus());
+    click(trigger);
+    await nextFrame();
+    expect(document.querySelector('[data-sidebar="sidebar"][data-mobile="true"]')).not.toBeNull();
+    click(Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Destination")!);
+    await nextFrame();
+    expect(document.activeElement).toBe(heading);
+  });
+});
+
+describe("Tabs accessibility regressions", () => {
+  it("keeps a long horizontal tab list locally scrollable", async () => {
+    await page.viewport(320, 720);
+    const rendered = mount(
+      <div style={{ width: "320px" }}>
+        <Tabs defaultValue="one">
+          <TabsList aria-label="Long tabs">
+            <TabsTrigger value="one">{"First destination ".repeat(8)}</TabsTrigger>
+            <TabsTrigger value="two">{"Second destination ".repeat(8)}</TabsTrigger>
+            <TabsTrigger value="three">{"Third destination ".repeat(8)}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>,
+    );
+    const list = rendered.querySelector<HTMLElement>("[data-slot=tabs-list]")!;
+
+    await nextFrame();
+    expect(getComputedStyle(list).overflowX).toBe("auto");
+    expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
+    list.scrollLeft = 64;
+    expect(list.scrollLeft).toBeGreaterThan(0);
+  });
+});
+
+describe("History scroller focus regressions", () => {
+  it("keeps a short diff out of the Tab order", async () => {
+    await page.viewport(1024, 720);
+    const rendered = mount(<HistoryPanel
+      active
+      state={{
+        listState: "ready",
+        snapshotState: "ready",
+        list: { id: "demo", currentRevision: 2, currentVersion: "generation.2", revisions: [{ revision: 1, savedAt: "2026-09-13T08:00:00.000Z", supersededAt: "2026-09-13T09:00:00.000Z", byteLength: 12 }] },
+        selected: { id: "demo", revision: 1, savedAt: "2026-09-13T08:00:00.000Z", supersededAt: "2026-09-13T09:00:00.000Z", byteLength: 12, content: "short snapshot" },
+        failure: null,
+        diff: { state: "ready", lines: [{ kind: "delete", text: "before\n" }, { kind: "add", text: "after\n" }] },
+      }}
+      openHistory={vi.fn()}
+      selectRevision={vi.fn()}
+      computeDiff={vi.fn()}
+      back={vi.fn()}
+    />);
+    const diff = rendered.querySelector<HTMLElement>("[data-history-detail] pre")!;
+
+    await nextFrame();
+    expect(diff.scrollWidth).toBeLessThanOrEqual(diff.clientWidth);
+    expect(diff.hasAttribute("tabindex")).toBe(false);
   });
 });
 

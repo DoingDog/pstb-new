@@ -1,0 +1,1994 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "test/e2e/create-password.spec.ts",
+      "test/e2e/ordinary-sync.spec.ts",
+      "test/e2e/view-once-representations.spec.ts",
+      "test/e2e/accessibility.spec.ts",
+      "test/e2e/engine-version.spec.ts",
+      "--project=webkit",
+      "--reporter=json",
+      "--workers=1",
+      "--retries=0"
+    ],
+    "configFile": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\playwright.config.ts",
+    "rootDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile-320",
+        "name": "mobile-320",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "reduced-motion",
+        "name": "reduced-motion",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev:e2e",
+      "url": "http://127.0.0.1:8787/",
+      "timeout": 120000,
+      "reuseExistingServer": false
+    }
+  },
+  "suites": [
+    {
+      "title": "test\\e2e\\accessibility.spec.ts",
+      "file": "test/e2e/accessibility.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "supports Tabs Arrow, Home, End, and normal Tab behavior",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1107,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:12.433Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-b2cf8d51d914db61e0b5",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 351,
+          "column": 1
+        },
+        {
+          "title": "opens HelpTrigger by hover, focus, click, Escape, and outside interaction",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1865,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:13.550Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-7bc29c14840f8e5236ef",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 366,
+          "column": 1
+        },
+        {
+          "title": "opens and closes HelpTrigger by touch or keyboard activation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1564,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:15.422Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-d3e1a89ef14310aeb918",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 389,
+          "column": 1
+        },
+        {
+          "title": "traps Dialog focus, closes with Escape, and returns focus",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1458,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:16.999Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-c2bb0ed000b4a152e15c",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 408,
+          "column": 1
+        },
+        {
+          "title": "traps Sheet focus on mobile and toggles the desktop sidebar",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 895,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:18.471Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-bea4f97926ac25df2f81",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 425,
+          "column": 1
+        },
+        {
+          "title": "keeps every settled branch interactive target at least 44 by 44 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3512,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:19.376Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-7add345a0761e5556c8a",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 459,
+          "column": 1
+        },
+        {
+          "title": "keeps long Markdown code reachable locally at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3125,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:22.895Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-74cc7c102e3f74a3cd53",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 488,
+          "column": 1
+        },
+        {
+          "title": "keeps wrapped unbroken Markdown and wide tables reachable at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1836,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:26.028Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ac331ee03968ca969c2f",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 525,
+          "column": 1
+        },
+        {
+          "title": "keeps the 320 CSS pixel document unscrolled horizontally and the editor full-width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1364,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:27.871Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ab59d53a17b6a5e1b62e",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 549,
+          "column": 1
+        },
+        {
+          "title": "keeps the focused Settings tab visible in a local scroller at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 925,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:29.242Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-872003c0946346c68c5e",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 567,
+          "column": 1
+        },
+        {
+          "title": "reflows without horizontal overflow at the 200 percent zoom viewport equivalent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1380,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:30.177Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-9426720237798f1254f6",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 601,
+          "column": 1
+        },
+        {
+          "title": "removes computed animation and transition duration for reduced motion",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 874,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:31.568Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-a933b64ae457d6b9a744",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 612,
+          "column": 1
+        },
+        {
+          "title": "renders unified differences with text prefixes, not color alone",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1554,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:32.454Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-2aae8dc2515e65ca8fa5",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 625,
+          "column": 1
+        },
+        {
+          "title": "focuses mobile History Back and restores the revision that opened detail",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1473,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:34.015Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-c211fcc11bcfe19286d6",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 633,
+          "column": 1
+        },
+        {
+          "title": "switches English and zh-CN document copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 539,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:35.495Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ea90bf9c0f5b6cbd0e68",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 642,
+          "column": 1
+        },
+        {
+          "title": "applies system, light, and dark themes only to the document without storage writes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 452,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:36.040Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-11a0723a6c2981b37f59",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 653,
+          "column": 1
+        },
+        {
+          "title": "loads derived graph resources only when their user-visible surface is opened",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3471,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:36.497Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-3d33e1986fc1a1e67564",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 681,
+          "column": 1
+        },
+        {
+          "title": "keeps Help copy closed, does not issue status-only requests, and confines credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 866,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:39.974Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-e10a79a0a55ca788d225",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 747,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "accessibility branches",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 190,
+          "column": 6,
+          "specs": [
+            {
+              "title": "runs Axe after the settled create branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1164,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:41.948Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-5f074455bc445e89f5eb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 191,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled password branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1214,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:43.269Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-d1f0436b6af52d78f89e",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 197,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled inline create-conflict branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2006,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:44.491Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-d35bfd06a73417de76b7",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 204,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1575,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:46.504Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-90743e7f77b6faf64d75",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 214,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1496,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:48.086Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-6ddadec7805f07759dcd",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 219,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled armed-view-once branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2310,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:49.593Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-45cf63d9fff042d34d93",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 224,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1328,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:51.910Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-1961a51a797cb596d7b4",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 233,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1456,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:53.245Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-48da0eac493f5ae38892",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 240,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the real not-found ErrorPage route settles",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1540,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:54.708Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-8c985cb2955bf08884c9",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 247,
+              "column": 3
+            },
+            {
+              "title": "runs Axe on a real 400 BAD_REQUEST ErrorPage rather than only the 404 branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1383,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:56.258Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-744d4392f719a7643409",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 255,
+              "column": 3
+            },
+            {
+              "title": "shows the 400 AMBIGUOUS_PASSWORD error page for a duplicate password query",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 865,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:57.650Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-14cdbf4975d8b1cfdaeb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 264,
+              "column": 3
+            },
+            {
+              "title": "mounts the lazy ordinary route before controlling autosync time on every engine",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3939,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:17:58.521Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-2f322743586ac5bb2dfb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 272,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after ordinary autosync transitions to local not-found",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 6255,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:18:02.471Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-f23c3f1b79547434c4a4",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 285,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled delete-uncertain branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2302,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:18:08.735Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-d565182bab967655295e",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 327,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled read-only Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1378,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:18:11.046Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-99fddea198fd827b6fe3",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 343,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\create-password.spec.ts",
+      "file": "test/e2e/create-password.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "creates, protects, edits, recovers, manages, and deletes a paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16308,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:40.861Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c3015206940205d5d7af-0db2ecb321da9cf03f76",
+          "file": "test/e2e/create-password.spec.ts",
+          "line": 20,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\engine-version.spec.ts",
+      "file": "test/e2e/engine-version.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "records browser.version() for record-engine",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "cfpb-engine-observation",
+                  "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:17:34.453Z\",\"runToken\":\"b73057e13af69cb4ac29f1dca9c927866e477c9d784becf1eaf904e027726137\",\"project\":\"webkit\",\"exactVersion\":\"26.6\"}"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:57.193Z",
+                  "annotations": [
+                    {
+                      "type": "cfpb-engine-observation",
+                      "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:17:34.453Z\",\"runToken\":\"b73057e13af69cb4ac29f1dca9c927866e477c9d784becf1eaf904e027726137\",\"project\":\"webkit\",\"exactVersion\":\"26.6\"}"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "93a4b8da444a42a54b67-5399d35083f79bf159ae",
+          "file": "test/e2e/engine-version.spec.ts",
+          "line": 22,
+          "column": 3
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\ordinary-sync.spec.ts",
+      "file": "test/e2e/ordinary-sync.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ordinary sync uses sequential conditional resource reads and applies a real remote mutation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2028,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:57.262Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-7e2b316c1fdd9d84b0fc",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 155,
+          "column": 1
+        },
+        {
+          "title": "ordinary sync holds a real resource response without overlap and resumes from settlement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1441,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:18:59.301Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-695c053fa3672fb231b3",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 210,
+          "column": 1
+        },
+        {
+          "title": "a dirty edit cancels the current cadence before its resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1760,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:00.753Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-f21187c151156baff57c",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 239,
+          "column": 1
+        },
+        {
+          "title": "offline pauses ordinary sync and online resumes one non-overlapping resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1502,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:02.523Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-6e7c993f991e2a5ca744",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 260,
+          "column": 1
+        },
+        {
+          "title": "a real replacement generation presents candidate choices that preserve the chosen source",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2662,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:04.034Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-4b9b6a5abf8d6ae02d72",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 287,
+          "column": 1
+        },
+        {
+          "title": "real activity extends the five-minute active window and inactivity stops business traffic at its deadline",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1549,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:06.708Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-42ce44fdf6d0ae55607b",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 317,
+          "column": 1
+        },
+        {
+          "title": "an edit aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2261,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:08.268Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-6ac8537033e61aae42a4",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 347,
+          "column": 1
+        },
+        {
+          "title": "a delete aborts a delayed view-once autosync response before browser delivery",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2774,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:10.537Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-0c65072888c80ea44bab",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 381,
+          "column": 1
+        },
+        {
+          "title": "the active deadline aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2302,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:13.321Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-04940f4b2c1e2b71a44a",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 438,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response after a local edit enters terminal local-only state without further business traffic",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5120,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:15.632Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-fc16df14efbad58df975",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 471,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response across the active deadline enters terminal local-only state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3126,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:20.766Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-e97569c6bf4f7f048f24",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 514,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\view-once-representations.spec.ts",
+      "file": "test/e2e/view-once-representations.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "view-once main response retains only local actions and consumes the server copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1466,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:23.922Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-28a08a8f5f7b00ccb4c0",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 5,
+          "column": 1
+        },
+        {
+          "title": "view-once direct methods do not consume before the first valid raw GET",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 125,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:25.394Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-ba5d053a0fcbf556bbcf",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 58,
+          "column": 1
+        },
+        {
+          "title": "API OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:25.525Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-e71c7a55d2d4a0efd77f",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 92,
+          "column": 1
+        },
+        {
+          "title": "ip-trace OPTIONS remains the CORS response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:25.541Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-3adce7b00b81bde5f8aa",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "MCP OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:25.559Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-5b3e8d4bd2e03c53ca76",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 106,
+          "column": 1
+        },
+        {
+          "title": "direct representations preserve exact source, safely render Markdown, and run top-level HTML",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "webkit",
+              "projectName": "webkit",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1087,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:19:25.574Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-a15817ddb28c4c033107",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 112,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-23T05:17:34.901Z",
+    "duration": 112169.62700000001,
+    "expected": 52,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

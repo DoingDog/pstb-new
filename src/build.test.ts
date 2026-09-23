@@ -6,14 +6,22 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
+import { build as viteBuild } from "vite";
 import { describe, expect, it } from "vitest";
 import { assetPaths } from "./generated/assets";
 
-const { assertDynamicRootsOutsideInitial, markdownBudgetPaths, resolveManifestAssets, resolveMarkdownRoots } = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
+const {
+  assertDynamicRootsOutsideInitial,
+  markdownBudgetPaths,
+  resolveManifestAssets,
+  resolveMarkdownRoots,
+  resolveWorkerBundleAssets,
+} = await import(new URL("../scripts/build.mjs", import.meta.url).href) as {
   assertDynamicRootsOutsideInitial(manifest: Record<string, unknown>, rootKeys: string[], group: string): void;
   markdownBudgetPaths(markdownClosure: Iterable<string>, initial: Iterable<string>, pageClosures: Record<string, string[]>): string[];
   resolveManifestAssets(manifest: Record<string, unknown>): { appJs: string; appCss: string; diffWorker: string };
   resolveMarkdownRoots(manifest: Record<string, unknown>): string[];
+  resolveWorkerBundleAssets?: (bundle: Record<string, unknown>) => { entry: string; assets: string[] };
 };
 
 const dependencies = {
@@ -105,12 +113,8 @@ const validManifest = {
     file: `assets/${name}-entry.js`,
     src,
     isDynamicEntry: true,
+    ...(name === "OrdinaryPage" ? { assets: ["assets/diff-worker.js"] } : {}),
   }])),
-  "src/client/diff.ts": {
-    file: "assets/diff-worker.js",
-    src: "src/client/diff.ts",
-    isEntry: true,
-  },
 };
 
 type ClientAssetsManifest = {
@@ -264,6 +268,20 @@ async function assertThirdPartyNotices(notices: string): Promise<void> {
 }
 
 describe("build contract", () => {
+  it("uses only the production Worker binding and custom domain", async () => {
+    expect(JSON.parse(await readFile("wrangler.jsonc", "utf8"))).toEqual({
+      $schema: "node_modules/wrangler/config-schema.json",
+      name: "cf-pastebin-new",
+      main: "src/index.ts",
+      compatibility_date: "2026-09-12",
+      workers_dev: false,
+      preview_urls: false,
+      routes: [{ pattern: "b-new.awsl.app", custom_domain: true, previews_enabled: false }],
+      kv_namespaces: [{ binding: "PASTE_DB", id: "cd0ebbaba15e486a8e1071bb21e31a9f" }],
+      assets: { directory: "./dist/assets" },
+    });
+  });
+
   it("publishes generated URLs that resolve to the final client manifest entry", async () => {
     const manifest = JSON.parse(await readFile("dist/client-assets-manifest.json", "utf8")) as ClientAssetsManifest;
 
@@ -278,7 +296,7 @@ describe("build contract", () => {
     expect((await listRegularFiles("dist/assets")).sort()).toEqual(manifest.files.map((file) => file.path).sort());
   });
 
-  it("requires exactly the two approved manifest entries", () => {
+  it("requires the sole app entry and the emitted runtime diff worker", () => {
     expect(resolveManifestAssets(validManifest)).toEqual({
       appJs: "assets/app-entry.js",
       appCss: "assets/app-entry.css",
@@ -286,7 +304,7 @@ describe("build contract", () => {
     });
     expect(resolveManifestAssets({
       ...validManifest,
-      "src/client/chunk.ts": { file: "assets/chunk.js", src: "src/client/chunk.ts" },
+      "src/client/chunk.ts": { file: "assets/chunk-extra.js", src: "src/client/chunk.ts" },
     })).toEqual({
       appJs: "assets/app-entry.js",
       appCss: "assets/app-entry.css",
@@ -295,12 +313,147 @@ describe("build contract", () => {
     expect(() => resolveManifestAssets({ "index.html": validManifest["index.html"] })).toThrow();
     expect(() => resolveManifestAssets({
       ...validManifest,
-      "src/client/diff.ts": { ...validManifest["src/client/diff.ts"], src: "src/client/wrong.ts" },
+      [pageSources.OrdinaryPage]: {
+        file: "assets/OrdinaryPage-entry.js",
+        src: pageSources.OrdinaryPage,
+        isDynamicEntry: true,
+        assets: [],
+      },
     })).toThrow();
     expect(() => resolveManifestAssets({
       ...validManifest,
-      "src/client/extra.ts": { file: "assets/extra.js", src: "src/client/extra.ts", isEntry: true },
+      "src/client/extra.ts": { file: "assets/extra-more.js", src: "src/client/extra.ts", isEntry: true },
     })).toThrow();
+  });
+
+  it("requires the OrdinaryPage dynamic entry to be the sole runtime diff worker owner", () => {
+    const worker = "assets/diff-worker.js";
+    const initialOwner = {
+      ...validManifest,
+      "index.html": { ...validManifest["index.html"], assets: [worker] },
+    };
+    const soleInitialOwner = {
+      ...initialOwner,
+      [pageSources.OrdinaryPage]: {
+        file: "assets/OrdinaryPage-entry.js",
+        src: pageSources.OrdinaryPage,
+        isDynamicEntry: true,
+        assets: [],
+      },
+    };
+    const passwordPageOwner = {
+      ...validManifest,
+      [pageSources.PasswordPage]: {
+        file: "assets/PasswordPage-entry.js",
+        src: pageSources.PasswordPage,
+        isDynamicEntry: true,
+        assets: [worker],
+      },
+    };
+    const ordinaryPageWithoutDynamicEntry = {
+      ...validManifest,
+      [pageSources.OrdinaryPage]: {
+        file: "assets/OrdinaryPage-entry.js",
+        src: pageSources.OrdinaryPage,
+        isDynamicEntry: false,
+        assets: [worker],
+      },
+    };
+
+    expect(() => resolveManifestAssets(initialOwner)).toThrow(
+      "Runtime diff worker must be owned only by the OrdinaryPage dynamic entry record",
+    );
+    expect(() => resolveManifestAssets(soleInitialOwner)).toThrow(
+      "Runtime diff worker must be owned only by the OrdinaryPage dynamic entry record",
+    );
+    expect(() => resolveManifestAssets(passwordPageOwner)).toThrow(
+      "Runtime diff worker must be owned only by the OrdinaryPage dynamic entry record",
+    );
+    expect(() => resolveManifestAssets(ordinaryPageWithoutDynamicEntry)).toThrow(
+      "Runtime diff worker must be owned only by the OrdinaryPage dynamic entry record",
+    );
+    expect(resolveManifestAssets(validManifest).diffWorker).toBe(worker);
+  });
+
+  it("captures every emitted file in a split pinned-Vite worker bundle", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "cf-pastebin-vite-worker-"));
+    let workerBundle: Record<string, unknown> | undefined;
+
+    try {
+      await Promise.all([
+        writeFile(join(fixtureRoot, "index.html"), '<script type="module" src="/main.js"></script>'),
+        writeFile(join(fixtureRoot, "main.js"), 'new Worker(new URL("./worker.js", import.meta.url), { type: "module" });'),
+        writeFile(join(fixtureRoot, "worker.js"), 'void import("./worker-dependency.js").then(({ value }) => postMessage(value));'),
+        writeFile(join(fixtureRoot, "worker-dependency.js"), 'export const value = "worker dependency";'),
+      ]);
+      await viteBuild({
+        configFile: false,
+        root: fixtureRoot,
+        publicDir: false,
+        logLevel: "silent",
+        build: {
+          manifest: true,
+          outDir: "dist",
+          rollupOptions: {
+            input: join(fixtureRoot, "index.html"),
+            output: {
+              entryFileNames: "assets/app-[hash].js",
+              chunkFileNames: "assets/[name]-[hash].js",
+            },
+          },
+        },
+        worker: {
+          format: "es",
+          plugins: () => [{
+            name: "capture-worker-bundle-fixture",
+            generateBundle(_options, bundle) {
+              workerBundle = Object.fromEntries(Object.entries(bundle).map(([key, output]) => [key, output.type === "chunk"
+                ? {
+                    type: output.type,
+                    fileName: output.fileName,
+                    facadeModuleId: output.facadeModuleId,
+                    isEntry: output.isEntry,
+                  }
+                : { type: output.type, fileName: output.fileName }]));
+            },
+          }],
+          rollupOptions: {
+            output: {
+              entryFileNames: "assets/diff-[hash].js",
+              chunkFileNames: "assets/[name]-[hash].js",
+            },
+          },
+        },
+      });
+
+      expect(workerBundle).toBeDefined();
+      const outputs = Object.values(workerBundle!) as Array<{ fileName: string; isEntry?: boolean }>;
+      const workerEntry = outputs.find((output) => output.isEntry)?.fileName;
+      const workerAssets = outputs.map((output) => output.fileName).sort();
+      expect(workerAssets).toHaveLength(2);
+      expect(workerEntry).toMatch(/^assets\/diff-[A-Za-z0-9_-]+\.js$/u);
+
+      const rawManifest = JSON.parse(await readFile(join(fixtureRoot, "dist/.vite/manifest.json"), "utf8")) as Record<string, { assets?: string[] }>;
+      const rawOwnerAssets = Object.values(rawManifest).flatMap((record) => record.assets ?? []);
+      expect(rawOwnerAssets).toEqual([workerEntry]);
+      expect(resolveWorkerBundleAssets?.(workerBundle!)).toEqual({
+        entry: workerEntry,
+        assets: workerAssets,
+      });
+    } finally {
+      await rm(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("validates every top-level manifest record before graph discovery", () => {
+    for (const invalid of [null, 1, []]) {
+      expect(() => resolveManifestAssets({ ...validManifest, unused: invalid })).toThrow(
+        "Vite manifest record must be an object: unused",
+      );
+    }
+    expect(() => resolveManifestAssets({ ...validManifest, unused: { file: 1 } })).toThrow(
+      "Manifest record unused is not a content-hashed asset path",
+    );
   });
 
   it("accounts for the Markdown graph per callsite before deduplicating", () => {
@@ -576,7 +729,7 @@ describe("build contract", () => {
       const child = spawn("powershell.exe", arguments_, { windowsHide: true });
       let stdout = "";
       let stderr = "";
-      const timeout = setTimeout(() => child.kill(), 5_000);
+      const timeout = setTimeout(() => child.kill(), 15_000);
 
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");

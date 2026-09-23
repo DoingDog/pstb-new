@@ -1,0 +1,1994 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "test/e2e/create-password.spec.ts",
+      "test/e2e/ordinary-sync.spec.ts",
+      "test/e2e/view-once-representations.spec.ts",
+      "test/e2e/accessibility.spec.ts",
+      "test/e2e/engine-version.spec.ts",
+      "--project=firefox",
+      "--reporter=json",
+      "--workers=1",
+      "--retries=0"
+    ],
+    "configFile": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\playwright.config.ts",
+    "rootDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile-320",
+        "name": "mobile-320",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "reduced-motion",
+        "name": "reduced-motion",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev:e2e",
+      "url": "http://127.0.0.1:8787/",
+      "timeout": 120000,
+      "reuseExistingServer": false
+    }
+  },
+  "suites": [
+    {
+      "title": "test\\e2e\\accessibility.spec.ts",
+      "file": "test/e2e/accessibility.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "supports Tabs Arrow, Home, End, and normal Tab behavior",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1025,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:32.903Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-604f8057b708131a27a6",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 351,
+          "column": 1
+        },
+        {
+          "title": "opens HelpTrigger by hover, focus, click, Escape, and outside interaction",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1195,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:33.935Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ae8eaf9773fa1fce797e",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 366,
+          "column": 1
+        },
+        {
+          "title": "opens and closes HelpTrigger by touch or keyboard activation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1022,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:35.138Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-2648573de5012625f700",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 389,
+          "column": 1
+        },
+        {
+          "title": "traps Dialog focus, closes with Escape, and returns focus",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1052,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:36.166Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-261d205c4cfec332d07a",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 408,
+          "column": 1
+        },
+        {
+          "title": "traps Sheet focus on mobile and toggles the desktop sidebar",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1622,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:37.224Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-66d699a6cef4da2ee8c0",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 425,
+          "column": 1
+        },
+        {
+          "title": "keeps every settled branch interactive target at least 44 by 44 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2732,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:38.856Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-123e305fa9f27fc8fa29",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 459,
+          "column": 1
+        },
+        {
+          "title": "keeps long Markdown code reachable locally at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2543,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:41.594Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ffad21555b2a18c58072",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 488,
+          "column": 1
+        },
+        {
+          "title": "keeps wrapped unbroken Markdown and wide tables reachable at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1384,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:44.143Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ce6a888ab991e5fd17de",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 525,
+          "column": 1
+        },
+        {
+          "title": "keeps the 320 CSS pixel document unscrolled horizontally and the editor full-width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 772,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:45.533Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-c2db1c3016e2b46d8737",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 549,
+          "column": 1
+        },
+        {
+          "title": "keeps the focused Settings tab visible in a local scroller at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 903,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:46.312Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-b28587940810ab1f3849",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 567,
+          "column": 1
+        },
+        {
+          "title": "reflows without horizontal overflow at the 200 percent zoom viewport equivalent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 838,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:47.221Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-b63ae814feb52c2445c5",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 601,
+          "column": 1
+        },
+        {
+          "title": "removes computed animation and transition duration for reduced motion",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 712,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:48.065Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-5c8ace8718edefb2cd74",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 612,
+          "column": 1
+        },
+        {
+          "title": "renders unified differences with text prefixes, not color alone",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 977,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:48.783Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-3fcce4f861f04e9fd4b7",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 625,
+          "column": 1
+        },
+        {
+          "title": "focuses mobile History Back and restores the revision that opened detail",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1003,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:49.765Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-51b81a6816d002b89f11",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 633,
+          "column": 1
+        },
+        {
+          "title": "switches English and zh-CN document copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1590,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:50.775Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-0612cc310d4945356307",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 642,
+          "column": 1
+        },
+        {
+          "title": "applies system, light, and dark themes only to the document without storage writes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 482,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:52.371Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-74bea704386d9756c5c4",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 653,
+          "column": 1
+        },
+        {
+          "title": "loads derived graph resources only when their user-visible surface is opened",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6520,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:52.859Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-f79d881bf60420d70bd0",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 681,
+          "column": 1
+        },
+        {
+          "title": "keeps Help copy closed, does not issue status-only requests, and confines credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 904,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:14:59.387Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-247e63f2ea7bac55cfd5",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 747,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "accessibility branches",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 190,
+          "column": 6,
+          "specs": [
+            {
+              "title": "runs Axe after the settled create branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3970,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:13:55.179Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-26ffad4e7ea66850610e",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 191,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled password branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1620,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:13:59.983Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-20961089d69a792a30db",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 197,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled inline create-conflict branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1907,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:01.618Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-63e85e0c37219ba73f5e",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 204,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1990,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:03.533Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-c9edefa8e515c6232aeb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 214,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1843,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:05.533Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-98f4e885dc9498d9d4a1",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 219,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled armed-view-once branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2102,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:07.384Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-262d1314cd24a9e24bf2",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 224,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1588,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:09.495Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-f15e8bccda9ca20b7b1f",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 233,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1537,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:11.091Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-a5d9b63415814fe8119d",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 240,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the real not-found ErrorPage route settles",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1599,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:12.635Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-afaf3acdb06c14795d55",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 247,
+              "column": 3
+            },
+            {
+              "title": "runs Axe on a real 400 BAD_REQUEST ErrorPage rather than only the 404 branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3686,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:14.243Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-d5bb874393d14328fa03",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 255,
+              "column": 3
+            },
+            {
+              "title": "shows the 400 AMBIGUOUS_PASSWORD error page for a duplicate password query",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1283,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:17.938Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-1cefaa0be806f72d5ecb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 264,
+              "column": 3
+            },
+            {
+              "title": "mounts the lazy ordinary route before controlling autosync time on every engine",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4073,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:19.241Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-79beedba30562eaaa3d2",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 272,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after ordinary autosync transitions to local not-found",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 5480,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:23.329Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-a35620fa3cb2a1d74026",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 285,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled delete-uncertain branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2349,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:28.817Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-b510b8a99a22dece3a5f",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 327,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled read-only Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "firefox",
+                  "projectName": "firefox",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1718,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:14:31.177Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-8129b55bf84ea27d21d1",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 343,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\create-password.spec.ts",
+      "file": "test/e2e/create-password.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "creates, protects, edits, recovers, manages, and deletes a paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 13689,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:00.317Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c3015206940205d5d7af-a6c969fca0042ab1ce09",
+          "file": "test/e2e/create-password.spec.ts",
+          "line": 20,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\engine-version.spec.ts",
+      "file": "test/e2e/engine-version.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "records browser.version() for record-engine",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "cfpb-engine-observation",
+                  "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:13:45.300Z\",\"runToken\":\"fdf34ae3a14313686b806cf30a513c8bc1deed117712b0c88d54bca0af210558\",\"project\":\"firefox\",\"exactVersion\":\"155.0\"}"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:14.027Z",
+                  "annotations": [
+                    {
+                      "type": "cfpb-engine-observation",
+                      "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:13:45.300Z\",\"runToken\":\"fdf34ae3a14313686b806cf30a513c8bc1deed117712b0c88d54bca0af210558\",\"project\":\"firefox\",\"exactVersion\":\"155.0\"}"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "93a4b8da444a42a54b67-796fe0d3ed2bd1ce09ce",
+          "file": "test/e2e/engine-version.spec.ts",
+          "line": 22,
+          "column": 3
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\ordinary-sync.spec.ts",
+      "file": "test/e2e/ordinary-sync.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ordinary sync uses sequential conditional resource reads and applies a real remote mutation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:14.058Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-57b98747982f07df15e9",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 155,
+          "column": 1
+        },
+        {
+          "title": "ordinary sync holds a real resource response without overlap and resumes from settlement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1129,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:15.830Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-9ee0a8b8adcdad3986dc",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 210,
+          "column": 1
+        },
+        {
+          "title": "a dirty edit cancels the current cadence before its resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1109,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:16.974Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-b653134acd67467040f5",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 239,
+          "column": 1
+        },
+        {
+          "title": "offline pauses ordinary sync and online resumes one non-overlapping resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1257,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:18.090Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-55e7b2280e042031be2c",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 260,
+          "column": 1
+        },
+        {
+          "title": "a real replacement generation presents candidate choices that preserve the chosen source",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1806,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:19.355Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-3bd09e897aea6d0b0a83",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 287,
+          "column": 1
+        },
+        {
+          "title": "real activity extends the five-minute active window and inactivity stops business traffic at its deadline",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2725,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:21.168Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-b2420f5c2e748396d992",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 317,
+          "column": 1
+        },
+        {
+          "title": "an edit aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1764,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:23.903Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-3d2650f96c6b33e45d9c",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 347,
+          "column": 1
+        },
+        {
+          "title": "a delete aborts a delayed view-once autosync response before browser delivery",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2455,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:25.680Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-fb177caeaff170f95b98",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 381,
+          "column": 1
+        },
+        {
+          "title": "the active deadline aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1890,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:28.146Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-f94108d5423e539d3111",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 438,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response after a local edit enters terminal local-only state without further business traffic",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2393,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:30.046Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-1a6811f1d8c156732053",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 471,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response across the active deadline enters terminal local-only state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2019,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:32.446Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-43fce755afdff06671ac",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 514,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\view-once-representations.spec.ts",
+      "file": "test/e2e/view-once-representations.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "view-once main response retains only local actions and consumes the server copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1483,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:34.482Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-64ef6baee09a43ce52c6",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 5,
+          "column": 1
+        },
+        {
+          "title": "view-once direct methods do not consume before the first valid raw GET",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 163,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:35.974Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-3bbb50637cf5d9bee682",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 58,
+          "column": 1
+        },
+        {
+          "title": "API OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 13,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:36.146Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-d6cab070980c5bdc027b",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 92,
+          "column": 1
+        },
+        {
+          "title": "ip-trace OPTIONS remains the CORS response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 14,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:36.166Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-208bc6a6ba61789066bb",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "MCP OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 30,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:36.186Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-43ada5cec4a9ace80887",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 106,
+          "column": 1
+        },
+        {
+          "title": "direct representations preserve exact source, safely render Markdown, and run top-level HTML",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "firefox",
+              "projectName": "firefox",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1112,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:15:36.221Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-da62142bf310ddcc4267",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 112,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-23T05:13:46.469Z",
+    "duration": 111630.95,
+    "expected": 52,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

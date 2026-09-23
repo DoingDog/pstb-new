@@ -20,10 +20,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
-        diff: fileURLToPath(new URL("./src/client/diff.ts", import.meta.url)),
       },
       output: {
-        entryFileNames: (chunk) => chunk.name === "diff" ? "assets/diff-[hash].js" : "assets/app-[hash].js",
+        entryFileNames: "assets/app-[hash].js",
         chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/app-[hash][extname]",
       },

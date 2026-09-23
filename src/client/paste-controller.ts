@@ -812,6 +812,11 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (slot.state !== "in-flight" || slot.token !== token || slot.intent.kind !== "delete" || !sameAcceptedBaseline(slot.capture, state)) return false;
     const expected = { key: "delete" as const, attempt: token };
     const failure: MutationFailure = result;
+    if (isUncertain(failure) || (result.status !== null && result.status >= 500)) {
+      settleLastAction(expected, "failed", at);
+      enterTerminal("delete-uncertain", at);
+      return true;
+    }
     if (result.status === 204) {
       settleLastAction(expected, "succeeded", at);
       release(false);
@@ -837,11 +842,6 @@ export function createPasteController(options: PasteControllerOptions): PasteCon
     if (result.status === 404) {
       settleLastAction(expected, "failed", at);
       enterTerminal("not-found", at);
-      return true;
-    }
-    if (isUncertain(failure) || (result.status !== null && result.status >= 500)) {
-      settleLastAction(expected, "failed", at);
-      enterTerminal("delete-uncertain", at);
       return true;
     }
     settleLastAction(expected, "failed", at);

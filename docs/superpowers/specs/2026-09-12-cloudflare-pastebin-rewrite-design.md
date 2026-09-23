@@ -6,6 +6,8 @@
 
 修订记录：
 
+* 2026-09-23：用户要求当日24:00前完成并部署；确因设备、环境或系统限制无法完成的测试与验证直接跳过，继续后续任务。本次发布将四类尚无实际人工/实体设备证据的 manual accessibility 验收列为明确跳过，不伪造 receipt 或修改严格 verifier；所有可执行的产品、浏览器、构建、Wrangler 和生产 smoke 验证仍须按结果记录。此例外只适用本次发布，未来发布仍按 17.13 的完整门槛执行。
+* 2026-09-23：冻结 Task 16 branded capture真实性边界：Chrome/Edge GUI executable不得用`--version`取证，必须从exact executable读取`FileVersionInfo`、有效 Authenticode signer、byte length与 SHA-256；Firefox保留direct`--version`。每个Windows branded capture只允许win32，使用按environment和已验证binary SHA-256或exact version隔离的profile，共享从读取到receipt commit的单一deadline，并检测spawn后exact 1,000 ms settle interval内的error/close；root-relative Windows path不算fully-qualified absolute path。Safari只允许darwin，`/usr/bin/open`作为launcher exit 0即成功而不冒充browser process。此前全部release matrix、manual evidence和未受影响的产品contract不变。
 * 2026-09-22：冻结 Task 16 Chrome VersionHistory acquisition 的 live-source兼容边界：continuation request复用完全相同的`page_token` URL并最多尝试六次；只有紧邻的成功页少于1,000条且六次均为exact`400 INVALID_ARGUMENT`时，才将vendor返回的下一token视为stale terminal token；所有其他initial/continuation失败、full-page exhaustion、malformed error和successful repeated token仍fail closed。整个`acquire-targets`的四个vendor fetch共享该次operation唯一remaining-duration deadline和AbortSignal，其中Chrome pagination与retry不得重置budget。失败response不计入source hash/count。Chrome `serving.startTime`按Google Timestamp JSON只接受UTC `Z`且fraction缺省或恰为3、6、9位；以完整9位补零precision进行identity conflict和earliest比较，再确定性截断为artifact的canonical millisecond timestamp。所有既定all-or-nothing与freshness contract不变。
 * 2026-09-14：落实 canonical plan review round 1 的 binding corrections：受控 React state 保持唯一 form state方案，删除未使用的 `react-hook-form`/`@hookform/resolvers` pins；password form接受零或一个字段；加入唯一 automated axe runner `@axe-core/playwright@4.13.0`；明确 browser/direct OPTIONS 405、branded browser evidence与四类 manual accessibility release gates；补入 ordinary lazy adapter ownership。此前全部修订、既定 research choices及未受影响的 KV/password/view-once/active-HTML/API/MCP contract不变。
 * 2026-09-14：落实 React/sync spec review round 3 的 R3-01..R3-02：为每个 derived-surface Retry补齐 local/source/display/host/parent/retry generation publication guard；让完整且严格验证的 terminal view-once response在 initial terminal commit恰好一次 settle originating action。此前全部修订、既定 research choices及未受影响的 KV/password/view-once/active-HTML/API/MCP contract不变。
@@ -1396,6 +1398,8 @@ theme control的 exact preference states为 `system`、`light`、`dark`，初始
 
 Chrome official VersionHistory acquisition以`page_size=1000`顺序读取。每个`nextPageToken`只通过同一base query追加URL-encoded`page_token`，token非空且不得重复。Continuation遇到exact JSON`400 INVALID_ARGUMENT`可在同一URL内最多尝试六次；只有六次全部如此且紧邻的最后成功页`releases.length < 1000`时，才忽略该stale terminal token并以已成功读取的pages结束。Initial page失败、非exact error、非400、malformed body、前页恰有1,000条时的retry exhaustion或successful repeated token均exit nonzero且不写任何campaign文件。失败response不进入`responseCount`或`responseSha256`。`serving.startTime`是Google Timestamp source field：只接受Gregorian UTC`YYYY-MM-DDTHH:mm:ssZ`或小数秒恰为3、6、9位的同形字符串，不接受offset、其他precision或rollover date。Adapter把fraction右补零到9位后用于同一source ID conflict与同version earliest instant比较，再截取前三位生成artifact所需的canonical`YYYY-MM-DDTHH:mm:ss.sssZ`；不得放宽其他artifact timestamp validator。本次acquisition从一个captured`commandNow`只派生一个remaining-duration deadline；Chrome、Edge、Firefox和Safari的全部fetch共享同一timer和AbortSignal，Chrome的全部pages与retries也不得重新获得完整budget。Deadline expiry仍fail closed且不写文件。
 
+Branded capture也从一个`commandNow`派生一个deadline，并保持同一timer和AbortSignal贯穿matrix/source读取、version或signed-PE metadata child、exact Windows browser的1,000 ms launch-settle以及receipt commit；expiry后必须退出且映射的receipt不存在；不能只靠timer callback推断期限，event loop延迟后须用monotonic clock再次检查，永不settle的action也须按deadline拒绝。同一路径capture用exclusive lock覆盖预检、commit和过期清理，并拒绝并发采集；共享AbortSignal下的receipt commit使用同步atomic rename并立即检查deadline，不能留下超时后暴露的receipt或删除另一采集的有效receipt。所有`windows-*` Chrome、Edge和Firefox capture只允许`process.platform === "win32"`，Safari capture只允许`darwin`。Chrome/Edge profile identity为verified binary SHA-256，Firefox current和previous均为exact version；self-test只能把这些profile建在其`mkdtemp` fixture内。Windows exact browser在settle interval内发生delayed `error`或`close`都失败且不得`unref`。`/usr/bin/open -a Safari`只是LaunchServices launcher：它在同一deadline内exit 0即成功，不应用browser-process settle规则。Signed-PE regression必须锁定FileVersionInfo product/version、Authenticode status、SignerCertificate simple name、positive bytes和lowercase SHA-256的实际PowerShell表达式，不能以version-resource company name替代signer identity。
+
 * semantic heading、form、nav、main、article、button和 label；不得用 clickable `div`；每个 input有visible Label，error由 `aria-describedby`或 `aria-errormessage`关联，explanation只由 HelpTrigger关联；
 * official Tabs遵守 WAI-ARIA automatic activation，Left/Right、Home/End、roving focus和正常 Tab行为；nested tab groups各自拥有 state，unmount清理；
 * Sidebar Sheet和Dialog正确 initial focus、focus trap/containment、Escape、outside policy与 focus return；delete最终动作是明确 Button；
@@ -1406,6 +1410,8 @@ Chrome official VersionHistory acquisition以`page_size=1000`顺序读取。每�
 * Crepe失败时 source Textarea和完整 draft仍可键盘操作并可 retry；large diff仍在 worker执行；
 * 320 CSS px没有 page-level horizontal overflow，document/editor全宽，Sheet关闭后不留 reserved rail space；
 * `@axe-core/playwright` AxeBuilder、keyboard和 focus-order checks不能替代 manual screen-reader、contrast、200% zoom/reflow与 physical-touch smoke。四类 manual evidence各自必须有 date、environment/tool exact version、tester、artifact和 `passed` status；缺失、failed或 unavailable均阻止 release。Safari `not-available` row不豁免其中任何一类，可改用实际可用的平台、辅助技术和物理 touch设备完成，但不得伪造 pass。
+
+本次 2026-09-23 生产交付的后续用户指令允许跳过因设备、环境或系统限制无法执行的验证，并继续部署。当前会话缺少实体 touch 硬件和可核验的实际人工辅助技术操作，因此四类 manual accessibility receipt 均保持缺失，严格 `verify-release-evidence.mjs` 仍应因此返回非零；不得修改状态、冒称已通过或把自动化运行写成手工证据。此处是本次交付的显式例外，不降低后续发布的默认门槛。
 
 ## 18．Limits 与资源预算
 
@@ -1452,7 +1458,7 @@ Worker upload 必须低于64 MiB uncompressed，top-level startup低于1秒，is
 6. React component tests直接 mount `App`全部 bootstrap variants，验证 semantic roles、Tabs keyboard、Sheet/Dialog focus、HelpTrigger hover/focus/click/Escape/outside、OperationStatus、closed ActionKey、controller cleanup、staged remote apply fallback、read-only `/md`和 consumed branch exact local capabilities及零 business hooks。mount -> unmount -> mount模拟 StrictMode lifecycle但 production不依赖 StrictMode。
 7. `src/build.test.ts`读取 Vite manifest和 production bytes，验证第18节 gzip/raw budgets、initial/lazy reachability、hashed filenames、无 sourcemap、没有 eager Crepe/micromark/diff、无 banned package和 duplicate browser copy；同时按 exact materialized source set检查 pinned provenance comments、`use-mobile.tsx`、pruned `SidebarMenuSkeleton`/`skeleton.tsx`、`THIRD_PARTY_NOTICES.md`及 package exact pins。
 8. Playwright必须连接真实 `wrangler dev --local`进程，而不是 mocked page server。Chromium、Firefox、WebKit运行 create、password redirect、ordinary read/edit、所有 React mode refresh、read-only `/md` hard refresh、Crepe、history/diff、settings/password、copy/wrap/download、delete root handoff、view-once local-only、autosync、i18n/theme、keyboard/help和320 px journeys。`test/e2e/accessibility.spec.ts`必须直接使用 `@axe-core/playwright@4.13.0`的 `AxeBuilder`，对 create、password、error、ordinary text、ordinary Markdown、armed-view-once、consumed text、consumed Markdown、not-found、delete-uncertain和 read-only `/md`每个 application branch执行 WCAG 2 A/AA、2.1 A/AA及2.2 AA tags scan并要求零 violations。active HTML test只写 same-origin marker并确认 query visibility，不外发数据。
-9. current-two-major matrix指 release时 Chrome、Edge、Firefox、Safari各最近两个 major，四个产品各有恰好两个 target rows。实际 Chrome、Edge和 Firefox必须在预置对应 branded binary的 release runner上运行并记录 runtime exact version；历史 branded binary是 release prerequisite，不由 Playwright download提供。实际 Safari只在预置目标 Safari的 macOS runner上运行。bundled Chromium/Firefox/WebKit结果另记为 engine coverage，不能复用为 branded rows。Chrome、Edge、Firefox任一 row缺失或非 `passed`即失败；只有 Safari row可因对应 macOS runner unavailable记为 `not-available`，但仍保留 target major/version/source evidence且不得称为 pass。四类 manual accessibility rows独立要求全部 `passed`。
+9. current-two-major matrix指 release时 Chrome、Edge、Firefox、Safari各最近两个 major，四个产品各有恰好两个 target rows。实际 Chrome、Edge和 Firefox必须在预置对应 branded binary的 release runner上运行并记录 runtime exact version；历史 branded binary是 release prerequisite，不由 Playwright download提供。Windows Chrome/Edge从exact executable的signed PE metadata取`ProductName`、`ProductVersion`、valid Authenticode signer、byte length和 SHA-256，不执行GUI binary的`--version`；Firefox保留exact executable direct`--version`。所有Windows branded browser以environment加verified binary SHA-256或observed exact version区分isolated profile，不得handoff到不同target的既有process；spawn后的exact 1,000ms settle interval内出现error/close必须失败且不得写capture receipt。PE path必须是drive-qualified或UNC fully-qualified absolute path，root-relative path不合格。实际 Safari只在预置目标 Safari的macOS runner上运行。bundled Chromium/Firefox/WebKit结果另记为 engine coverage，不能复用为 branded rows。Chrome、Edge、Firefox任一 row缺失或非 `passed`即失败；只有 Safari row可因对应macOS runner unavailable记为 `not-available`，但仍保留 target major/version/source evidence且不得称为pass。四类 manual accessibility rows独立要求全部`passed`。
 
 ### 19.2 必测边界与 race
 
@@ -1503,9 +1509,9 @@ npx wrangler types --check
 npx wrangler deploy --dry-run --outdir .wrangler-dist
 ```
 
-build/test还必须产出可机读 Vite manifest/budget assertion结果，并确认 dry-run `Total Upload`低于64 MiB、`dist/assets`低于第18节8 MiB、artifact没有 source map或 server-bundled duplicate Crepe/micromark/diff。任何 requirement ID、dictionary key、bootstrap variant或 traceability parity failure都阻止完成。
+build/test还必须产出可机读 Vite manifest/budget assertion结果，并确认 dry-run `Total Upload`低于64 MiB、`dist/assets`低于第18节8 MiB、artifact没有 source map或 server-bundled duplicate Crepe/micromark/diff。任何 requirement ID、dictionary key、bootstrap variant或 traceability parity failure都阻止完成。所有 Task 18 release gates、legacy removal、final review和clean integration gate通过后，才执行第20.3节的一次真实 production deploy；任何较早 task、candidate或未审核 tree都不得 deploy。
 
-## 20．Wrangler configuration 与 local smoke
+## 20．Wrangler configuration、local smoke 与 production deploy
 
 ### 20.1 配置
 
@@ -1514,13 +1520,16 @@ build/test还必须产出可机读 Vite manifest/budget assertion结果，并确
 | 字段 | 固定值或约束 |
 |---|---|
 | `$schema` | `node_modules/wrangler/config-schema.json` |
-| `name` | `cf-pastebin` |
+| `name` | `cf-pastebin-new` |
 | `main` | `src/index.ts` |
 | `compatibility_date` | `2026-09-12` |
-| `kv_namespaces` | 恰好一个 object，只绑定 `PASTE_DB`；开发配置使用明显的 placeholder `11111111111111111111111111111111`，实际 deploy 前由使用者替换为真实 namespace ID |
+| `kv_namespaces` | 恰好一个 object，只绑定 `PASTE_DB` 到现有 namespace ID `cd0ebbaba15e486a8e1071bb21e31a9f` |
+| `workers_dev` | `false` |
+| `preview_urls` | `false` |
+| `routes` | 恰好一个 object：`{ "pattern": "b-new.awsl.app", "custom_domain": true, "previews_enabled": false }`；不声明其他 route |
 | `assets.directory` | `./dist/assets` |
 
-只声明一个 KV binding。不设置 `nodejs_compat`，因为该 compatibility date 自动启用相应 behavior gate，但仍需在 workerd 中执行所有实际 dependency paths，[Node compatibility 说明](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#get-started)。
+只声明一个 KV binding和一个 custom domain route。不设置 `nodejs_compat`，因为该 compatibility date 自动启用相应 behavior gate，但仍需在 workerd 中执行所有实际 dependency paths，[Node compatibility 说明](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#get-started)。`workers_dev:false`、`preview_urls:false`和 route-level `previews_enabled:false`必须保持，不能以临时或 fallback `workers.dev` route、preview URL或 preview deployment替代 production custom domain。
 
 ### 20.2 PowerShell local smoke
 
@@ -1568,6 +1577,28 @@ npx wrangler deploy --dry-run --outdir .wrangler-dist
 
 server readiness loop 使用脚本内的 30-second deadline；超时后执行 finally，并终止完整 Wrangler process tree。`--local` 不允许 remote binding。
 
+### 20.3 Production deploy 与线上验收
+
+用户已完成 `npx wrangler@latest login`。只有第19.3节和 Task 18 的 pre-deletion、candidate-final、independent review、integrated-final gates全部通过，final integration worktree clean，且 `worker.js`已经按计划删除后，才从该 exact reviewed commit执行一次：
+
+```powershell
+npx wrangler whoami
+npx wrangler deploy
+```
+
+真实 deploy必须是 `wrangler deploy`创建并立即投入流量的 production deployment，不使用 `wrangler versions upload`、preview alias、preview URL或其他 preview mode。它必须使用第20.1节的 checked-in配置，不传 `--env`、临时 binding、临时 route或 `workers.dev` override。若账号、zone、custom-domain、KV或 deploy权限失败，保留失败输出并停止；不得启用 `workers.dev`、新建替代 namespace或改用另一域名绕过。
+
+Deploy成功后必须针对 `https://b-new.awsl.app`执行独立 production smoke，并记录 status、response contract和 cleanup结果：
+
+1. `/`返回 application shell；以唯一临时 custom ID创建 paste，并验证 main read、edit和最终 delete。
+2. 对 password redirect/query行为以及 `/raw/:id`、`/md/:id`、`/html/:id`、`/file/:id`逐项验证授权状态、exact body或 renderer/download contract；HTML fixture只执行无外部副作用的 marker。
+3. 对 `/ip-trace`验证 URL、method、body、request headers、`request.cf`、pretty JSON和 wildcard CORS；对 `/mcp`运行 initialize、`tools/list` exact八项和一个可清理的 tool call。
+4. 通过 checked-in binding、Cloudflare deployment metadata和指定 namespace ID上的临时 main key读取，确认 `PASTE_DB`实际绑定 `cd0ebbaba15e486a8e1071bb21e31a9f`；KV读取允许按第3节 eventual-consistency边界做有上限的重试。
+5. 确认 deploy metadata只列 `b-new.awsl.app` custom domain，`workers_dev`为 false；若能取得账号 subdomain，还要直接请求 `cf-pastebin-new.<subdomain>.workers.dev`并确认它不提供该 Worker。
+6. 删除全部临时 paste，确认 canonical read为404，并确认 main、metadata和revision sibling不再保留可读测试数据。
+
+Production smoke失败不允许宣称发布完成。可修复的代码或配置问题回到 owning task先加 RED、review并重跑全部 final gates，再重新 deploy；不得直接在 Cloudflare dashboard产生未记录的配置漂移。项目仍不得 push。
+
 ## 21．Requirement-to-acceptance traceability
 
 下表中的验收项都是 release gate，不是建议。
@@ -1603,7 +1634,7 @@ server readiness loop 使用脚本内的 30-second deadline；超时后执行 fi
 | C27 | English/简体中文，browser language选择，manual switch | 17.12 | navigator zh/en fixtures与 switch；visible/help/status/action全部 dictionary parity |
 | C28 | `system`/`light`/`dark` document-only theme | 17.12 | matchMedia变化、三态切换与切回system通过；storage为空；new document重置；不影响 `/html` |
 | C29 | 当前四浏览器最近两个 major、responsive/accessibility | 17.13、19 | Playwright三 engine另行通过；actual branded Chrome/Edge/Firefox/Safari各恰好两个 release-time major rows，Chrome/Edge/Firefox全为passed且只有Safari可not-available；320 px Sheet、keyboard、每个application branch的AxeBuilder scan及四类manual rows通过 |
-| C30 | Wrangler name、唯一 binding、开发 placeholder | 20 | config exact name/main/date/assets；只有一个 `PASTE_DB`，开发 ID 为明确 placeholder；local smoke 与 dry-run exit 0；不执行 deploy |
+| C30 | Wrangler production name、唯一 binding、仅 custom domain、禁用 workers.dev与preview、final-gate后生产部署 | 20 | config exact name/main/date/assets；只有一个 `PASTE_DB`并绑定 `cd0ebbaba15e486a8e1071bb21e31a9f`；`workers_dev:false`、`preview_urls:false`、唯一 `b-new.awsl.app` custom-domain route且 `previews_enabled:false`；local smoke、types、dry-run先通过；Task 18 final clean integration后只执行 production `wrangler deploy`，production smoke和cleanup通过 |
 | C31 | 不保留 legacy API 与 destructive GET | 3、12.2 | method/path contract tests均为404/405且无 KV mutation |
 | C32 | protected main GET无 password呈 React input；form POST校验并302到 query | 9.3、17.1、17.4 | GET 200 shell无 content；POST零 field与一个wrong field均403 React inline error；duplicate/unknown field 422；一个correct field 302 Location exact encoded target |
 | C33 | HTML JavaScript可读取和外传 query password，用户接受 | 9.3、16.2、22 | browser test确认 `location.search` 可读；无 CSP/sandbox阻止 fetch；风险文档存在 |

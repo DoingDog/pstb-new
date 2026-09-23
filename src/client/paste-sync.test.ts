@@ -888,6 +888,32 @@ describe("PasteSync ordering and recovery", () => {
     expect(fixture.reads).toHaveLength(2);
   });
 
+  it("does not publish a retired ordinary 200 after local work takes authority", async () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    const remote = snapshot({
+      source: "remote-authority",
+      identity: { kind: "v2", generation: "generation-a", versionCounter: 2 },
+      contentRevision: 2,
+      updatedAtMs: Date.parse("2026-09-14T00:00:00.000Z"),
+      summary: summary({
+        version: "generation-a.2",
+        contentRevision: 2,
+        updatedAt: "2026-09-14T00:00:00.000Z",
+        contentBytes: 16,
+      }),
+    });
+
+    fixture.clock.advance(3_000);
+    fixture.controller.localWorkChanged();
+    const eventsAfterRetirement = [...fixture.events];
+    fixture.resolve200(0, remote);
+    await fixture.flush();
+
+    expect(fixture.events).toEqual(eventsAfterRetirement);
+    expect(fixture.lastState()).toBe("paused-local");
+    expect(fixture.activeReadCount()).toBe(0);
+  });
+
   it("pauses offline, clears a candidate, and waits a full cadence after online", async () => {
     const fixture = syncFixture({ loadAt: 0 });
 
@@ -923,6 +949,22 @@ describe("PasteSync ordering and recovery", () => {
     fixture.resolve304(1);
     await fixture.flush();
     expect(fixture.events).toContainEqual({ type: "credential-proved", password: "replacement", at: 9_000 });
+  });
+
+  it("releases a failed Delete pause only after confirmed access and local work settles", () => {
+    const fixture = syncFixture({ loadAt: 0 });
+    fixture.controller.localWorkChanged();
+    fixture.controller.rejectDelete(403, 0);
+    expect(fixture.lastState()).toBe("forbidden");
+    fixture.clock.advance(1);
+    fixture.controller.confirmedAccess(fixture.clock.now);
+    expect(fixture.lastState()).toBe("paused-local");
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(0);
+    fixture.controller.localWorkSettled(fixture.clock.now);
+    expect(fixture.lastState()).toBe("waiting");
+    fixture.clock.advance(3_000);
+    expect(fixture.reads).toHaveLength(1);
   });
 
   it("does not let queued callbacks change permanent not-found state", async () => {

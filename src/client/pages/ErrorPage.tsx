@@ -15,7 +15,7 @@ export function ErrorPage({ locale, status, errorCode }: ErrorPageProps) {
     <section className="flex flex-col gap-4">
       <h2>{safeStatus}</h2>
       <p role="alert">{errorMessage(locale, code)}</p>
-      <a href="/" className="w-fit text-primary underline-offset-4 hover:underline">{copy.create}</a>
+      <a href="/" className="inline-flex min-h-11 min-w-11 w-fit items-center text-primary underline-offset-4 hover:underline">{copy.create}</a>
     </section>
   );
 }

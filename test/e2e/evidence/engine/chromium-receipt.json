@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "releaseDate": "2026-09-23",
+  "runToken": "1bd3b42e6cf1b4581c3f7184eccfcedbd8414c62babb97873e3a5bc4049096b2",
+  "project": "chromium",
+  "exactVersion": "153.0.8010.12",
+  "status": "passed",
+  "testedAt": "2026-09-23T05:11:59.172Z",
+  "suite": {
+    "files": [
+      "test/e2e/create-password.spec.ts",
+      "test/e2e/ordinary-sync.spec.ts",
+      "test/e2e/view-once-representations.spec.ts",
+      "test/e2e/accessibility.spec.ts",
+      "test/e2e/engine-version.spec.ts"
+    ],
+    "total": 52,
+    "passed": 52,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0,
+    "sentinel": "records browser.version() for record-engine"
+  },
+  "reporterArtifact": {
+    "path": "test/e2e/evidence/engine/chromium-report.json",
+    "sha256": "d4d6d7c800fbc5dafd1e73464116ecde760dabf6dd6b1f4cffdc14d01ad83ac8"
+  },
+  "observationArtifact": {
+    "path": "test/e2e/evidence/engine/chromium-version-observation.json",
+    "sha256": "4d80613fcc56755f3e9c9cbbb8353cee1110b364f1b169301886e8be459dbfeb"
+  }
+}

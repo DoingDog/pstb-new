@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "releaseDate": "2026-09-23",
+  "product": "Firefox",
+  "slot": "previous",
+  "environment": "windows-firefox-previous",
+  "capturedAt": "2026-09-23T05:11:41.203Z",
+  "testedAt": "2026-09-23T05:46:24.531Z",
+  "captureReceipt": {
+    "path": "test/e2e/evidence/browser-matrix/firefox-previous-capture.json",
+    "sha256": "8016e7250dc04dae4d328237af176577f01d4d0f16862f0b35a78e575272ee5d"
+  },
+  "target": {
+    "sourceArtifact": "test/e2e/evidence/browser-target-sources/firefox-stable.json",
+    "sourceSha256": "baa277685bbf6e7dfbd47c1fed80d0c6bb3da789e87f1fddd81d956c38ddba69",
+    "exactVersion": "155.0.1",
+    "major": 155
+  },
+  "observed": { "exactVersion": "155.0.1", "major": 155 },
+  "tester": "Claude Code, script-driven headed W3C WebDriver via geckodriver 0.37.1 using exact signed Firefox executable; not human manual testing",
+  "checks": [
+    { "id": "root-create", "status": "passed", "notes": "W3C WebDriver opened the React root, created a protected paste, and retained its View URL. Browser capabilities reported Firefox 155.0.1." },
+    { "id": "password-post-hard-refresh", "status": "passed", "notes": "Submitted the native password form, observed a redirect with exactly one URL-encoded password query, and hard-refreshed the authorized URL." },
+    { "id": "ordinary-edit-autosave", "status": "passed", "notes": "A browser input event edited Content; the one-second autosave reported Saved and the exact source survived hard refresh." },
+    { "id": "tabs-sheet", "status": "passed", "notes": "Real W3C WebDriver ArrowRight/End and Escape keys exercised Tabs, Delete Dialog, and mobile Sheet; focus returned to their triggers." },
+    { "id": "raw-html-md-file", "status": "passed", "notes": "Browsed raw, safe Markdown, and active top-level HTML; browser fetch of file checked status, attachment headers, and exact body. Active script was same-origin fixture only." },
+    { "id": "delete-root-handoff", "status": "passed", "notes": "Confirmed delete via dialog, observed root handoff and cleared password query, refreshed root without stale Deleted feedback, then observed 404 and paste-not-found alert." }
+  ]
+}

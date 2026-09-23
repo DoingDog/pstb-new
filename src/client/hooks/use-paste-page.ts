@@ -23,7 +23,7 @@ import { PasteSync, classifyRemote, type PasteSyncCapture, type PasteSyncEvent, 
 import { createStagedSurfaceApply, type DerivedSurface, type GuardedSurfaceOperation, type StagedSurfaceApply, type SurfaceFallback } from "../surface-apply";
 import type { DeleteFlowState } from "../components/DeleteFlow";
 import type { PasswordPanelState } from "../components/PasswordPanel";
-import type { SettingsPanelState } from "../components/SettingsPanel";
+import type { SettingsActionKey, SettingsField, SettingsPanelState } from "../components/SettingsPanel";
 
 export interface SurfaceFallbackState {
   surface: Exclude<SurfaceFallback, null>;
@@ -62,7 +62,7 @@ export interface PastePageActions {
   autosaveInput(content: string, eventAt: number): void;
   compositionStart(): void;
   compositionEnd(content: string, eventAt: number): void;
-  retry(credential: string | null): void;
+  retry(credential: string | null, owner?: "content"): void;
   reconcile(): void;
   overwrite(): void;
   reload(): void;
@@ -102,6 +102,7 @@ export interface PastePageCandidate {
 export interface PastePageSnapshot {
   paste: Readonly<PasteControllerSnapshot>;
   autosave: Readonly<AutosaveSnapshot>;
+  contentRecoveryAllowed: boolean;
   records: OperationRecords;
   history: HistoryPanelState;
   settings: SettingsPanelState;
@@ -133,7 +134,7 @@ type OrdinaryInitialPage = {
   password: string | null;
 };
 type ActiveSnapshot = Extract<PasteControllerSnapshot, { resource: "active" }>;
-type LocalWorkOwner = "content" | "settings" | "password";
+type LocalWorkOwner = "content" | "settings" | "password" | "delete";
 type Candidate = {
   kind: "remote" | "terminal" | "forbidden";
   snapshot?: RemoteSnapshot;
@@ -160,6 +161,14 @@ type DerivedResources = {
   generation: number;
 };
 
+type SettingsRecoveryAction = {
+  key: "settings-reconcile" | "reload-server";
+  field: SettingsField | null;
+  state: "pending" | "succeeded" | "failed";
+  attempt: number;
+  startedAt: string;
+};
+
 type Runtime = {
   api: PasteApi;
   paste: PasteController;
@@ -178,6 +187,7 @@ type Runtime = {
   pendingRemoteApply: PendingRemoteApply | null;
   useRemoteAction: { attempt: number; startedAt: string } | null;
   reloadAction: { attempt: number; startedAt: string } | null;
+  settingsRecoveryAction: SettingsRecoveryAction | null;
   composing: boolean;
   disposed: boolean;
   terminalSignalled: boolean;
@@ -207,6 +217,15 @@ function locallyClean(runtime: Runtime): boolean {
   return runtime.dirtyDraftOwners.size === 0 && save.draft === save.acceptedSource && save.inFlightContent === null && save.dueAt === null;
 }
 
+function visibleSyncCandidate(runtime: Runtime, paste: Readonly<PasteControllerSnapshot>): Candidate | null {
+  const candidate = runtime.candidate;
+  if (candidate !== null && candidate.kind !== "forbidden") return candidate;
+  if (!active(paste) || paste.phase !== "ordinary" || paste.mutation.state !== "idle"
+    || runtime.records.autosync.state !== "forbidden" || runtime.records.network.state === "offline"
+    || navigator.onLine === false || now() >= runtime.activeUntil || !locallyClean(runtime)) return null;
+  return candidate ?? { kind: "forbidden", source: "" };
+}
+
 function markLocalWorkChanged(runtime: Runtime, owner: LocalWorkOwner): boolean {
   if (runtime.dirtyDraftOwners.has(owner)) return false;
   runtime.dirtyDraftOwners.add(owner);
@@ -231,6 +250,7 @@ function mutationOwner(snapshot: Readonly<PasteControllerSnapshot>): LocalWorkOw
   if (intent.kind === "content") return "content";
   if (intent.kind === "settings-title" || intent.kind === "settings-format" || intent.kind === "settings-expiration" || intent.kind === "settings-view-once") return "settings";
   if (intent.kind === "password-set" || intent.kind === "password-clear") return "password";
+  if (intent.kind === "delete") return "delete";
   return null;
 }
 
@@ -374,6 +394,24 @@ function actionBelongsToOwner(key: ActionKey, owner: LocalWorkOwner): boolean {
   return key === "settings-title" || key === "settings-format" || key === "settings-expiration" || key === "settings-view-once" || key === "settings-reconcile";
 }
 
+function settingsAction(key: ActionKey | null): SettingsActionKey | undefined {
+  return key === "settings-title" || key === "settings-format" || key === "settings-expiration" || key === "settings-view-once" || key === "settings-reconcile" || key === "reload-server"
+    ? key
+    : undefined;
+}
+
+function settingsField(value: unknown): SettingsField | null {
+  return value === "title" || value === "format" || value === "expiration" || value === "viewOnce" ? value : null;
+}
+
+function settingsActionField(action: ActionKey | undefined): SettingsField | null {
+  if (action === "settings-title") return "title";
+  if (action === "settings-format") return "format";
+  if (action === "settings-expiration") return "expiration";
+  if (action === "settings-view-once") return "viewOnce";
+  return null;
+}
+
 function statusFor(lastAction: LastAction, keys: readonly ActionKey[], snapshot: ActiveSnapshot, suppressedRecovery: { key: ActionKey; attempt: number } | null): "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required" {
   if (lastAction.state !== "idle" && suppressedRecovery?.key === lastAction.key && suppressedRecovery.attempt === lastAction.attempt) return "idle";
   if (snapshot.reconciliationRequired) return "reconciliation-required";
@@ -439,6 +477,7 @@ function initialView(initialPage: OrdinaryInitialPage): PastePageSnapshot {
   return {
     paste: { ...accepted, resource: "active", lastSavedContent: accepted.acceptedSource, mutation: { state: "idle", nextToken: 0 }, coalescedSource: null, phase: "ordinary", credential: { committed: initialPage.password, pending: null }, autosave: { state: "clean", confirmedAt: null, failedAt: null }, lastAction: { state: "idle" }, conflictCandidate: null, terminalResponseSource: null, terminalOrigin: null, originalMutationFailure: null, reconciliationRequired: false, reconciliation: { owner: null, requestPending: false }, serverCapabilities: true },
     autosave,
+    contentRecoveryAllowed: true,
     records: initialRecords(),
     history: emptyHistory(),
     settings,
@@ -469,6 +508,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
 
   const makeView = React.useCallback((runtime: Runtime): PastePageSnapshot => {
     const paste = runtime.paste.snapshot();
+    const syncCandidate = visibleSyncCandidate(runtime, paste);
     const autosave = runtime.autosave.snapshot();
     const surface = runtime.surface.snapshot();
     const derivedSource = surface.status === "staging" ? surface.source : paste.draft;
@@ -507,9 +547,17 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
 
     const settingsOwnsReconciliation = paste.reconciliation.owner === "title" || paste.reconciliation.owner === "format" || paste.reconciliation.owner === "expiration" || paste.reconciliation.owner === "viewOnce";
     const passwordOwnsReconciliation = paste.reconciliation.owner === "password";
-    const settingsState = paste.reconciliationRequired
-      ? settingsOwnsReconciliation ? "reconciliation-required" : "idle"
-      : statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile"], paste, runtime.suppressedRecovery);
+    const settingsReconciliationPending = settingsOwnsReconciliation && paste.reconciliation.requestPending;
+    const settingsRecoveryAction = runtime.settingsRecoveryAction;
+    const settingsState = settingsReconciliationPending
+      ? "pending"
+      : paste.reconciliationRequired
+        ? settingsOwnsReconciliation ? "reconciliation-required" : "idle"
+        : settingsRecoveryAction === null
+          ? statusFor(paste.lastAction, ["settings-title", "settings-format", "settings-expiration", "settings-view-once", "settings-reconcile", "reload-server"], paste, runtime.suppressedRecovery)
+          : settingsRecoveryAction.state === "failed"
+            ? paste.versionUsable ? "retryable" : "conflict"
+            : settingsRecoveryAction.state;
     const passwordState = paste.reconciliationRequired
       ? passwordOwnsReconciliation ? "reconciliation-required" : "idle"
       : statusFor(paste.lastAction, ["password-set", "password-clear", "password-reconcile"], paste, runtime.suppressedRecovery);
@@ -526,25 +574,41 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       ? paste.phase
       : "ordinary";
     const lastActionKey = paste.lastAction.state === "idle" ? null : paste.lastAction.key;
+    const activeSettingsAction = settingsRecoveryAction?.key
+      ?? (settingsReconciliationPending ? "settings-reconcile" as const : settingsAction(lastActionKey));
+    const reconciliationField = settingsField(paste.reconciliation.owner)
+      ?? settingsRecoveryAction?.field
+      ?? (activeSettingsAction === "settings-reconcile" ? settingsActionField(runtime.lastIntent?.action) : null);
+    const settingsResultField = settingsState === "idle"
+      ? null
+      : settingsState === "reconciliation-required" || activeSettingsAction === "settings-reconcile"
+        ? reconciliationField
+        : settingsActionField(activeSettingsAction);
+    const expirationReconciliationIntent = paste.mutation.state === "metadata-reconciliation" && paste.mutation.intent.kind === "settings-expiration"
+      ? typeof paste.mutation.intent.expiration === "number" ? "relative" as const : paste.mutation.intent.expiration === null ? "permanent" as const : "absolute" as const
+      : "absolute" as const;
 
     return {
       paste,
       autosave,
+      contentRecoveryAllowed: (paste.mutation.state === "idle" || paste.mutation.state === "content-reconciliation") && (runtime.lastIntent?.kind === "content" || autosave.draft !== autosave.acceptedSource),
       records: { ...runtime.records, autosave: { ...runtime.records.autosave }, autosync: { ...runtime.records.autosync }, network: { ...runtime.records.network }, lastAction: paste.lastAction },
       history: shallowHistory(runtime),
       settings: {
         accepted: { id: paste.summary.id, title: paste.summary.title, format: paste.summary.format, expiration, viewOnce: paste.summary.viewOnce },
         versionUsable: paste.versionUsable,
-        mutationPending: paste.lastAction.state === "pending",
+        mutationPending: settingsRecoveryAction?.state === "pending" || paste.lastAction.state === "pending",
         mutationOccupied: paste.mutation.state !== "idle",
         reconciliationOwner: paste.reconciliation.owner,
         reconciliationRequestPending: paste.reconciliation.requestPending,
-        resultIdentity: paste.lastAction,
+        reconciliationCredentialRequired: settingsOwnsReconciliation && autosave.state === "password-required",
+        resultIdentity: settingsRecoveryAction ?? paste.lastAction,
         result: {
-          field: settingsState === "idle" ? null : settingsState === "reconciliation-required" && settingsOwnsReconciliation ? paste.reconciliation.owner : lastActionKey === "settings-format" ? "format" : lastActionKey === "settings-expiration" ? "expiration" : lastActionKey === "settings-view-once" ? "viewOnce" : "title",
+          field: settingsResultField,
           state: settingsState,
           message: null,
-          ...(settingsState === "reconciliation-required" && paste.mutation.state === "metadata-reconciliation" && paste.mutation.intent.kind === "settings-expiration" && typeof paste.mutation.intent.expiration === "number" ? { reconciliationIntent: "relative" as const } : {}),
+          ...(activeSettingsAction === undefined || (settingsRecoveryAction === null && paste.lastAction.state === "idle") ? {} : { action: activeSettingsAction, attempt: settingsRecoveryAction?.attempt ?? (paste.lastAction.state === "idle" ? 0 : paste.lastAction.attempt) }),
+          ...(settingsState === "reconciliation-required" && settingsResultField === "expiration" ? { reconciliationIntent: expirationReconciliationIntent } : {}),
         } as SettingsPanelState["result"],
       },
       password: {
@@ -573,7 +637,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         mutationPending: paste.mutation.state !== "idle",
         versionUsable: paste.versionUsable,
       },
-      candidate: runtime.candidate === null ? null : { kind: runtime.candidate.kind, source: runtime.candidate.source },
+      candidate: syncCandidate === null ? null : { kind: syncCandidate.kind, source: syncCandidate.source },
       source: paste.draft,
       acceptedSource: paste.acceptedSource,
       version: paste.version,
@@ -768,10 +832,28 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     void retry(source).then(() => publish(runtime));
   }
 
-  function settleReloadAction(runtime: Runtime, state: "succeeded" | "failed"): void {
+  function settleSettingsRecoveryAction(runtime: Runtime, key: SettingsRecoveryAction["key"], attempt: number, state: "succeeded" | "failed"): boolean {
+    const action = runtime.settingsRecoveryAction;
+    if (action === null || action.key !== key || action.attempt !== attempt || action.state !== "pending") return false;
+    runtime.settingsRecoveryAction = { ...action, state };
+    return true;
+  }
+
+  function settleSettingsReconcileIfFinished(runtime: Runtime): void {
+    const action = runtime.settingsRecoveryAction;
+    if (action?.key !== "settings-reconcile" || action.state !== "pending") return;
+    const snapshot = runtime.paste.snapshot();
+    const retryPending = active(snapshot) && snapshot.mutation.state === "in-flight" && snapshot.mutation.intent.action === "settings-reconcile";
+    if (!retryPending && (!active(snapshot) || !snapshot.reconciliation.requestPending)) {
+      settleSettingsRecoveryAction(runtime, "settings-reconcile", action.attempt, "failed");
+    }
+  }
+
+  function settleReloadAction(runtime: Runtime, state: "succeeded" | "failed", expected?: { attempt: number }): void {
     const action = runtime.reloadAction;
-    if (action === null) return;
+    if (action === null || (expected !== undefined && action.attempt !== expected.attempt)) return;
     runtime.reloadAction = null;
+    settleSettingsRecoveryAction(runtime, "reload-server", action.attempt, state);
     runtime.paste.recordLocalAction({ key: "reload-server", state, attempt: action.attempt, startedAt: action.startedAt, settledAt: displayTime() });
   }
 
@@ -885,6 +967,14 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (dispatch.kind !== "dispatch") return;
     const controller = signal(runtime);
     if (controller === null) return;
+    const field = settingsActionField(dispatch.intent.action);
+    if (field !== null) {
+      const snapshot = runtime.paste.snapshot();
+      const startedAt = snapshot.lastAction.state !== "idle" && snapshot.lastAction.key === "settings-reconcile" && snapshot.lastAction.attempt === dispatch.requestToken
+        ? snapshot.lastAction.startedAt
+        : displayTime();
+      runtime.settingsRecoveryAction = { key: "settings-reconcile", field, state: "pending", attempt: dispatch.requestToken, startedAt };
+    }
     void runtime.api.getSettings({ id: initial.bootstrap.paste.id, password: dispatch.authorizationPassword, signal: controller.signal }).then((result) => {
       if (!settleRequest(runtime, controller)) return;
       const before = runtime.paste.snapshot();
@@ -893,12 +983,14 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       if (accepted && result.ok && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
       if (accepted && !result.ok && result.failure.kind === "network" && navigator.onLine !== false) updateNetworkRecord(runtime, "degraded");
       drainEffects(runtime);
+      settleSettingsReconcileIfFinished(runtime);
       publish(runtime);
     }, () => {
       if (!settleRequest(runtime, controller)) return;
       const accepted = runtime.paste.acceptMetadataReconcile(dispatch.requestToken, { kind: "network" }, now());
       if (accepted && navigator.onLine !== false) updateNetworkRecord(runtime, "degraded");
       drainEffects(runtime);
+      settleSettingsReconcileIfFinished(runtime);
       publish(runtime);
     });
   }
@@ -941,12 +1033,19 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         runtime.paste.failMutation(dispatch.token, { status: result.failure.status, ...mutationFlag(result.failure.mutationMayHaveApplied) }, now());
       }
       drainEffects(runtime);
+      if (dispatch.intent.kind === "delete") {
+        const snapshot = runtime.paste.snapshot();
+        if (!result.ok && (result.failure.status === 403 || result.failure.status === 409)) runtime.sync.rejectDelete(result.failure.status, now());
+        else if (active(snapshot) && snapshot.mutation.state === "idle") settleLocalWork(runtime, "delete");
+      }
+      settleSettingsReconcileIfFinished(runtime);
       publish(runtime);
     }, () => {
       if (!settleRequest(runtime, controller)) return;
       if (dispatch.intent.kind === "delete") runtime.paste.acceptDeleteMutation(dispatch.token, { status: null, mutationMayHaveApplied: true }, now());
       else runtime.paste.failMutation(dispatch.token, { status: null, mutationMayHaveApplied: true }, now());
       drainEffects(runtime);
+      settleSettingsReconcileIfFinished(runtime);
       publish(runtime);
     });
   }
@@ -956,6 +1055,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     if (start.kind !== "dispatch") return { kind: "blocked" };
     runtime.lastIntent = start.intent;
     runtime.suppressedRecovery = null;
+    if (runtime.settingsRecoveryAction?.state === "failed") runtime.settingsRecoveryAction = null;
     drainEffects(runtime);
     const controller = signal(runtime);
     if (controller === null) return { kind: "blocked" };
@@ -1042,11 +1142,17 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
             if (active(snapshot)) {
               runtime.validator = effect.kind === "remote" ? snapshot.responseEtag : null;
               runtime.surface.replaceCapture(surfaceCapture(snapshot));
+              const recovery = runtime.settingsRecoveryAction;
               if (effect.kind === "content" || effect.kind === "reconciled-applied") settleLocalWork(runtime, "content");
+              else if (effect.kind === "metadata" && recovery?.key === "settings-reconcile" && settleSettingsRecoveryAction(runtime, "settings-reconcile", recovery.attempt, "succeeded")) settleLocalWork(runtime, "settings");
               else if (effect.kind !== "remote") settleLocalWorkIfClean(runtime);
             }
           }
           updateAutosaveRecord(runtime);
+          if (effect.kind === "content" || effect.kind === "metadata" || effect.kind === "reconciled-applied") {
+            settleLocalWork(runtime, "delete");
+            runtime.sync.confirmedAccess(now());
+          }
           continue;
         }
         if (effect.type === "pause") {
@@ -1112,6 +1218,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     }
     runtime.lastIntent = intent;
     runtime.suppressedRecovery = null;
+    if (runtime.settingsRecoveryAction?.state !== "pending") runtime.settingsRecoveryAction = null;
     cancelPendingRemoteApply(runtime, "authoritative");
     clearExpiringCandidate(runtime);
     runtime.surface.invalidate();
@@ -1385,6 +1492,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     runtime.pendingRemoteApply = null;
     runtime.useRemoteAction = null;
     runtime.reloadAction = null;
+    runtime.settingsRecoveryAction = null;
     runtime.composing = false;
     runtime.disposed = false;
     runtime.terminalSignalled = false;
@@ -1475,6 +1583,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         },
       },
     });
+    let inFlightContent: string | null = null;
     runtime.autosave = new AutosaveController({
       content: accepted.draft,
       version: accepted.version,
@@ -1490,8 +1599,11 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         const snapshot = runtime.paste.snapshot();
         return active(snapshot) ? snapshot.credential.pending ?? snapshot.credential.committed : null;
       },
-      onStateChange: () => {
+      onStateChange: (state) => {
+        const saveSettled = inFlightContent !== null && state.inFlightContent === null;
+        inFlightContent = state.inFlightContent;
         if (runtime.autosave === undefined) return;
+        if (saveSettled && runtime.sync !== undefined) settleLocalWorkIfClean(runtime);
         updateAutosaveRecord(runtime);
         queuePublish();
       },
@@ -1609,12 +1721,21 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.autosave.compositionEnd(content, eventAt);
       if (runtime.autosave.snapshot().state === "clean") settleLocalWork(runtime, "content");
     },
-    retry(credential) {
+    retry(credential, owner) {
       const runtime = runtimeRef.current;
       if (runtime === null || runtime.disposed) return;
       const snapshot = runtime.paste.snapshot();
       if (!active(snapshot)) return;
+      const autosave = runtime.autosave.snapshot();
+      if (owner === "content" && autosave.draft === autosave.acceptedSource && snapshot.mutation.state !== "content-reconciliation") return;
       runtime.paste.setPendingCredential(credential);
+      if (owner === "content") {
+        if (snapshot.mutation.state === "content-reconciliation") dispatchContentReconcile(runtime, runtime.paste.startContentReconcile(now()));
+        else runtime.autosave.retry();
+        drainEffects(runtime);
+        publish(runtime);
+        return;
+      }
       if (runtime.candidate?.kind === "forbidden") {
         runtime.candidate = null;
         settleUseRemoteAction(runtime, "failed");
@@ -1653,6 +1774,10 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const snapshot = runtime.paste.snapshot();
       if (!active(snapshot) || snapshot.mutation.state !== "idle") return;
       cancelPendingRemoteApply(runtime, "authoritative");
+      if (runtime.reloadAction !== null) {
+        runtime.reloadController?.abort();
+        runtime.surface.invalidate();
+      }
       settleReloadAction(runtime, "failed");
       const token = ++runtime.reloadToken;
       const capture = baseline(snapshot);
@@ -1663,6 +1788,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       runtime.reloadController = controller;
       const startedAt = displayTime();
       runtime.reloadAction = { attempt: token, startedAt };
+      runtime.settingsRecoveryAction = { key: "reload-server", field: null, state: "pending", attempt: token, startedAt };
       runtime.paste.recordLocalAction({ key: "reload-server", state: "pending", attempt: token, startedAt });
       void runtime.api.readResource({ id: snapshot.summary.id, password: credential, ifNoneMatch: null, signal: controller.signal }).then(async (result) => {
         if (!settleRequest(runtime, controller)) return;
@@ -1705,14 +1831,14 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         }
         if (token !== runtime.reloadToken) return;
         if (!active(current) || !sameBaseline(capture, baseline(current)) || current.draft !== draft) {
-          settleReloadAction(runtime, "failed");
+          settleReloadAction(runtime, "failed", { attempt: token });
           publish(runtime);
           return;
         }
         if ((result.kind === "snapshot" || result.kind === "not-modified") && navigator.onLine !== false) updateNetworkRecord(runtime, "online");
         if (result.kind === "failure" && result.failure.kind === "network" && navigator.onLine !== false) updateNetworkRecord(runtime, "degraded");
         if (result.kind === "failure") {
-          settleReloadAction(runtime, "failed");
+          settleReloadAction(runtime, "failed", { attempt: token });
           publish(runtime);
           return;
         }
@@ -1721,27 +1847,28 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
           drainEffects(runtime);
         }
         if (result.kind !== "snapshot") {
-          settleReloadAction(runtime, "succeeded");
+          settleReloadAction(runtime, "succeeded", { attempt: token });
           publish(runtime);
           return;
         }
         if (sameResourceIdentity(result.snapshot, current)) {
-          settleReloadAction(runtime, "succeeded");
+          settleReloadAction(runtime, current.versionUsable ? "succeeded" : "failed", { attempt: token });
+          if (current.versionUsable) runtime.sync.confirmedAccess(now());
           runtime.records = { ...runtime.records, autosync: { ...runtime.records.autosync, checkedAt: displayTime() } };
           publish(runtime);
           return;
         }
+        const action = runtime.reloadAction;
+        if (action === null || action.attempt !== token) return;
         const operation: GuardedSurfaceOperation = {
-          enter: reloadCurrent,
+          enter: () => runtime.reloadAction?.attempt === action.attempt && reloadCurrent(),
           prepare: (context) => {
-            if (!reloadCurrent()) return null;
-            const action = runtime.reloadAction;
-            if (action === null) return null;
+            if (runtime.reloadAction?.attempt !== action.attempt || !reloadCurrent()) return null;
             const prepared = runtime.paste.prepareRemoteSnapshot(result.snapshot, {
               expectedBaseline: capture,
               expectedDraft: draft,
               targetDisplayGeneration: context.target.currentDisplayGeneration,
-              action: { key: "reload-server", ...action },
+              action: null,
             });
             if (prepared === null) return null;
             return {
@@ -1752,23 +1879,25 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
                 const retention = runtime.history.commitRetention(prepared.previousBaseline, prepared.nextBaseline);
                 runtime.validator = result.snapshot.etag;
                 runtime.candidate = null;
-                runtime.reloadAction = null;
+                settleReloadAction(runtime, "succeeded", action);
                 return () => {
                   autosaveRelease();
                   retention.release();
                   settleLocalWork(runtime, "content");
+                  settleLocalWork(runtime, "delete");
+                  runtime.sync.confirmedAccess(now());
                   queuePublish();
                 };
               },
               fail: () => {
                 prepared.fail(displayTime());
-                runtime.reloadAction = null;
+                settleReloadAction(runtime, "failed", action);
                 return queuePublish;
               },
             };
           },
           reject: () => {
-            settleReloadAction(runtime, "failed");
+            settleReloadAction(runtime, "failed", action);
             queuePublish();
           },
         };
@@ -1779,7 +1908,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         }
       }, () => {
         if (!settleRequest(runtime, controller)) return;
-        settleReloadAction(runtime, "failed");
+        settleReloadAction(runtime, "failed", { attempt: token });
         publish(runtime);
       });
       publish(runtime);
@@ -1791,6 +1920,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
       const owner = active(before) ? before.reconciliation.owner : null;
       if (owner === null || before.reconciliation.requestPending || !runtime.paste.discardReconciliation()) return;
       const discardedOwner: LocalWorkOwner = owner === "content" ? "content" : owner === "password" ? "password" : "settings";
+      if (discardedOwner === "settings") runtime.settingsRecoveryAction = null;
       if (runtime.lastIntent !== null && intentOwner(runtime.lastIntent) === discardedOwner) runtime.lastIntent = null;
       if (before.lastAction.state !== "idle" && actionBelongsToOwner(before.lastAction.key, discardedOwner)) {
         runtime.suppressedRecovery = { key: before.lastAction.key, attempt: before.lastAction.attempt };
@@ -1890,9 +2020,9 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     },
     retrySync(credential) {
       const runtime = runtimeRef.current;
-      const candidate = runtime?.candidate ?? null;
       if (runtime === null || runtime.disposed) return;
       const snapshot = runtime.paste.snapshot();
+      const candidate = visibleSyncCandidate(runtime, snapshot);
       if (!active(snapshot) || candidate === null || candidate.kind === "terminal") return;
       runtime.paste.setPendingCredential(credential);
       runtime.candidate = null;

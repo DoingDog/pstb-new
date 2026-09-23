@@ -135,7 +135,7 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
   const role = result.state === "pending" || result.state === "succeeded" ? "status" : "alert";
 
   return (
-    <section aria-label={copy.password} className="grid gap-3">
+    <section aria-label={copy.password} className="grid gap-3 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:justify-center [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11">
       {state.protected && <label>{copy.currentPassword}<Input name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>}
       <label>{copy.newPassword}<Input name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
       <div className="flex flex-wrap gap-2">

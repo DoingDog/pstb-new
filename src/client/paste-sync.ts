@@ -88,6 +88,8 @@ export interface PasteSyncController {
   recordUserActivity(activityAt: number): void;
   localWorkChanged(): void;
   localWorkSettled(settledAt: number): void;
+  rejectDelete(status: 403 | 409, at: number): void;
+  confirmedAccess(at: number): void;
   setOnline(online: boolean, eventAt: number): void;
   keepCurrent(actionAt: number): void;
   retrySync(actionAt: number, pendingCredential: string | null): boolean;
@@ -182,6 +184,7 @@ export class PasteSync implements PasteSyncController {
   private retryWithoutValidator = false;
   private retryCredential: string | null = null;
   private retryRequired = false;
+  private deletePause: "forbidden" | "conflict" | null = null;
   private candidate: Candidate | null = null;
   private stagedCandidate: Candidate | null = null;
   private locallyCleanOverride = false;
@@ -239,7 +242,7 @@ export class PasteSync implements PasteSyncController {
     this.locallyCleanOverride = false;
     this.clearRetryIntent();
     this.invalidateRead();
-    if (this.isActive() && !this.retryRequired) this.setState("paused-local", this.options.now());
+    if (this.isActive() && !this.retryRequired && this.deletePause === null) this.setState("paused-local", this.options.now());
     this.armTimer();
   }
 
@@ -247,6 +250,7 @@ export class PasteSync implements PasteSyncController {
     if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
     this.localDirty = false;
+    this.deletePause = null;
     if (this.retryRequired) {
       this.armTimer();
       return;
@@ -261,6 +265,25 @@ export class PasteSync implements PasteSyncController {
     this.armTimer();
   }
 
+  rejectDelete(status: 403 | 409, at: number): void {
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
+    this.syncDueAt = null;
+    this.deletePause = status === 403 ? "forbidden" : "conflict";
+    this.setState(this.online && !this.options.capture().offline ? this.deletePause : "paused-offline", at);
+    this.armTimer();
+  }
+
+  confirmedAccess(at: number): void {
+    if (!this.started || this.disposed || this.terminal || this.permanentlyStopped || (!this.retryRequired && this.deletePause === null)) return;
+    this.retryRequired = false;
+    this.deletePause = null;
+    if (!this.localDirty) this.localWorkSettled(at);
+    else {
+      this.setPausedState(at);
+      this.armTimer();
+    }
+  }
+
   setOnline(online: boolean, eventAt: number): void {
     if (!this.started || this.disposed || this.terminal || this.permanentlyStopped) return;
 
@@ -272,12 +295,13 @@ export class PasteSync implements PasteSyncController {
       this.locallyCleanOverride = false;
       this.clearRetryIntent();
       this.invalidateRead();
-      if (this.isActive() && !this.retryRequired) this.setState("paused-offline", eventAt);
+      if (this.isActive()) this.setState("paused-offline", eventAt);
       this.armTimer();
       return;
     }
 
-    if (this.retryRequired) {
+    if (this.retryRequired || this.deletePause !== null) {
+      this.setState(this.deletePause ?? "forbidden", eventAt);
       this.armTimer();
       return;
     }

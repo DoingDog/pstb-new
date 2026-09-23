@@ -102,19 +102,33 @@ async function assertWranglerConfig() {
   const config = JSON.parse(removeLineComments(await readFile(resolve(root, "wrangler.jsonc"), "utf8")));
   const [namespace] = config.kv_namespaces ?? [];
   const namespaceKeys = Object.keys(namespace ?? {}).sort();
+  const [route] = config.routes ?? [];
+  const routeKeys = Object.keys(route ?? {}).sort();
 
   if (
-    config.name !== "cf-pastebin" ||
+    config.name !== "cf-pastebin-new" ||
     config.main !== "src/index.ts" ||
+    config.compatibility_date !== "2026-09-12" ||
     config.assets?.directory !== "./dist/assets" ||
+    config.workers_dev !== false ||
+    config.preview_urls !== false ||
+    config.route !== undefined ||
     config.kv_namespaces?.length !== 1 ||
     namespaceKeys.length !== 2 ||
     namespaceKeys[0] !== "binding" ||
     namespaceKeys[1] !== "id" ||
     namespace?.binding !== "PASTE_DB" ||
-    namespace?.id !== "11111111111111111111111111111111"
+    namespace?.id !== "cd0ebbaba15e486a8e1071bb21e31a9f" ||
+    config.routes?.length !== 1 ||
+    routeKeys.length !== 3 ||
+    routeKeys[0] !== "custom_domain" ||
+    routeKeys[1] !== "pattern" ||
+    routeKeys[2] !== "previews_enabled" ||
+    route?.pattern !== "b-new.awsl.app" ||
+    route?.custom_domain !== true ||
+    route?.previews_enabled !== false
   ) {
-    throw new Error("wrangler.jsonc does not match the build contract");
+    throw new Error("wrangler.jsonc does not match the production build contract");
   }
 }
 
@@ -203,38 +217,74 @@ function resolvePageRecords(manifest, indexEntry) {
 
 export function resolveManifestAssets(manifest) {
   if (!isRecord(manifest)) throw new Error("Vite manifest must be an object");
+  for (const [key, value] of Object.entries(manifest)) {
+    if (!isRecord(value)) throw new Error(`Vite manifest record must be an object: ${key}`);
+    emittedPath(value.file, `Manifest record ${key}`);
+  }
 
   const entryKeys = Object.entries(manifest)
-    .filter(([, value]) => isRecord(value) && value.isEntry === true)
+    .filter(([, value]) => value.isEntry === true)
     .map(([key]) => key);
-  const expectedEntryKeys = ["index.html", "src/client/diff.ts"];
-
-  if (
-    entryKeys.length !== expectedEntryKeys.length ||
-    entryKeys.some((key) => !expectedEntryKeys.includes(key))
-  ) {
-    throw new Error("Vite manifest must contain exactly the approved entry records");
+  if (entryKeys.length !== 1 || entryKeys[0] !== "index.html") {
+    throw new Error("Vite manifest must contain exactly the approved app entry");
   }
 
   const indexEntry = manifestRecord(manifest, "index.html");
-  const diffEntry = manifestRecord(manifest, "src/client/diff.ts");
-  if (indexEntry.src !== "index.html" || diffEntry.src !== "src/client/diff.ts") {
-    throw new Error("Vite manifest entry sources do not match the build contract");
+  if (indexEntry.src !== "index.html") {
+    throw new Error("Vite manifest entry source does not match the build contract");
+  }
+  const pageRecords = resolvePageRecords(manifest, indexEntry);
+  const diffWorkerPattern = /^assets\/diff-[A-Za-z0-9_-]+\.js$/u;
+  const diffWorkerAssets = new Set();
+  const diffWorkerOwners = new Set();
+  for (const [key, value] of Object.entries(manifest)) {
+    for (const asset of stringList(value.assets, `${key} assets`)) {
+      const path = emittedPath(asset, `${key} asset`);
+      if (!diffWorkerPattern.test(path)) continue;
+      diffWorkerAssets.add(path);
+      diffWorkerOwners.add(key);
+    }
+  }
+  const diffWorker = requireSingle([...diffWorkerAssets], "runtime diff worker asset");
+  if (
+    diffWorkerOwners.size !== 1 ||
+    !diffWorkerOwners.has(pageRecords.OrdinaryPage) ||
+    manifestRecord(manifest, pageRecords.OrdinaryPage).isDynamicEntry !== true
+  ) {
+    throw new Error("Runtime diff worker must be owned only by the OrdinaryPage dynamic entry record");
   }
 
   const appJs = emittedPath(indexEntry.file, "Vite app entry");
   const appCss = emittedPath(requireSingle(stringList(indexEntry.css, "index.html css"), "entry CSS file"), "Vite app CSS entry");
-  const diffWorker = emittedPath(diffEntry.file, "Vite diff worker entry");
-  if (!/^assets\/app-[A-Za-z0-9_-]+\.js$/u.test(appJs) || !/^assets\/app-[A-Za-z0-9_-]+\.css$/u.test(appCss) || !/^assets\/diff-[A-Za-z0-9_-]+\.js$/u.test(diffWorker)) {
+  if (!/^assets\/app-[A-Za-z0-9_-]+\.js$/u.test(appJs) || !/^assets\/app-[A-Za-z0-9_-]+\.css$/u.test(appCss)) {
     throw new Error("Vite entry output does not match the build contract");
   }
-  resolvePageRecords(manifest, indexEntry);
 
   return { appJs, appCss, diffWorker };
 }
 
 function sortedPaths(paths) {
   return [...new Set(paths)].sort();
+}
+
+export function resolveWorkerBundleAssets(bundle) {
+  if (!isRecord(bundle)) throw new Error("Vite worker bundle must be an object");
+  const outputs = Object.entries(bundle).map(([key, output]) => {
+    if (!isRecord(output)) throw new Error(`Vite worker output must be an object: ${key}`);
+    return {
+      type: output.type,
+      isEntry: output.isEntry,
+      fileName: emittedPath(output.fileName, `Vite worker output ${key}`),
+    };
+  });
+  const entry = requireSingle(
+    outputs.filter((output) => output.type === "chunk" && output.isEntry === true),
+    "Vite worker entry",
+  );
+  return {
+    entry: entry.fileName,
+    assets: sortedPaths(outputs.map((output) => output.fileName)),
+  };
 }
 
 function without(paths, ...excluded) {
@@ -334,8 +384,11 @@ function cssAssetPath(cssPath, reference) {
   return emittedPath(path, `CSS asset reference from ${cssPath}`);
 }
 
-async function createClientAssetsManifest(manifest) {
+async function createClientAssetsManifest(manifest, workerAssets) {
   const entry = resolveManifestAssets(manifest);
+  const diff = sortedPaths(stringList(workerAssets, "diff worker assets").map((path) =>
+    emittedPath(path, "Diff worker asset")));
+  if (!diff.includes(entry.diffWorker)) throw new Error("Diff worker bundle is missing its runtime entry");
   const indexEntry = manifestRecord(manifest, "index.html");
   const pageRecords = resolvePageRecords(manifest, indexEntry);
   const deployedFiles = (await readBuiltFiles())
@@ -408,13 +461,13 @@ async function createClientAssetsManifest(manifest) {
   const crepeRoots = resolveCrepeRoots(manifest);
   assertDynamicRootsOutsideInitial(manifest, markdownRoots, "Markdown");
   assertDynamicRootsOutsideInitial(manifest, crepeRoots, "Crepe");
-  assertDynamicRootsOutsideInitial(manifest, ["src/client/diff.ts"], "diff");
+  if (diff.some((path) => initial.has(path))) throw new Error("Diff worker is reachable from the initial graph");
   const pageClosures = {};
   const pageRoots = {};
   for (const pageName of pageNames) {
     const rootKey = pageRecords[pageName];
     const rootPath = emittedPath(manifestRecord(manifest, rootKey).file, `${pageName} page root`);
-    const closure = without(await collectClosure([rootKey]), initial);
+    const closure = without(await collectClosure([rootKey]), initial, diff);
     if (!closure.includes(rootPath)) throw new Error(`${pageName} root is missing from its closure`);
     pageClosures[pageName] = closure;
     pageRoots[pageName] = rootPath;
@@ -422,7 +475,7 @@ async function createClientAssetsManifest(manifest) {
 
   const applicationPages = sortedPaths(Object.values(pageClosures).flat());
   const markdown = markdownBudgetPaths(
-    await collectClosure(markdownRoots),
+    without(await collectClosure(markdownRoots), diff),
     initial,
     {
       OrdinaryPage: pageClosures.OrdinaryPage,
@@ -430,8 +483,7 @@ async function createClientAssetsManifest(manifest) {
       MarkdownPage: pageClosures.MarkdownPage,
     },
   );
-  const crepe = without(await collectClosure(crepeRoots), initial, pageClosures.OrdinaryPage);
-  const diff = without(await collectClosure(["src/client/diff.ts"]), initial, pageClosures.OrdinaryPage);
+  const crepe = without(await collectClosure(crepeRoots), initial, pageClosures.OrdinaryPage, diff);
   const groups = {
     initial: sortedPaths(initial),
     applicationPages,
@@ -483,7 +535,6 @@ async function createClientAssetsManifest(manifest) {
 
   const classifiedRecordKeys = new Set([
     "index.html",
-    "src/client/diff.ts",
     ...Object.values(pageRecords),
     ...markdownRoots,
     ...collectRecordKeys(crepeRoots, true),
@@ -535,14 +586,37 @@ async function writeClientAssetsManifest(manifest) {
 async function buildClient() {
   await rm(assetsDirectory, { force: true, recursive: true });
   await rm(clientAssetsManifestPath, { force: true });
-  await build({ root });
+  const diffWorkerSource = normalizedPath(resolve(root, "src/client/diff.ts"));
+  let diffWorkerBundle;
+  await build({
+    root,
+    worker: {
+      plugins: () => [{
+        name: "capture-diff-worker-bundle",
+        generateBundle(_options, bundle) {
+          const entries = Object.values(bundle).filter((output) =>
+            output.type === "chunk" &&
+            output.isEntry === true &&
+            typeof output.facadeModuleId === "string" &&
+            normalizedPath(output.facadeModuleId) === diffWorkerSource);
+          if (entries.length === 0) return;
+          if (entries.length !== 1 || diffWorkerBundle !== undefined) {
+            throw new Error("Expected one emitted diff worker bundle");
+          }
+          diffWorkerBundle = resolveWorkerBundleAssets(bundle);
+        },
+      }],
+    },
+  });
+  if (diffWorkerBundle === undefined) throw new Error("Expected one emitted diff worker bundle");
 
   const manifestPath = resolve(assetsDirectory, ".vite/manifest.json");
   const rawManifest = JSON.parse(await readFile(manifestPath, "utf8"));
   const { appJs, appCss, diffWorker } = resolveManifestAssets(rawManifest);
+  if (diffWorkerBundle.entry !== diffWorker) throw new Error("Runtime diff worker does not match its emitted bundle entry");
 
   await writeStaticAssetHeaders();
-  const clientAssetsManifest = await createClientAssetsManifest(rawManifest);
+  const clientAssetsManifest = await createClientAssetsManifest(rawManifest, diffWorkerBundle.assets);
   assertBundleBudgets(clientAssetsManifest);
   await writeGeneratedAssets({
     appJs: assetPath(appJs),

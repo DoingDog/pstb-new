@@ -231,7 +231,7 @@ export function extractInitialPage(document: Document, url: URL): InitialPage {
     if (bootstrap === undefined) return failure(locale);
 
     const passwords = url.searchParams.getAll("password");
-    if (passwords.length > 1) return failure(locale);
+    if (passwords.length > 1 && bootstrap.page !== "error") return failure(locale);
 
     if (bootstrap.page === "create" || bootstrap.page === "password" || bootstrap.page === "error") {
       return sources.length === 0 && previews.length === 0

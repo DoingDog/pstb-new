@@ -104,7 +104,7 @@ function OrdinaryPastePageBody({
   return (
     <section data-ordinary-paste-page="true" className="flex min-w-0 flex-col gap-4">
       <Tabs value={active} onValueChange={(value) => setActive(value as ContentMode | "history" | "settings")} activationMode="automatic">
-        <TabsList variant="line" aria-label={copy.pasteViews}>
+        <TabsList variant="line" aria-label={copy.pasteViews} className="justify-start [&_[data-slot=tabs-trigger]]:flex-none">
           <TabsTrigger value="view">{copy.view}</TabsTrigger>
           <TabsTrigger value="edit">{copy.edit}</TabsTrigger>
           <TabsTrigger value="markdown">{copy.markdown}</TabsTrigger>
@@ -115,7 +115,7 @@ function OrdinaryPastePageBody({
         <TabsContent value="edit"><ContentModes mode="edit" {...contentProps} /></TabsContent>
         <TabsContent value="markdown"><ContentModes mode="markdown" {...contentProps} /></TabsContent>
         <TabsContent value="history">{historyPanel}</TabsContent>
-        <TabsContent value="settings">{settingsPanel}{passwordPanel}{deleteFlow}</TabsContent>
+        <TabsContent value="settings" forceMount hidden={active !== "settings"}>{settingsPanel}{active === "settings" && <>{passwordPanel}{deleteFlow}</>}</TabsContent>
       </Tabs>
       <LocalActions
         actionScope={pasteIdentity}
@@ -125,7 +125,7 @@ function OrdinaryPastePageBody({
         capabilities={{ copy: true, download: true, wrap: { value: wrap, onChange: setWrap } }}
         {...(onActionState === undefined ? {} : { onActionState })}
       />
-      <nav aria-label={copy.representations} className="flex flex-wrap gap-3">
+      <nav aria-label={copy.representations} className="flex flex-wrap gap-3 [&>a]:inline-flex [&>a]:min-h-11 [&>a]:min-w-11 [&>a]:items-center [&>a]:justify-center">
         <a href={representationHref(links.raw, password)}>{copy.raw}</a>
         <a href={representationHref(links.html, password)}>{copy.html}</a>
         <a href={representationHref(links.markdown, password)}>{copy.markdown}</a>

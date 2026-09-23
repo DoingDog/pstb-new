@@ -570,6 +570,81 @@ describe("local-only capability", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps an unwrapped terminal plaintext view in a local keyboard scroller", async () => {
+    const longSource = "terminal-source".repeat(200);
+    const fixture = await mount(<LocalOnlyPastePage locale="en" phase="not-found" source={longSource} initialMarkdown={null} />);
+    fixture.host.style.width = "320px";
+    const plaintext = fixture.host.querySelector<HTMLElement>("[data-local-view]")!;
+
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(plaintext.scrollWidth).toBeGreaterThan(plaintext.clientWidth);
+    expect(getComputedStyle(plaintext).overflowX).toBe("auto");
+    expect(plaintext.tabIndex).toBe(0);
+    expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
+  });
+
+  it("keeps an unwrapped terminal preview fallback in a local keyboard scroller", async () => {
+    const longSource = "fallback-source".repeat(200);
+    const fixture = await mount(
+      <LocalOnlyPastePage
+        locale="en"
+        phase="not-found"
+        source={longSource}
+        initialMarkdown={null}
+        fallback={{ surface: "preview", source: longSource, generation: 1 }}
+      />,
+    );
+    fixture.host.style.width = "320px";
+    const fallback = fixture.host.querySelector<HTMLElement>('[data-derived-fallback="preview"] pre')!;
+
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(fallback.scrollWidth).toBeGreaterThan(fallback.clientWidth);
+    expect(getComputedStyle(fallback).overflowX).toBe("auto");
+    expect(fallback.tabIndex).toBe(0);
+    expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
+  });
+
+  it("wraps a terminal preview fallback without document overflow", async () => {
+    const longSource = "fallback-source".repeat(200);
+    const fixture = await mount(
+      <LocalOnlyPastePage
+        locale="en"
+        phase="not-found"
+        source={longSource}
+        initialMarkdown={null}
+        fallback={{ surface: "preview", source: longSource, generation: 1 }}
+      />,
+    );
+    fixture.host.style.width = "320px";
+    const fallback = fixture.host.querySelector<HTMLElement>('[data-derived-fallback="preview"] pre')!;
+    const wrap = Array.from(fixture.host.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Wrap")!;
+
+    await act(async () => { wrap.click(); });
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(getComputedStyle(fallback).whiteSpace).toBe("pre-wrap");
+    expect(fallback.scrollWidth).toBeLessThanOrEqual(fallback.clientWidth);
+    expect(fallback).not.toHaveAttribute("tabindex");
+    expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
+  });
+
+  it("keeps a fitting terminal preview fallback out of the Tab order", async () => {
+    const fixture = await mount(
+      <LocalOnlyPastePage
+        locale="en"
+        phase="not-found"
+        source="short fallback"
+        initialMarkdown={null}
+        fallback={{ surface: "preview", source: "short fallback", generation: 1 }}
+      />,
+    );
+    fixture.host.style.width = "320px";
+    const fallback = fixture.host.querySelector<HTMLElement>('[data-derived-fallback="preview"] pre')!;
+
+    await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(fallback.scrollWidth).toBeLessThanOrEqual(fallback.clientWidth);
+    expect(fallback).not.toHaveAttribute("tabindex");
+  });
+
   it("does not expose Visual or diff Retry controls in a terminal page", async () => {
     for (const surface of ["visual", "diff"] as const) {
       const fixture = await mount(

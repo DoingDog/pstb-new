@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在已完成并通过独立评审的 parser/domain/MCP/multipart/autosave/Markdown-diff 基线上，完成冻结的 canonical HTTP contract、React 19.3.0 Document Workbench、精确 browser autosync/reconciliation 状态机、跨浏览器验收和无真实部署的 Cloudflare release gates。
+**Goal:** 在已完成并通过独立评审的 parser/domain/MCP/multipart/autosave/Markdown-diff 基线上，完成冻结的 canonical HTTP contract、React 19.3.0 Document Workbench、精确 browser autosync/reconciliation 状态机、跨浏览器验收和 Cloudflare release gates，并在全部 final gates通过后以 production mode部署到唯一 custom domain `b-new.awsl.app`。
 
 **Architecture:** `src/index.ts` 继续先把精确 `/mcp` 分流给 stateless MCP handler，其余请求进入唯一 Hono router；只有 `src/pastes.ts` 访问唯一业务存储 `env.PASTE_DB`。Worker application routes 只返回最小 React shell、validated inert bootstrap、单份 exact-source transport和可选 fixed-renderer safe Markdown template。Vite 8.3.0 构建 React/shadcn initial graph、lazy Crepe、lazy browser Markdown和独立 diff worker；ordinary paste 的一个 framework-neutral page controller串行化所有 mutation，并与单 timer/单 in-flight autosync controller、history epochs和 staged derived-surface coordinator协作。Full-document routes仍是 page identity boundary；仅 delete 204 在同一 React root内 hand off到 create branch。
 
@@ -24,10 +24,10 @@
 - ordinary controlled paste page只用 `GET /api/pastes/:id`进行每3,000 ms的顺序 conditional polling；每个 load/真实 user activity window精确300,000 ms，最多一个 timer和一个 fetch，deadline不 round、不 grace、不因 dispatch/Retry/settle延长。
 - 所有 browser mutation携带可用 current version；authoritative 409使 `versionUsable=false`，只有完整 Reload恢复。明确用户选择的 Overwrite可省略 version；curl/MCP省略 version仍是冻结的 last-write-wins。
 - dynamic application/API/representation/error/304全部 `Cache-Control: no-store`；content-hashed Vite assets为一年 immutable。initial JS、CSS、lazy Markdown、lazy Crepe、diff worker和总静态输出必须逐项满足规格第18节预算。
-- `wrangler.jsonc`只声明一个 `PASTE_DB` binding，开发 ID保持 `11111111111111111111111111111111`；只允许 `wrangler dev --local`、`wrangler types --check`和 `wrangler deploy --dry-run`，不得真实 deploy或 push。
+- `wrangler.jsonc`只声明一个 `PASTE_DB` binding并绑定现有 namespace `cd0ebbaba15e486a8e1071bb21e31a9f`；Worker name固定为`cf-pastebin-new`，`workers_dev:false`、`preview_urls:false`，唯一 route为`{ "pattern": "b-new.awsl.app", "custom_domain": true, "previews_enabled": false }`。Tasks 1至17和Task 18 final integration gate前只允许local/types/dry-run；全部release gates、legacy removal、final review和clean integration通过后，Task 18必须执行一次production `wrangler deploy`并完成线上smoke。不得使用`wrangler versions upload`、preview URL、preview alias、preview mode或push。
 - 不恢复 `GET|POST /api`、legacy response shape、`GET /delete/:id`或 destructive GET；`aioapi.js`只作为 `/ip-trace`参考且保持不变。
 - 不引入 `react-hook-form`或 `@hookform/resolvers`：所有表单是受控 React state，client只做 UX validation，现有 server/domain strict validation继续是 authority；这两项不能提供本计划所需的 mutation serialization、credential precedence或 reconciliation，因此没有具体缺口可证明其必要性。本计划不得使用 `useForm`、`Controller`或 `zodResolver`。只有未来出现受控 state 无法直接满足的具体 form/schema need，并先修改 binding spec与当时 implementation plan证明该需要时，才可加入这些 packages或APIs。
-- 每个 remaining task先写实际 RED、再做最小 GREEN；每个 task在独立 worktree由 Sonnet 1M xhigh实现并形成聚焦 commit，随后由另一个干净 worktree中的 Opus 1M max独立评审。只有明确 `APPROVED` 的 candidate commit才可 cherry-pick到 feature worktree。
+- 每个 remaining task先写实际 RED、再做最小 GREEN；从2026-09-23起，所有remaining implementation、fix、recovery、subagent、Workflow和review都只使用 Opus 1M，implementation/fix至少xhigh，independent review使用max。只有明确 `APPROVED` 的 candidate commit才可 cherry-pick到 feature worktree。
 - 同一 wave内不得并发编辑同一个 router、package/lockfile、generated asset、i18n catalog、render shell、shared React state或 copied shadcn source。所有共享文件按下文唯一 owner和先后顺序处理。
 
 ## Reviewed Baseline（不创建重做任务）
@@ -59,7 +59,7 @@
 | Create | `index.html` | Vite build entry，仅含`#app`和`/src/client/main.tsx` module；emitted copy不部署 | 8 |
 | Create | `vite.config.ts` | React/Tailwind build、hashed entry/chunks、manifest和Vite worker boundary | 8 |
 | Modify | `tsconfig.json`, `vitest.config.ts` | TSX/aliases与worker/node/browser Vitest projects | 8 |
-| Keep | `wrangler.jsonc` | exact Worker/config/single-KV/static-assets contract | 17只读检查 |
+| Modify | `wrangler.jsonc` | exact production Worker name、single-KV binding、static assets、workers.dev/preview禁用和唯一 custom-domain route | 17只读检查，然后18 |
 | Modify | `scripts/build.mjs` | Vite orchestration、manifest projection、asset cleanup；release reachability/budget projection | 8，然后17 |
 | Create | `scripts/smoke.ps1` | supervised real Wrangler local smoke与process-tree cleanup | 17 |
 | Create | `scripts/browser-evidence.mjs`, `scripts/verify-release-evidence.mjs` | acquire andnormalize official stable release histories、derive browser targets、capture actual branded/engine versions、record manual rows andfail closed onall release evidence | 16 |
@@ -385,7 +385,7 @@ git diff --name-only 5e3250a51c22e72b6e3a402bf35a80fc1ef04d5f $planHead
 
 The second command must list exactly `docs/superpowers/specs/2026-09-12-cloudflare-pastebin-rewrite-design.md` and `docs/superpowers/plans/2026-09-13-cloudflare-pastebin-rewrite.md`, with no other path；retain `$planHead` as `PLAN_HEAD` for the implementation run and never start a candidate at the parent commit where these corrections are absent.
 
-每个wave开始前，feature worktree必须clean；同wave标为parallel的implementation worktree从同一个已审核integrated HEAD创建。Each fresh implementation/review worktree runs `npm ci` before its first RED/check (Task 8 reruns it after regenerating the lockfile). Worktrees that execute `*.browser.test.tsx` first run `npx playwright install chromium`; Task 16 installs Chromium, Firefox, and WebKit as its explicit matrix step. Browser binaries are environment prerequisites, never repository changes or evidence by themselves.Wave 1先parallel执行Tasks1/2，再从两者approved/cherry-picked后的HEAD串行执行Task3；Wave3是另一条明确serial dependency chain：Task6从approved Task5后的HEAD开始，Task7从approved Task6后的HEAD开始，Task8再从approved Task7后的HEAD开始。实现进程固定`claude-sonnet-5[1m]`、effort `xhigh`；review进程固定`claude-opus-5[1m]`、effort `max`，review worktree只含integrated base和单个candidate。Review发现问题时，原Sonnet worktree先加RED regression与fix commit，再由新的Opus context复审完整task range。不得让reviewer自行批准未验证的fix。
+每个wave开始前，feature worktree必须clean；同wave标为parallel的implementation worktree从同一个已审核integrated HEAD创建。Each fresh implementation/review worktree runs `npm ci` before its first RED/check (Task 8 reruns it after regenerating the lockfile). Worktrees that execute `*.browser.test.tsx` first run `npx playwright install chromium`; Task 16 installs Chromium, Firefox, and WebKit as its explicit matrix step. Browser binaries are environment prerequisites, never repository changes or evidence by themselves.Wave 1先parallel执行Tasks1/2，再从两者approved/cherry-picked后的HEAD串行执行Task3；Wave3是另一条明确serial dependency chain：Task6从approved Task5后的HEAD开始，Task7从approved Task6后的HEAD开始，Task8再从approved Task7后的HEAD开始。从2026-09-23起，remaining implementation/fix/recovery进程固定`claude-opus-5[1m]`、effort至少`xhigh`；review进程固定同一model、effort `max`，review worktree只含integrated base和单个candidate。Review发现问题时，原Opus worktree先加RED regression与fix commit，再由新的Opus context复审完整task range。不得让reviewer自行批准未验证的fix。
 
 | Wave | Parallel candidates | Dependency | File-disjoint proof / integration order |
 |---:|---|---|---|
@@ -396,7 +396,7 @@ The second command must list exactly `docs/superpowers/specs/2026-09-12-cloudfla
 | 5 | Tasks 12、13、14 | approved Wave 4 | 三组page/component源与各自browser tests完全分开，不写App/i18n/index.css/shared controller。Review后按12→13→14。 |
 | 6 | Task 15 | approved Wave 5 | 独占shared App lifecycle、ordinary lazy`OrdinaryPage` hook owner和React controller adapter。 |
 | 7 | Tasks 16、17 | approved Task 15 | Task 16只写Playwright/config/evidence scripts/fixtures；Task 17只写build/notices/smoke/generated manifest。两者paths不重叠；Review后按16->17。 |
-| 8 | Task 18 | approved Wave 7 | 先跑所有release gates，再独占legacy-removal test与`worker.js` deletion，最后fresh full gate。 |
+| 8 | Task 18 | approved Wave 7 | 先跑所有release gates，再独占production config tests/change、legacy-removal test与`worker.js` deletion；fresh final review和clean integration gate通过后，以production mode部署到`b-new.awsl.app`并完成线上smoke。 |
 
 每个task的“full checks”均在candidate worktree执行。当前reviewed handoff供Tasks1-7作为起点，Task8再提交Vite handoff；任何Tasks1-16中不拥有`src/generated/assets.ts`的task在`npm run build`期间允许build script临时投影当前hash，以便render/build tests检查真实assets，但checks完成后必须运行`git restore --source=HEAD -- src/generated/assets.ts`并确认candidate commit不含该path。Task17作为下一位且最后一位owner从最终React graph重新生成并提交它；parallel candidates绝不传递或提交自己的投影。Task18不改client graph，fresh build必须证明Task17 bytes完全相同而不以restore掩盖nondeterminism。Review worktree按对应规则执行。Review批准后，主worktree只`git cherry-pick`列出的task commits，再重跑该task focused checks并restore非owner generated projection；不得手工复制文件。
 
@@ -2558,7 +2558,7 @@ The screen-reader row exercises heading/landmark announcement、everyfield/error
 
 - [ ] **Step 6: Acquire exact release-time branded browser and manual accessibility evidence**
 
-Branded browser history is not acquired by `npx playwright install`。Provision these release environments before this step：`windows-chrome-current`、`windows-chrome-previous`、`windows-edge-current`、`windows-edge-previous`、`windows-firefox-current` and`windows-firefox-previous` are isolated Windows11 runners whose named target branded binary ispreinstalled at the path exported as`CFPB_BROWSER_EXECUTABLE` andwhose auto-update isdisabled forthe run。`macos-safari-current` and`macos-safari-previous` areactual Mac runners whose OS contains thetarget Safari major at`/Applications/Safari.app`。A historical branded binary ormatching historical macOS runner thatcannot beprovisioned blocksChrome/Edge/Firefox andmay produceonly theexplicit Safari unavailable row；it isnot replaced by aPlaywright download。Never run orclaim Safari onWindows。
+Branded browser history is not acquired by `npx playwright install`。Provision these release environments before this step：`windows-chrome-current`、`windows-chrome-previous`、`windows-edge-current`、`windows-edge-previous`、`windows-firefox-current` and`windows-firefox-previous` are isolated Windows11 runners whose named target branded binary ispreinstalled at the path exported as`CFPB_BROWSER_EXECUTABLE` andwhose auto-update isdisabled forthe run。`macos-safari-current` and`macos-safari-previous` areactual Mac runners whose OS contains thetarget Safari major at`/Applications/Safari.app`。A historical branded binary ormatching historical macOS runner thatcannot beprovisioned blocksChrome/Edge/Firefox andmay produceonly theexplicit Safari unavailable row；it isnot replaced by aPlaywright download。Never run orclaim Safari onWindows。User restriction on 2026-09-23: do not start or indirectly invoke Windows Sandbox; it disconnects the host. A missing signed exact-version Edge browser is a blocker, not permission to retry Sandbox or install an older Edge over the host version.
 
 First，onthe release controller with`CFPB_RELEASE_DATE` setto the intended UTC release date，run theowned all-or-nothing source acquisition。This command mustcomplete beforeany capture andisrerun fromscratch ratherthanediting generated targets：
 
@@ -2579,7 +2579,9 @@ The following table isthe closed branded tuple map andthe onlyauthority forenvir
 | Safari | current | `macos-safari-current` | `test/e2e/evidence/browser-target-sources/safari-stable.json` | `test/e2e/evidence/browser-matrix/safari-current-capture.json` | `test/e2e/evidence/browser-matrix/safari-current.json` |
 | Safari | previous | `macos-safari-previous` | `test/e2e/evidence/browser-target-sources/safari-stable.json` | `test/e2e/evidence/browser-matrix/safari-previous-capture.json` | `test/e2e/evidence/browser-matrix/safari-previous.json` |
 
-The sole unavailable inputs arealso fixed：Safari/current uses`test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json` andSafari/previous uses`test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json`。Task16 ownsthe transient exact locks`test/e2e/browser-matrix.json.lock` for`acquire-targets`/`record-pass`/`record-safari-unavailable`/`record-engine` and`test/e2e/accessibility-manual.json.lock` for`record-accessibility`；each writer capturesits clock，opensits lock with`wx` beforethe first aggregate read，holdsit throughatomic rename，andremovesonlythat lock in`finally`。Locks containno evidence andare nevercommitted。Distribute byte-identical read-only copies ofthe initialized matrix andfour source artifacts toeach isolated runner，butkeepone writable aggregate onthe release controller；nevermerge independently edited matrices。Every later command uses thatsame explicit releaseDate，derivesall paths/environment fromthe table andrefuses acontent mismatch。On each Windows runner，Terminal A runs：
+The sole unavailable inputs arealso fixed：Safari/current uses`test/e2e/evidence/browser-matrix/safari-current-runner-unavailable.json` andSafari/previous uses`test/e2e/evidence/browser-matrix/safari-previous-runner-unavailable.json`。Task16 ownsthe transient exact locks`test/e2e/browser-matrix.json.lock` for`acquire-targets`/`record-pass`/`record-safari-unavailable`/`record-engine` and`test/e2e/accessibility-manual.json.lock` for`record-accessibility`；each writer capturesits clock，opensits lock with`wx` beforethe first aggregate read，holdsit throughatomic rename，andremovesonlythat lock in`finally`。Locks containno evidence andare nevercommitted。Distribute byte-identical read-only copies ofthe initialized matrix andfour source artifacts toeach isolated runner，butkeepone writable aggregate onthe release controller；nevermerge independently edited matrices。Every later command uses thatsame explicit releaseDate，derivesall paths/environment fromthe table andrefuses acontent mismatch。Each `capture`/`capture-safari` also owns a transient `${captureReceiptPath}.lock` from before its preflight through receipt commit or expiry cleanup. A second capture of the same tuple fails while this lock is held; it cannot overwrite the first receipt or have an expired first attempt delete its valid output. The one operation deadline uses both a timer and an absolute monotonic checkpoint, rejects never-settling work, and aborts matrix/source reads, metadata/version children, and launch with the same signal. The capture receipt's signal-aware write uses synchronous atomic rename followed immediately by the deadline checkpoint; an expired commit removes only its own mapped receipt before releasing the lock. The self-test must exercise delayed reads and writes through the capture path, aborted child signals, a blocked post-rename checkpoint, concurrent same-tuple capture, complete PowerShell stdin provenance, and public platform overrides on both Windows and macOS.
+
+On each Windows runner，Terminal A runs：
 
 ```powershell
 npm ci
@@ -2612,30 +2614,56 @@ node scripts/browser-evidence.mjs capture --release-date $env:CFPB_RELEASE_DATE 
 node scripts/browser-evidence.mjs record-pass --release-date $env:CFPB_RELEASE_DATE --product Firefox --slot previous --environment windows-firefox-previous --evidence test/e2e/evidence/browser-matrix/firefox-previous.json
 ```
 
-For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path andrunits`capture` line there。`capture` capturesone`commandNow` beforeany read/spawn，looks upthe exact tuple，requires theCLI environment andthe matrix/source path/hash/version/major toagree withthat mapping，andrefuses ifthat tuple’s mapped capture、smoke orunavailable output alreadyexists。It uses`child_process.spawn(executablePath,["--version"],{shell:false})` torunthat exact executable，collects stdout andstderr separately asbytes，decodesboth withfatal UTF-8 andstores bothstrings untrimmed。After splitting onCRLF/LF andtrimmingonlyASCII edge whitespace，define`V = "(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*)){0,3}"` andrequireexactlyone nonempty line tomatchthe applicable`new RegExp` source`"^Google Chrome (" + V + ")$"`、`"^Microsoft Edge (" + V + ")$"`、`"^Mozilla Firefox (" + V + ")$"` or`"^Included with Safari (" + V + ")(?: \\([^\\r\\n]*\\))?$"`；capture group1 isthe observed exact version，andanyother nonempty line orsecond match fails。The parsed version andmajor mustequal the target。The command sets`capturedAt` tothe canonical`commandNow`，writesonlythe mapped JSON capture receipt throughsame-directory temp plusatomic rename，prints thatpath andits SHA-256，thenlaunches the exact executable at`http://127.0.0.1:8787/`。It nevercreates orreads astandalone text version artifact。
+For each command pair，set`CFPB_BROWSER_EXECUTABLE` tothe corresponding runner’s real installed path andrunits`capture` line there。`capture` capturesone`commandNow` beforeany read/spawn，looks upthe exact tuple，requires theCLI environment andthe matrix/source path/hash/version/major toagree withthat mapping，andrefuses ifthat tuple’s mapped capture、smoke orunavailable output alreadyexists。ForChrome andEdge onWindows，the browser GUI executable isnotinvoked with`--version`。Instead，the command spawnsWindows PowerShell withthe fixed arguments`-NoLogo -NoProfile -NonInteractive -Command -`、`shell:false` andafixed stdin script；the executable path ispassed onlythrough`CFPB_BROWSER_EXECUTABLE_LITERAL`，neverinterpolated intoarguments orscript text，andthe child environment removes inherited`PSModulePath`。The script resolves thefile with`Get-Item -LiteralPath` andreturns`FileVersionInfo.ProductName`、`FileVersionInfo.ProductVersion`、`Get-AuthenticodeSignature` status/signer、positive byte length and`Get-FileHash -Algorithm SHA256`。Capture requiresanabsolute path equal tothe requested executable underWindows path identity，exact product/publisher pairs`Google Chrome`/`Google LLC` or`Microsoft Edge`/`Microsoft Corporation`，`authenticodeStatus === "Valid"`，target-equal product version andlowercase64-hex SHA-256；its schemaVersion2 receipt stores this as`binaryProvenance` andhasno`rawVersionOutput`。ForFirefox，capture stillspawns theexact executable with`["--version"]` and`shell:false`，collects stdout andstderr separately asbytes，decodesboth withfatal UTF-8 andstores bothstrings untrimmed inaschemaVersion1`rawVersionOutput`。After splitting onCRLF/LF andtrimmingonlyASCII edge whitespace，define`V = "(?:0|[1-9]\\d*)(?:\\.(?:0|[1-9]\\d*)){0,3}"` andrequireexactlyone nonempty Firefox line tomatch`new RegExp("^Mozilla Firefox (" + V + ")$")`；capture group1 isthe observed exact version，andanyother nonempty line orsecond match fails。`capture-safari` applies thesame byte/decode/single-line rule to`/usr/bin/safaridriver --version` with`new RegExp("^Included with Safari (" + V + ")(?: \\([^\\r\\n]*\\))?$")` andalsoemits schemaVersion1`rawVersionOutput`。Every observed version andmajor mustequal thetarget。Beforecommitting aWindows receipt，capture launches theexact executable at`http://127.0.0.1:8787/` withaprofile under`path.resolve(os.tmpdir(),"cfpb-browser-evidence",environment,identity)`，where`identity` isthe verified executable SHA-256 forChrome/Edge andthe observed exact version forFirefox。This prevents alater campaign withdifferent target bytes/version fromhanding off toanolder process inthat environment whileallowing theexact same verified binary toreuseits own isolated profile。Chrome/Edge use`--user-data-dir=<path> --no-first-run --no-default-browser-check <URL>`；Firefox uses`-no-remote -profile <path> <URL>`。Afterthe child emits`spawn`，capture observes anexact1,000ms launch-settle interval；an`error` or`close` atanytime duringthat interval rejects thecapture，doesnotunref thechild andleavesno capture receipt。AllChrome、Edge andFirefox commands reject`process.platform !== "win32"`，including Firefox’s Windows-labelled mappings。One deadline/controller/AbortSignal derivedimmediately fromthe single`commandNow` remains activeacross matrix/source reads、metadata/direct-version child、launch settling andreceipt commit；expiry removes any receipt committed bythat attempt andreturnsnonzero。Onlyafterthe fullinterval doesitunref thechild，write the mapped JSON throughsame-directory temp plusatomic rename andprint thatpath andits SHA-256；`capturedAt` remains thecanonical initial`commandNow`。Self-tests injectaprofile root undertheir own`mkdtemp` tree，exercise bothFirefox slots andadelayed pre-settleclose，andassertthe exact PowerShell expressions forFileVersionInfo fields、Authenticode status、SignerCertificate simple name、positivebytes、SHA-256 andlowercase conversion。It nevercreates orreads astandalone text version artifact。
 
 The tester executes every`browser-manual.md` check onlyafterthe capture receipt exists，copiesits shared binding fields withouteditingthem，sets`testedAt >= capturedAt`，andwrites the exact mapped smoke path throughsame-directory temp plusrename。These arethe exact receipt shapes；allobjects rejectunknown keys andall SHA-256 values arelowercase64-hex hashes ofthe referenced exact bytes：
 
 ```ts
-type BrandedCaptureReceipt = BrandedTuple & {
-  schemaVersion: 1;
-  releaseDate: string;
-  capturedAt: string;
-  target: {
-    sourceArtifact: string;
-    sourceSha256: string;
-    exactVersion: string;
-    major: number;
-  };
-  rawVersionOutput: {
-    stdout: string;
-    stderr: string;
-  };
-  observed: {
-    exactVersion: string;
-    major: number;
-  };
-};
+type BrandedCaptureReceipt =
+  | (Extract<BrandedTuple, { product: "Chrome" | "Edge" }> & {
+      schemaVersion: 2;
+      releaseDate: string;
+      capturedAt: string;
+      target: {
+        sourceArtifact: string;
+        sourceSha256: string;
+        exactVersion: string;
+        major: number;
+      };
+      binaryProvenance: {
+        extractionMethod: "windows-powershell-authenticode-fileversion-v1";
+        path: string;
+        productName: "Google Chrome" | "Microsoft Edge";
+        productVersion: string;
+        authenticodeStatus: "Valid";
+        publisher: "Google LLC" | "Microsoft Corporation";
+        bytes: number;
+        sha256: string;
+      };
+      observed: {
+        exactVersion: string;
+        major: number;
+      };
+    })
+  | (Extract<BrandedTuple, { product: "Firefox" | "Safari" }> & {
+      schemaVersion: 1;
+      releaseDate: string;
+      capturedAt: string;
+      target: {
+        sourceArtifact: string;
+        sourceSha256: string;
+        exactVersion: string;
+        major: number;
+      };
+      rawVersionOutput: {
+        stdout: string;
+        stderr: string;
+      };
+      observed: {
+        exactVersion: string;
+        major: number;
+      };
+    });
 type BrandedBrowserSmoke = BrandedTuple & {
   schemaVersion: 2;
   releaseDate: string;
@@ -2729,7 +2757,7 @@ node scripts/browser-evidence.mjs capture-safari --release-date "$CFPB_RELEASE_D
 node scripts/browser-evidence.mjs record-pass --release-date "$CFPB_RELEASE_DATE" --product Safari --slot previous --environment macos-safari-previous --evidence test/e2e/evidence/browser-matrix/safari-previous.json
 ```
 
-Run each`capture-safari` line onlyonits named runner。It applies thesame closed mapping、clock、structured receipt、raw-output parser andatomic write contract，runs exact`/usr/bin/safaridriver --version` forcapture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution；afterthe runner returnsits byte-identical mapped capture andsmoke receipts，runthat slot’s`record-pass` line onthe release controller。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
+Run each`capture-safari` line onlyonits named`process.platform === "darwin"` runner。It applies thesame closed mapping、single operation deadline、structured receipt、raw-output parser andatomic write contract，runs exact`/usr/bin/safaridriver --version` forcapture and`/usr/bin/open -a Safari http://127.0.0.1:8787/` formanual execution。`open` isashort-lived LaunchServices launcher：exit0 isrequired andaccepted，andtheWindows browser-process1,000ms liveness settle rule doesnotapply toit；nonzero、error orshared-deadline expiry stillfailswithno receipt。Afterthe runner returnsits byte-identical mapped capture andsmoke receipts，runthat slot’s`record-pass` line onthe release controller。If one named Mac runner doesnotexist，the release controller may run onlythis command forits corresponding row froman available control host：
 
 ```bash
 CFPB_RELEASE_DATE="$(node -p "JSON.parse(require('node:fs').readFileSync('test/e2e/browser-matrix.json','utf8')).releaseDate")"
@@ -3013,13 +3041,19 @@ Independent Opus validatesraw Vite entry dynamic-root discovery、all six emitte
 
 ---
 
-### Task 18: Pass Every Release Gate, Then Delete the Legacy Worker
+### Task 18: Pass Every Release Gate, Finalize Production Config, Remove Legacy Worker, Then Deploy
 
 **Files:**
+- Modify test: `src/build.test.ts`
+- Modify build contract: `scripts/build.mjs`
+- Modify production config: `wrangler.jsonc`
 - Create test: `src/legacy-removal.test.ts`
 - Delete: `worker.js`
 - Keep unchanged: `aioapi.js`
-- Production/config modifications: none unlessa newRED regression firstdemonstrates a release defect；such fixes must return tothe owning task andreceivefresh review beforethis task resumes。
+- Operational evidence: `.superpowers/sdd/2026-09-13-cloudflare-pastebin-rewrite/task-18-production-deploy.md`
+- No other production/config modification is allowed unless a new RED regression first demonstrates a release defect；such fixes must return to the owning task and receive fresh review before this task resumes。
+
+**2026-09-23 本次交付例外：** 用户要求今日24:00前部署；设备、环境或系统限制无法执行的验证直接跳过。当前缺少真实人工/实体 touch 的四类 manual accessibility receipt，`verify-release-evidence.mjs` 必须继续如实退出非零；它此前已顺序完成 official source、八个 branded row 与三个 engine receipt 的校验，仅在四类 manual 聚合处失败。本次不重复运行已通过且输入未变化的单项，也不造假/绕过/修改 verifier；记录此唯一放行例外后继续 Task18 的 TDD、所有可执行 gate、独立 review、clean commit、一次生产 deploy 和真实生产 smoke。Safari 两项继续记录真实 `not-available`。此例外不延续到未来发布；其余明确失败不可跳过。
 
 At the start ofStep1 pre-deletion，Step4 final candidate andStep6 final integration，run this exact ancestry-and-source gate inthat current worktree beforeany reusable release command：
 
@@ -3066,9 +3100,36 @@ npx wrangler types --check
 npx wrangler deploy --dry-run --outdir .wrangler-dist
 ```
 
-Every command mustexit0 beforedeletion。The verifier mustparse andhash thefour fixed official stable-source artifacts，recompute thehighest two distinct majors bythe Task16 numeric-descending rule，andmatchall eight targets includingtheir fixed source paths/hashes。It mustreportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception。Everypassed branded row mustreparse/hashits exact mapped capture andsmoke receipts，rederiveversion fromraw output，matchall repeated tuple/environment/target/source fields andsatisfy`capturedAt <= testedAt`；each unavailable Safari row mustreparse/hashonlyits mapped failure receipt andhave no capture/smoke files。Three separate engine rows musteach reparse the fixed JSON reporter、single-observation andreceipt artifacts，recompute allhashes，repeat theall-pass/sentinel/token/project/version policy andequalthe receipt projection field-for-field。Screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpass fromreparsed receipts。Both aggregates andevery referenced artifact sharethe exact valid releaseDate；one`verifierNow` iscaptured beforeall reads，isinside`[D - 7 * 86_400_000, D + 86_400_000)`，andevery`retrievedAt`、`capturedAt` and`testedAt` isbothinside thatinterval and`<= verifierNow`，whileevery`releasedAt <= retrievedAt`。Missing、failed、future-dated、stale、swapped、malformed orsource-unbound evidence blocksdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
+Except for the explicitly waived manual accessibility aggregate above，every executable command must exit0 before deletion。The verifier must parse and hash the four fixed official stable-source artifacts，recompute thehighest two distinct majors bythe Task16 numeric-descending rule，andmatchall eight targets includingtheir fixed source paths/hashes。It mustreportexactly eight product/slot rows；all sixChrome/Edge/Firefox rows passed；each Safari row passed orhonestly not-available underits sole exception。Everypassed branded row mustreparse/hashits exact mapped capture andsmoke receipts，rederiveversion fromraw output，matchall repeated tuple/environment/target/source fields andsatisfy`capturedAt <= testedAt`；each unavailable Safari row mustreparse/hashonlyits mapped failure receipt andhave no capture/smoke files。Three separate engine rows musteach reparse the fixed JSON reporter、single-observation andreceipt artifacts，recompute allhashes，repeat theall-pass/sentinel/token/project/version policy andequalthe receipt projection field-for-field。Screen-reader、contrast、zoom-reflow-200 andphysical-touch rows allpass fromreparsed receipts。Both aggregates andevery referenced artifact sharethe exact valid releaseDate；one`verifierNow` iscaptured beforeall reads，isinside`[D - 7 * 86_400_000, D + 86_400_000)`，andevery`retrievedAt`、`capturedAt` and`testedAt` isbothinside thatinterval and`<= verifierNow`，whileevery`releasedAt <= retrievedAt`。Missing、failed、future-dated、stale、swapped、malformed orsource-unbound evidence blocksdeletion。Also recordtest counts、bundle groups、static total anddry-run upload。Ifany gate fails，do notdeleteworker；route thefix toitsowner task withRED test andre-review。
 
-- [ ] **Step 2: Add the final RED legacy-removal test**
+- [ ] **Step 2: Add the final RED production-config and legacy-removal tests**
+
+Add this exact test inside the existing `describe("build contract", ...)` in `src/build.test.ts`：
+
+```ts
+it("uses only the production Worker binding and custom domain", async () => {
+  expect(JSON.parse(await readFile("wrangler.jsonc", "utf8"))).toEqual({
+    $schema: "node_modules/wrangler/config-schema.json",
+    name: "cf-pastebin-new",
+    main: "src/index.ts",
+    compatibility_date: "2026-09-12",
+    workers_dev: false,
+    preview_urls: false,
+    routes: [{
+      pattern: "b-new.awsl.app",
+      custom_domain: true,
+      previews_enabled: false,
+    }],
+    kv_namespaces: [{
+      binding: "PASTE_DB",
+      id: "cd0ebbaba15e486a8e1071bb21e31a9f",
+    }],
+    assets: { directory: "./dist/assets" },
+  });
+});
+```
+
+Create `src/legacy-removal.test.ts`：
 
 ```ts
 import { access, readFile } from "node:fs/promises";
@@ -3094,22 +3155,58 @@ describe("legacy removal", () => {
 });
 ```
 
-Run:
+Run：
 
 ```powershell
-npx vitest run src/legacy-removal.test.ts
+npx vitest run src/build.test.ts src/legacy-removal.test.ts -t "uses only the production Worker binding and custom domain|ships only the module Worker"
 ```
 
-Expected RED: `worker.js` still exists，证明gate会捕获premature retention。
+Expected RED：config test显示旧name/placeholder/缺少production route与disable flags；legacy test显示`worker.js`仍存在。两项都必须因尚未实施的目标失败，不得因syntax或fixture error失败。
 
-- [ ] **Step 3: Delete only the obsolete file and make focused test GREEN**
+- [ ] **Step 3: Apply only the production config contract and legacy deletion, then make focused tests GREEN**
+
+Set `wrangler.jsonc` to the exact object asserted above。In `scripts/build.mjs::assertWranglerConfig()`，retain the current namespace extraction and replace the condition with the following exact production checks：
+
+```js
+const [route] = config.routes ?? [];
+const routeKeys = Object.keys(route ?? {}).sort();
+
+if (
+  config.name !== "cf-pastebin-new" ||
+  config.main !== "src/index.ts" ||
+  config.compatibility_date !== "2026-09-12" ||
+  config.assets?.directory !== "./dist/assets" ||
+  config.workers_dev !== false ||
+  config.preview_urls !== false ||
+  config.route !== undefined ||
+  config.kv_namespaces?.length !== 1 ||
+  namespaceKeys.length !== 2 ||
+  namespaceKeys[0] !== "binding" ||
+  namespaceKeys[1] !== "id" ||
+  namespace?.binding !== "PASTE_DB" ||
+  namespace?.id !== "cd0ebbaba15e486a8e1071bb21e31a9f" ||
+  config.routes?.length !== 1 ||
+  routeKeys.length !== 3 ||
+  routeKeys[0] !== "custom_domain" ||
+  routeKeys[1] !== "pattern" ||
+  routeKeys[2] !== "previews_enabled" ||
+  route?.pattern !== "b-new.awsl.app" ||
+  route?.custom_domain !== true ||
+  route?.previews_enabled !== false
+) {
+  throw new Error("wrangler.jsonc does not match the production build contract");
+}
+```
+
+This rejects singular `route`、extra routes、a second namespace、`workers_dev:true`、`preview_urls:true` and any preview-enabled custom-domain route。Then delete only `worker.js`：
 
 ```powershell
 Remove-Item "worker.js"
-npx vitest run src/legacy-removal.test.ts
+npx vitest run src/build.test.ts src/legacy-removal.test.ts -t "uses only the production Worker binding and custom domain|ships only the module Worker"
+npm run build
 ```
 
-Confirm`git diff --name-status` showsonlynewtest anddeletedworker for this task。
+Expected GREEN：both focused tests and build exit0。Confirm `git diff --name-status` lists only `src/build.test.ts`、`scripts/build.mjs`、`wrangler.jsonc`、new `src/legacy-removal.test.ts` and deleted `worker.js`。
 
 - [ ] **Step 4: Run fresh final evidence; do not reuse Step 1 output**
 
@@ -3130,16 +3227,16 @@ git diff --check
 git status --short
 ```
 
-Expected：allexit0；onlyTask18 files pending beforecommit；no Wrangler/Node child on8787；no realdeploy/push。
+Expected：all executed gates exit0 except the documented four-category manual accessibility verifier failure；the 2026-09-23 Task16 edits and five Task18 paths are pending before commit；no Wrangler/Node child on8787。Do not run the production deploy yet；Step7 owns the only real deploy。No push。
 
 - [ ] **Step 5: Commit and independent review gate**
 
 ```powershell
-git add src/legacy-removal.test.ts worker.js
-git commit -m "chore: remove legacy worker after release gates"
+git add src/build.test.ts scripts/build.mjs wrangler.jsonc src/legacy-removal.test.ts worker.js
+git commit -m "chore: finalize production worker release"
 ```
 
-Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task18 againstthe68-ID table below，checksTask18 onlydeletedobsolete implementation，rerunsallthree inverted ancestry checks、thecandidate-symbol source scans、thefocused legacy test、both release-pipeline self-tests andthe final release-evidence verifier，andconfirms fresh official-source-bound evidence plusallbranded capture/smoke andengine reporter/observation/receipt cross-hashes underone non-future verifier clock。Any finding returns tooriginalowner forRED/fix/re-review；thecandidate may integrate onlyafterTask18 review says`APPROVED`。
+Independent Opus 1M max reviews the complete approved range from `PLAN_HEAD` through Task18 against the 68-ID table below，checks Task18 changed only the exact production config/build test/build assertion plus obsolete Worker deletion，and verifies pinned Wrangler schema accepts `workers_dev:false`、`preview_urls:false` and the sole `{ pattern: "b-new.awsl.app", custom_domain: true, previews_enabled: false }` route。It reruns all three inverted ancestry checks、candidate-symbol source scans、both focused Task18 tests、both release-pipeline self-tests and the final release-evidence verifier，and confirms fresh official-source-bound evidence plus all branded capture/smoke and engine reporter/observation/receipt cross-hashes under one non-future verifier clock。Any finding returns to original owner for RED/fix/re-review；the candidate may integrate only after Task18 review says `APPROVED`。
 
 - [ ] **Step 6: Cherry-pick the approved candidate and verify the final integration itself**
 
@@ -3160,7 +3257,36 @@ git diff --check
 git status --short
 ```
 
-Restore nothing：Task17 already owns thefinal generated projection，anddeterministicTask18 rebuild mustleaveit byte-identical。Completion requiresallcommands exit0，empty`git status --short`，no process on8787，andno realdeploy/push。
+Restore nothing：Task17 already owns the final generated projection，and deterministic Task18 rebuild must leave it byte-identical。Integration-gate completion requires all executable gates exit0 except the documented inaccessible-manual-evidence verifier failure，empty `git status --short` and no process on8787。Do not deploy before this point；the immediately following Step7 performs the one authorized production deploy。No push。
+
+- [ ] **Step 7: Deploy the reviewed commit in production mode and run production smoke**
+
+Record the exact clean HEAD、UTC start time and authenticated account in `task-18-production-deploy.md`，then execute only：
+
+```powershell
+$releaseHead = git rev-parse HEAD
+if (git status --porcelain) { throw "Production deploy requires a clean worktree" }
+npx wrangler whoami
+if ($LASTEXITCODE -ne 0) { throw "Wrangler authentication failed" }
+npx wrangler deploy
+if ($LASTEXITCODE -ne 0) { throw "Production deployment failed" }
+```
+
+`wrangler deploy` is the production deployment command。Do not use `wrangler versions upload`、`wrangler versions deploy` with a preview percentage、preview alias、preview URL、`--env`、temporary route/binding override or dashboard edits。The checked-in config must publish `cf-pastebin-new` at only `b-new.awsl.app`，with `workers_dev:false`、`preview_urls:false` and route-level `previews_enabled:false`。
+
+Use `https://b-new.awsl.app` as `$base` and a unique `release-<32 lowercase hex>` custom ID。Run the following independent assertions，recording redacted request/response status and exact cleanup outcome in the deployment report；password values may be recorded only in the already-accepted plaintext query locations，not copied into unrelated report text：
+
+1. GET `/` returns200 and the React root shell。POST `/api/pastes` creates exact source、title、custom ID and ten-minute expiry；GET `/api/pastes/:id` returns the same source plus a strong resource ETag。
+2. PATCH content with current version，PATCH settings for title/format/expiry，PUT password，then submit the protected main-page form and assert302 Location contains one percent-encoded `password` query。With that query，assert `/raw/:id` exact source、`/md/:id` safe GFM wrapper、`/html/:id` exact harmless marker source and no application CSP、and `/file/:id` attachment headers/body。Missing query on all four protected direct routes remains403。
+3. POST `/ip-trace` with a unique header and exact body；assert response URL/method/body/header、nonempty `cf` object、two-space JSON formatting and `Access-Control-Allow-Origin: *`。
+4. POST `/mcp` with the frozen 2026-07-28 modern headers/body for `server/discover` and `tools/list`；assert200、the negotiated protocol and exactly the eight frozen tool names。Call one non-consuming settings/read tool against the temporary paste and assert its ID。Do not create an untracked MCP paste that cleanup cannot identify。
+5. Read the temporary main key by its exact custom ID from namespace `cd0ebbaba15e486a8e1071bb21e31a9f` using pinned Wrangler remote KV inspection。Retry only for the documented KV propagation window and assert exact plaintext source；this proves the deployed `PASTE_DB` points at the requested existing namespace rather than a substitute。
+6. Inspect the production deployment metadata and deploy output：the only route is custom domain `b-new.awsl.app`，`workers_dev` and preview URLs are disabled，and no preview deployment/alias was created。If the account subdomain is discoverable，request `https://cf-pastebin-new.<subdomain>.workers.dev/` and assert it does not serve this Worker。
+7. DELETE `/api/pastes/:id` with the current password/version，assert204 then canonical404。After the bounded KV propagation window，assert the main key、`__cfpb:meta:<id>` and all three `__cfpb:rev:<id>:0..2` keys are absent from the specified namespace。
+
+Also create and delete separate short-lived fixtures for view-once first authorized read then404，and for MCP `paste_create`/`paste_delete` if the non-consuming tool cannot cover the deployed tool path。All fixture IDs must be listed before creation so `finally` cleanup can delete them after an intermediate assertion failure。Do not reuse production data or enumerate/delete unrelated namespace keys。
+
+If any production assertion fails，record the exact failed check and stop claiming completion。A code/config correction returns to its owning task with RED、Opus review and every Step4/Step6 gate rerun before another production deploy。Do not enable workers.dev or preview mode as a fallback。No push。
 
 ## Requirement-to-Task-and-Automated-Check Traceability（68/68）
 
@@ -3197,7 +3323,7 @@ Every row is a release gate。Test title strings below arefixed acceptance names
 | C27 | Tasks 11 and 16 | recursive dictionary parity、browser language/manual switch journey |
 | C28 | Tasks 6, 11, and 16 | theme controller/remount/noStorage andactiveHTML unaffected |
 | C29 | Tasks 11, 16, and 18 | four fixed official stable histories derive two newest distinct majors；exact eight fresh branded current/previous rows withonlySafari unavailable exception；separate Chromium/Firefox/WebKit engine reports；everybranch AxeBuilder scans；four same-release-date passed manual category rows；320/touch/focus/zoom/contrast checks |
-| C30 | Tasks 17 and 18 | exact Wrangler config、local smoke、types check、dry-run only |
+| C30 | Tasks 17 and 18 | exact `cf-pastebin-new` production config、single requested KV、`workers_dev:false`、`preview_urls:false`、one `b-new.awsl.app` custom-domain route with previews disabled；local smoke/types/dry-run gates，then clean-final production `wrangler deploy` and production smoke/cleanup evidence |
 | C31 | Tasks 4 and 17 | legacy routes404/noKV mutation inunit+smoke |
 | C32 | Tasks 2, 4, 12, and 16 | password bootstrap containsno summary；POST form zero fields reachesauthorization andreturns403，one wrongreturns403，duplicate/unknown returns422，one correctreturns302 exact query |
 | C33 | Tasks 4 and 16 | activeHTML reads`location.search` andcanissue same-origin fetch；noCSP/sandbox |
@@ -3248,4 +3374,4 @@ Every row is a release gate。Test title strings below arefixed acceptance names
 - [ ] Everymutation/reconcile/delete/terminal transition preserves exactsource、credential andtimestamp authority；no pending action is silentlyreset。
 - [ ] Vite manifest, generated assets, source integrity, notices, gzip/raw budgets andWrangler smoke/types/dry-run arefresh；allfour fixed official stable histories arevalid andderive thehighest two distinct majors；browser matrix hasexactly two bound branded rows perproduct，all non-Safari rows passed，both aggregates haveone exact releaseDate，andthe final verifier clock、all source`retrievedAt` plusbrowser/Safari-unavailable/engine/manual`testedAt` values satisfythe same interval；all four manual accessibility categories passed withmachine-readable evidence。
 - [ ] Task18 pre-deletion、candidate-final andintegrated-final gates eachproveallthree superseded commits arenot ancestors andallcandidate-specific source symbols areabsent。
-- [ ] `worker.js` wasdeleted onlyafterpre-deletion gates passed；`aioapi.js` remainsunchanged；no deploy orpush occurred；finalworktree isclean。
+- [ ] `worker.js` was deleted only after pre-deletion gates passed；`aioapi.js` remains unchanged；the exact clean reviewed HEAD was deployed once with production `wrangler deploy`，not preview mode；only `b-new.awsl.app` serves the Worker，workers.dev and preview URLs remain disabled；production smoke and fixture cleanup passed；no push occurred；final worktree is clean。

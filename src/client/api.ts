@@ -391,6 +391,7 @@ function isJsonMediaType(value: string | null): boolean {
   const mediaType = "application/json";
   if (!equalsAsciiIgnoreCase(value.slice(index, index + mediaType.length), mediaType)) return false;
   index = skipOws(value, index + mediaType.length);
+  if (index === value.length) return true;
   if (value[index] !== ";") return false;
   index = skipOws(value, index + 1);
   const parameter = readToken(value, index);
@@ -412,6 +413,22 @@ function isNoStore(value: string | null): boolean {
 
 function hasJsonHeaders(response: Response): boolean {
   return isJsonMediaType(response.headers.get("content-type")) && isNoStore(response.headers.get("cache-control"));
+}
+
+async function webkitNormalizedNotModifiedEtag(response: Response, ifNoneMatch: string | null): Promise<`"sha256-${string}"` | null> {
+  if (response.status !== 200
+    || !isResourceEtag(ifNoneMatch)
+    || response.headers.get("etag") !== ifNoneMatch
+    || !isNoStore(response.headers.get("cache-control"))
+    || response.headers.has("content-type")
+    || response.headers.has("content-length")
+    || response.headers.has("trailer")) return null;
+
+  try {
+    return (await response.arrayBuffer()).byteLength === 0 ? ifNoneMatch : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readJsonBytes(response: Response): Promise<Uint8Array<ArrayBuffer>> {
@@ -568,6 +585,9 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         return { kind: "failure", failure: await readError(response, false) };
       }
 
+      const normalizedEtag = await webkitNormalizedNotModifiedEtag(response, input.ifNoneMatch);
+      if (normalizedEtag !== null) return { kind: "not-modified", etag: normalizedEtag };
+
       try {
         const bytes = await readJsonBytes(response);
         const etag = response.headers.get("etag");
@@ -683,10 +703,14 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         return { ok: false, failure: await readError(response, true) };
       }
 
+      let emptyBody = response.body === null;
+      if (!emptyBody && equalsAsciiIgnoreCase(response.headers.get("content-encoding") ?? "", "gzip")) {
+        try { emptyBody = (await response.arrayBuffer()).byteLength === 0; } catch { emptyBody = false; }
+      }
       if (!isNoStore(response.headers.get("cache-control"))
         || response.headers.has("content-type")
         || response.headers.has("content-length")
-        || response.body !== null) {
+        || !emptyBody) {
         return { ok: false, failure: malformed(204, true) };
       }
       return { ok: true, status: 204, value: null, etag: null };

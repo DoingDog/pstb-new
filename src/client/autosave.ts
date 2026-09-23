@@ -173,7 +173,7 @@ export class AutosaveController implements AutosaveControllerApi {
       this.disposed ||
       this.composing ||
       (this.state !== "error" && this.state !== "password-required") ||
-      !this.requiresExplicitRetry ||
+      (!this.requiresExplicitRetry && !(this.state === "password-required" && this.pausedState !== undefined)) ||
       this.inFlightContent !== null ||
       this.pendingAttempt !== null ||
       this.draft === this.acceptedSource

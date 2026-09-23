@@ -1,0 +1,1994 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "test/e2e/create-password.spec.ts",
+      "test/e2e/ordinary-sync.spec.ts",
+      "test/e2e/view-once-representations.spec.ts",
+      "test/e2e/accessibility.spec.ts",
+      "test/e2e/engine-version.spec.ts",
+      "--project=chromium",
+      "--reporter=json",
+      "--workers=1",
+      "--retries=0"
+    ],
+    "configFile": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\playwright.config.ts",
+    "rootDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile-320",
+        "name": "mobile-320",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "reduced-motion",
+        "name": "reduced-motion",
+        "testDir": "C:/Users/user/Downloads/cf-pastebin/.claude/worktrees/pastebin-rewrite",
+        "testIgnore": [],
+        "testMatch": [
+          "test/e2e/**/*.spec.ts"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev:e2e",
+      "url": "http://127.0.0.1:8787/",
+      "timeout": 120000,
+      "reuseExistingServer": false
+    }
+  },
+  "suites": [
+    {
+      "title": "test\\e2e\\accessibility.spec.ts",
+      "file": "test/e2e/accessibility.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "supports Tabs Arrow, Home, End, and normal Tab behavior",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 744,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:31.333Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-664eabdb97ddc15127fe",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 351,
+          "column": 1
+        },
+        {
+          "title": "opens HelpTrigger by hover, focus, click, Escape, and outside interaction",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 942,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:32.083Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-5dc40539ac4b12a89270",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 366,
+          "column": 1
+        },
+        {
+          "title": "opens and closes HelpTrigger by touch or keyboard activation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 645,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:33.031Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-a65370f317f15fb5f9f7",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 389,
+          "column": 1
+        },
+        {
+          "title": "traps Dialog focus, closes with Escape, and returns focus",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 930,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:33.683Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-e31f242f82639f4402d8",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 408,
+          "column": 1
+        },
+        {
+          "title": "traps Sheet focus on mobile and toggles the desktop sidebar",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 361,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:34.619Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-16d5401de3dca9c3ed66",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 425,
+          "column": 1
+        },
+        {
+          "title": "keeps every settled branch interactive target at least 44 by 44 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2121,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:34.986Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-bf1741244b050b812eea",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 459,
+          "column": 1
+        },
+        {
+          "title": "keeps long Markdown code reachable locally at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1834,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:37.113Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ac845258cd81002cc0f6",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 488,
+          "column": 1
+        },
+        {
+          "title": "keeps wrapped unbroken Markdown and wide tables reachable at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1079,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:38.952Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-0cf6355df218568ba0f3",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 525,
+          "column": 1
+        },
+        {
+          "title": "keeps the 320 CSS pixel document unscrolled horizontally and the editor full-width",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 605,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:40.037Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-4788a7e6ac5c41696922",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 549,
+          "column": 1
+        },
+        {
+          "title": "keeps the focused Settings tab visible in a local scroller at 320 CSS pixels",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 616,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:40.648Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-04f2b0e1d9691448147a",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 567,
+          "column": 1
+        },
+        {
+          "title": "reflows without horizontal overflow at the 200 percent zoom viewport equivalent",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 685,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:41.270Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-ab44e5088458f0407228",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 601,
+          "column": 1
+        },
+        {
+          "title": "removes computed animation and transition duration for reduced motion",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 639,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:41.961Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-be31f0a358ad8b03a0f0",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 612,
+          "column": 1
+        },
+        {
+          "title": "renders unified differences with text prefixes, not color alone",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 774,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:42.607Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-61377c7130dc896e42e5",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 625,
+          "column": 1
+        },
+        {
+          "title": "focuses mobile History Back and restores the revision that opened detail",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 827,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:43.387Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-44b67fee5df72620cf04",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 633,
+          "column": 1
+        },
+        {
+          "title": "switches English and zh-CN document copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 307,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:44.220Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-f044d78d28a425d36ff2",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 642,
+          "column": 1
+        },
+        {
+          "title": "applies system, light, and dark themes only to the document without storage writes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 346,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:44.533Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-3b181e95898119f7ddcc",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 653,
+          "column": 1
+        },
+        {
+          "title": "loads derived graph resources only when their user-visible surface is opened",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2687,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:44.887Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-1a5f75a7c28e826fc55f",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 681,
+          "column": 1
+        },
+        {
+          "title": "keeps Help copy closed, does not issue status-only requests, and confines credentials",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 628,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:47.582Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "9b2131b6c9cdb450b9d6-0af844e51a10c3f0d450",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 747,
+          "column": 1
+        }
+      ],
+      "suites": [
+        {
+          "title": "accessibility branches",
+          "file": "test/e2e/accessibility.spec.ts",
+          "line": 190,
+          "column": 6,
+          "specs": [
+            {
+              "title": "runs Axe after the settled create branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1013,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:06.521Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-7c4f150ac7c8f0552170",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 191,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled password branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1171,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:07.892Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-fb3eb249e56f4df75ca6",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 197,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled inline create-conflict branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1330,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:09.071Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-4a5d8db9ade1050c2b74",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 204,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1251,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:10.411Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-196ca3a6c4d4e2625189",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 214,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled ordinary Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1412,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:11.671Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-106c42c186fcd6da0c02",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 219,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled armed-view-once branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2131,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:13.093Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-bce0eec02c34379fa5cb",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 224,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-text branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 950,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:15.231Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-5568385155b7735a661f",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 233,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled consumed-Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1071,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:16.188Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-0e0c414795cc50e07604",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 240,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the real not-found ErrorPage route settles",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 962,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:17.266Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-bd1e66bb127c04afcf83",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 247,
+              "column": 3
+            },
+            {
+              "title": "runs Axe on a real 400 BAD_REQUEST ErrorPage rather than only the 404 branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 941,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:18.235Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-1ac949919007ddbf5185",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 255,
+              "column": 3
+            },
+            {
+              "title": "shows the 400 AMBIGUOUS_PASSWORD error page for a duplicate password query",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 595,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:19.183Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-0e891c770769d47bc4ac",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 264,
+              "column": 3
+            },
+            {
+              "title": "mounts the lazy ordinary route before controlling autosync time on every engine",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3623,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:19.785Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-a5b966a599bff290970d",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 272,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after ordinary autosync transitions to local not-found",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4718,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:23.415Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-29085909407331c6246c",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 285,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled delete-uncertain branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2194,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:28.140Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-5c85aa7043610467785a",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 327,
+              "column": 3
+            },
+            {
+              "title": "runs Axe after the settled read-only Markdown branch",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 986,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-23T05:12:30.341Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "9b2131b6c9cdb450b9d6-1092a463a5d998332b39",
+              "file": "test/e2e/accessibility.spec.ts",
+              "line": 343,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\create-password.spec.ts",
+      "file": "test/e2e/create-password.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "creates, protects, edits, recovers, manages, and deletes a paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11986,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:12:48.227Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\user\\Downloads\\cf-pastebin\\.claude\\worktrees\\pastebin-rewrite\\test\\e2e\\create-password.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c3015206940205d5d7af-e8e15069dd0ce0c179fe",
+          "file": "test/e2e/create-password.spec.ts",
+          "line": 20,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\engine-version.spec.ts",
+      "file": "test/e2e/engine-version.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "records browser.version() for record-engine",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [
+                {
+                  "type": "cfpb-engine-observation",
+                  "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:11:59.172Z\",\"runToken\":\"1bd3b42e6cf1b4581c3f7184eccfcedbd8414c62babb97873e3a5bc4049096b2\",\"project\":\"chromium\",\"exactVersion\":\"153.0.8010.12\"}"
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:00.231Z",
+                  "annotations": [
+                    {
+                      "type": "cfpb-engine-observation",
+                      "description": "{\"releaseDate\":\"2026-09-23\",\"testedAt\":\"2026-09-23T05:11:59.172Z\",\"runToken\":\"1bd3b42e6cf1b4581c3f7184eccfcedbd8414c62babb97873e3a5bc4049096b2\",\"project\":\"chromium\",\"exactVersion\":\"153.0.8010.12\"}"
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "93a4b8da444a42a54b67-8eb648469866fb0876eb",
+          "file": "test/e2e/engine-version.spec.ts",
+          "line": 22,
+          "column": 3
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\ordinary-sync.spec.ts",
+      "file": "test/e2e/ordinary-sync.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ordinary sync uses sequential conditional resource reads and applies a real remote mutation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1097,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:00.262Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-fecb9d65ecddd5102454",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 155,
+          "column": 1
+        },
+        {
+          "title": "ordinary sync holds a real resource response without overlap and resumes from settlement",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 843,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:01.366Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-13106e05be51d70035bb",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 210,
+          "column": 1
+        },
+        {
+          "title": "a dirty edit cancels the current cadence before its resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 969,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:02.215Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-8399373ed4af3f669956",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 239,
+          "column": 1
+        },
+        {
+          "title": "offline pauses ordinary sync and online resumes one non-overlapping resource read",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 911,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:03.190Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-5783f7fbb456a6640163",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 260,
+          "column": 1
+        },
+        {
+          "title": "a real replacement generation presents candidate choices that preserve the chosen source",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1201,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:04.112Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-3a6fcb7b27e49b2ecb85",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 287,
+          "column": 1
+        },
+        {
+          "title": "real activity extends the five-minute active window and inactivity stops business traffic at its deadline",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1243,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:05.321Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-0447c188483251c9eee2",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 317,
+          "column": 1
+        },
+        {
+          "title": "an edit aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1710,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:06.579Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-1ed76bc28769302150be",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 347,
+          "column": 1
+        },
+        {
+          "title": "a delete aborts a delayed view-once autosync response before browser delivery",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:08.307Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-d8b84d1a4402a1dd2821",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 381,
+          "column": 1
+        },
+        {
+          "title": "the active deadline aborts a delayed view-once autosync response without falsely consuming the paste",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1312,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:10.082Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-db04d0ced03672667508",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 438,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response after a local edit enters terminal local-only state without further business traffic",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1941,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:11.404Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-1b5e08e6bc4c7ef2dac8",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 471,
+          "column": 1
+        },
+        {
+          "title": "a delayed view-once Reload response across the active deadline enters terminal local-only state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1797,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:13.354Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "79a822b5ee9d33eeddb0-496f7c85c5eb2ef412d6",
+          "file": "test/e2e/ordinary-sync.spec.ts",
+          "line": 514,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "test\\e2e\\view-once-representations.spec.ts",
+      "file": "test/e2e/view-once-representations.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "view-once main response retains only local actions and consumes the server copy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1039,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:15.183Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-b602c15898eb403e52db",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 5,
+          "column": 1
+        },
+        {
+          "title": "view-once direct methods do not consume before the first valid raw GET",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 133,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:16.231Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-8563d2580d2b4e1ee207",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 58,
+          "column": 1
+        },
+        {
+          "title": "API OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:16.372Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-c3e898ed01996bd7af1d",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 92,
+          "column": 1
+        },
+        {
+          "title": "ip-trace OPTIONS remains the CORS response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:16.390Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-0913d0d3bae849a82af7",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "MCP OPTIONS remains 204",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:16.406Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-abacf950c113150d52b6",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 106,
+          "column": 1
+        },
+        {
+          "title": "direct representations preserve exact source, safely render Markdown, and run top-level HTML",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 870,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-23T05:13:16.422Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ab047ff1c80ee5300b28-e86d1728a7881a97e3fd",
+          "file": "test/e2e/view-once-representations.spec.ts",
+          "line": 112,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-23T05:11:59.616Z",
+    "duration": 78315.614,
+    "expected": 52,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

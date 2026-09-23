@@ -362,6 +362,18 @@ function button(root: any, label: string, occurrence = 0): HTMLButtonElement {
   return matches[occurrence]!;
 }
 
+function settingsButton(root: { querySelector(selector: string): unknown }, field: string): HTMLButtonElement {
+  const value = root.querySelector(`button[data-settings-field="${field}"]`);
+  if (!(value instanceof HTMLButtonElement)) throw new Error(`Missing settings ${field} button`);
+  return value;
+}
+
+function settingsSelect(root: { querySelector(selector: string): unknown }): HTMLSelectElement {
+  const value = root.querySelector('select[name="format"]');
+  if (!(value instanceof HTMLSelectElement)) throw new Error("Missing format select");
+  return value;
+}
+
 async function clickButton(root: any, label: string, occurrence = 0): Promise<void> {
   await act(async () => {
     button(root, label, occurrence).click();
@@ -496,6 +508,47 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 10; step += 1) await Promise.resolve();
     });
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "history-snapshot" });
+  });
+
+  it("announces History loading through Last action and diff computation in its detail", async () => {
+    let resolveList!: (response: Response) => void;
+    let resolveSnapshot!: (response: Response) => void;
+    const list = new Promise<Response>((resolve) => { resolveList = resolve; });
+    const snapshot = new Promise<Response>((resolve) => { resolveSnapshot = resolve; });
+    const workers: Array<{ postMessage: ReturnType<typeof vi.fn>; terminate: ReturnType<typeof vi.fn>; onmessage: ((event: MessageEvent<unknown>) => void) | null; onerror: ((event: ErrorEvent) => void) | null }> = [];
+    vi.stubGlobal("Worker", class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      constructor() { workers.push(this); }
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => (
+      String(input).endsWith("/history/1") ? snapshot : list
+    )));
+    const rendered = await mountOrdinary();
+    const liveRegions = () => rendered.querySelectorAll('[role="status"], [aria-live="polite"]');
+
+    await selectTab(rendered, "History");
+    await vi.waitFor(() => expect(rendered.textContent).toContain("Loading history"));
+    expect(liveRegions()).toHaveLength(1);
+
+    await act(async () => {
+      resolveList(jsonResponse({ id: "example", currentRevision: 1, currentVersion: "generation.1", revisions: [{ revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4 }] }, 200, { etag: '"generation.1"' }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(button(rendered, "Revision 1")).toBeDefined());
+    await clickButton(rendered, "Revision 1");
+    await vi.waitFor(() => expect(rendered.textContent).toContain("Loading revision"));
+    expect(liveRegions()).toHaveLength(1);
+
+    await act(async () => {
+      resolveSnapshot(jsonResponse({ id: "example", revision: 1, savedAt: "2026-09-15T00:00:00.000Z", supersededAt: "2026-09-16T00:00:00.000Z", byteLength: 4, content: "past" }, 200, { etag: '"generation.1"' }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(workers).toHaveLength(1));
+    expect(rendered.querySelector("[data-history-detail] [role=status]")?.textContent).toContain("Compute diff");
+    expect(liveRegions()).toHaveLength(2);
   });
 
   it("updates the selected History diff current side for local and accepted remote source changes", async () => {
@@ -808,11 +861,201 @@ describe("Task 15 async lifecycle behavior", () => {
     await setInput(rendered, 'input[name="title"]', "Updated");
     await setInput(rendered, 'input[name="newPassword"]', "replacement");
     await clickButton(rendered, "Save title");
-    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="succeeded"]')).not.toBeNull());
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-action-result="succeeded"]')).not.toBeNull());
 
     expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
     await setInput(rendered, 'input[name="newPassword"]', "");
     expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+  });
+
+  it("clears the Settings draft owner after successful reconciliation so Autosync resumes", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      return jsonResponse(resourceBody("initial", { title: "Reconciled title", version: "generation.2" }), 200, { etag: '"generation.2"' });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+
+    await setInput(rendered, 'input[name="title"]', "Reconciled title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(button(rendered, "Settings reconciled")).toBeDefined());
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+
+    const reads = () => fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method !== "PATCH").length;
+    expect(reads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(reads()).toBe(2);
+  });
+
+  it.each(["Copy", "Download"] as const)("settles the originating Reconcile button and Settings draft after %s replaces Last action", async (localAction) => {
+    let resolveReconcile: ((response: Response) => void) | undefined;
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return Promise.resolve(uncertainWriteResponse());
+      return new Promise<Response>((resolve) => { resolveReconcile = resolve; });
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Reconciled title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
+
+    const reconcile = button(rendered, "Reconcile");
+    await act(async () => {
+      reconcile.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(reconcile.textContent).toBe("Reconciling settings"));
+    await clickButton(rendered, localAction);
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain(localAction === "Copy" ? "Copied" : "Download ready"));
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+
+    await act(async () => {
+      resolveReconcile!(jsonResponse(resourceBody("initial", { title: "Reconciled title", version: "generation.2" }), 200, { etag: '"generation.2"' }));
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(reconcile.textContent).toBe("Settings reconciled"));
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+  });
+
+  it("releases Settings after a relative expiration retry fails and is discarded", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return jsonResponse(resourceBody("initial", { version: "generation.2" }), 200, { etag: '"generation.2"' });
+      writes += 1;
+      return uncertainWriteResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    const expiration = rendered.querySelector('select[name="expiration"]') as unknown as HTMLSelectElement;
+    await act(async () => {
+      expiration.value = "60";
+      expiration.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickButton(rendered, "Save expiration");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    await act(async () => {
+      rendered.querySelector<HTMLButtonElement>('button[data-settings-recovery-action="settings-reconcile"]')!.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(writes).toBe(2));
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    await clickButton(rendered, "Discard");
+
+    expect(settingsButton(rendered, "expiration").disabled).toBe(false);
+    expect(settingsButton(rendered, "title").disabled).toBe(false);
+    expect(expiration.value).toBe("permanent");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+  });
+
+  it("removes a failed Reconcile Retry after Settings Discard", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "PATCH" ? uncertainWriteResponse() : errorResponse(500, "INTERNAL_ERROR")
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Unsaved title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(button(rendered, "Settings reconcile failed")).toBeDefined());
+    await clickButton(rendered, "Discard");
+
+    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Example");
+    expect(settingsButton(rendered, "title").disabled).toBe(false);
+    expect(rendered.querySelector('[data-settings-result="retryable"]')).toBeNull();
+    expect(rendered.querySelector('button[data-settings-recovery-action="settings-title"]')).toBeNull();
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["Copy", "Download"] as const)("saves a new Settings field after Reconcile succeeds and %s replaces Last action", async (localAction) => {
+    let writes = 0;
+    let resolveSave!: (response: Response) => void;
+    const delayedSave = new Promise<Response>((resolve) => { resolveSave = resolve; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return jsonResponse(resourceBody("initial", { title: "Reconciled title", version: "generation.2" }), 200, { etag: '"generation.2"' });
+      writes += 1;
+      return writes === 1 ? uncertainWriteResponse() : delayedSave;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Reconciled title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(button(rendered, "Settings reconciled")).toBeDefined());
+    await clickButton(rendered, localAction);
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain(localAction === "Copy" ? "Copied" : "Download ready"));
+
+    const format = settingsSelect(rendered);
+    await act(async () => {
+      format.value = "markdown";
+      format.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await clickButton(rendered, "Save format");
+    await vi.waitFor(() => expect(writes).toBe(2));
+    expect(settingsButton(rendered, "format").dataset.settingsActionResult).toBe("pending");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await act(async () => {
+      resolveSave(mutationResponse("initial", { title: "Reconciled title", format: "markdown", version: "generation.3" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(settingsButton(rendered, "format").dataset.settingsActionResult).toBe("succeeded"));
+    expect(JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")[1]?.[1]?.body))).toMatchObject({ format: "markdown", version: "generation.2" });
+    expect(button(rendered, "Settings reconciled")).toBeDefined();
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    expect(rendered.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+
+  it("retains settled Settings outcomes through Settings, View, Settings", async () => {
+    let writes = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return resourceResponse("initial");
+      writes += 1;
+      return writes === 1
+        ? mutationResponse("initial", { title: "Updated", version: "generation.2" })
+        : mutationResponse("initial", { title: "Updated", format: "markdown", version: "generation.3" });
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+
+    await setInput(rendered, 'input[name="title"]', "Updated");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(settingsButton(rendered, "title").dataset.settingsActionResult).toBe("succeeded"));
+
+    const format = settingsSelect(rendered);
+    await act(async () => {
+      format.value = "markdown";
+      format.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickButton(rendered, "Save format");
+    await vi.waitFor(() => expect(settingsButton(rendered, "format").dataset.settingsActionResult).toBe("succeeded"));
+
+    await selectTab(rendered, "View");
+    await selectTab(rendered, "Settings");
+
+    expect(settingsButton(rendered, "title").dataset.settingsActionResult).toBe("succeeded");
+    expect(settingsButton(rendered, "title").textContent).toContain("Title saved");
+    expect(settingsButton(rendered, "format").dataset.settingsActionResult).toBe("succeeded");
+    expect(settingsButton(rendered, "format").textContent).toContain("Format saved");
   });
 
   it("keeps a Password draft dirty after Settings Discard clears only Settings", async () => {
@@ -850,6 +1093,189 @@ describe("Task 15 async lifecycle behavior", () => {
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
     expect(page!.snapshot.records.lastAction).toMatchObject({ state: "succeeded", key: "reload-server" });
+  });
+
+  it.each(["Copy", "Download"] as const)("commits Reload and settles its originating button after %s replaces Last action", async (localAction) => {
+    let resolveReload: ((response: Response) => void) | undefined;
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return Promise.resolve(errorResponse(409, "VERSION_CONFLICT"));
+      return new Promise<Response>((resolve) => { resolveReload = resolve; });
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Local title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reload")).toBeDefined());
+
+    const reload = button(rendered, "Reload");
+    await clickButton(rendered, "Reload");
+    const dialog = document.querySelector<HTMLElement>("[role=dialog]");
+    expect(dialog).not.toBeNull();
+    await clickButton(dialog!, "Reload");
+    await vi.waitFor(() => expect(reload.textContent).toBe("Reloading"));
+    await clickButton(rendered, localAction);
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain(localAction === "Copy" ? "Copied" : "Download ready"));
+
+    await act(async () => {
+      resolveReload!(await resourceResponse("remote", { title: "Server title", version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(reload.textContent).toBe("Reloaded"));
+    expect(settingsButton(rendered, "title").disabled).toBe(false);
+    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Local title");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await setInput(rendered, 'input[name="title"]', "Server title");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    await selectTab(rendered, "Edit");
+    await vi.waitFor(() => expect(rendered.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("remote"));
+  });
+
+  it.each(["Copy", "Download"] as const)("saves a new Settings title after Reload succeeds and %s replaces Last action", async (localAction) => {
+    let writes = 0;
+    let resolveSave!: (response: Response) => void;
+    const delayedSave = new Promise<Response>((resolve) => { resolveSave = resolve; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return resourceResponse("remote", { title: "Server title", version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+      writes += 1;
+      return writes === 1 ? errorResponse(409, "VERSION_CONFLICT") : delayedSave;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(document, "execCommand").mockReturnValue(true);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Local title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reload")).toBeDefined());
+    await clickButton(rendered, "Reload");
+    await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Reload");
+    await vi.waitFor(() => expect(button(rendered, "Reloaded")).toBeDefined());
+    await clickButton(rendered, localAction);
+    await vi.waitFor(() => expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toContain(localAction === "Copy" ? "Copied" : "Download ready"));
+
+    await setInput(rendered, 'input[name="title"]', "Next title");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await act(async () => {
+      settingsButton(rendered, "title").click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(writes).toBe(2));
+    expect(settingsButton(rendered, "title").dataset.settingsActionResult).toBe("pending");
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
+    await act(async () => {
+      resolveSave(mutationResponse("remote", { title: "Next title", version: "generation.3", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(settingsButton(rendered, "title").dataset.settingsActionResult).toBe("succeeded"));
+    expect(JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")[1]?.[1]?.body))).toMatchObject({ title: "Next title", version: "generation.2" });
+    expect(button(rendered, "Reloaded")).toBeDefined();
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    expect(rendered.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+
+  it("does not let an older staged Reload settle a newer Reload attempt", async () => {
+    let page: UsePastePageResult | null = null;
+    let resolvePreview: ((value: unknown) => void) | undefined;
+    const preview = new Promise<unknown>((resolve) => { resolvePreview = resolve; });
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => preview as never);
+    let read = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      read += 1;
+      return read === 1
+        ? resourceResponse("older", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" })
+        : new Promise<Response>(() => {});
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      page!.actions.reload();
+      resolvePreview!({ source: "older", html: "<p>older</p>" });
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+
+    expect(page!.snapshot.settings.result).toMatchObject({ state: "pending", action: "reload-server", attempt: 2 });
+    expect(page!.snapshot.records.lastAction).toMatchObject({ state: "pending", key: "reload-server", attempt: 2 });
+  });
+
+  it("commits a newer Reload while an older Preview stage never settles", async () => {
+    let page: UsePastePageResult | null = null;
+    stagedMarkdown.prepareMarkdownPreview.mockImplementationOnce(() => new Promise<never>(() => {}));
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      reads += 1;
+      return resourceResponse(reads === 1 ? "older" : "newer", {
+        version: reads === 1 ? "generation.2" : "generation.3",
+        contentRevision: reads === 1 ? 2 : 3,
+        updatedAt: reads === 1 ? "2026-09-16T00:00:00.000Z" : "2026-09-17T00:00:00.000Z",
+      });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.setSurfaceMounted("preview", true);
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(reads).toBe(2));
+    await vi.waitFor(() => expect(page!.snapshot.records.lastAction).toMatchObject({ key: "reload-server", state: "succeeded", attempt: 2 }));
+    expect(page!.snapshot.source).toBe("newer");
+    expect(page!.snapshot.derivedPreview?.source).toBe("newer");
+    expect(stagedMarkdown.prepareMarkdownPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts the older Reload GET when a newer Reload starts", async () => {
+    let page: UsePastePageResult | null = null;
+    let firstSignal: AbortSignal | undefined;
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      reads += 1;
+      if (reads === 2) return resourceResponse("newer", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+      firstSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        firstSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    }));
+
+    function Probe() {
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+
+    await mount(<Probe />);
+    await act(async () => {
+      page!.actions.reload();
+      page!.actions.reload();
+      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+    });
+    expect(firstSignal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(page!.snapshot.records.lastAction).toMatchObject({ key: "reload-server", state: "succeeded", attempt: 2 }));
+    expect(page!.snapshot.source).toBe("newer");
   });
 
   it("settles Reload only after its staged surface commits", async () => {
@@ -1033,13 +1459,18 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(page!.snapshot.candidate).toEqual({ kind: "terminal", source: "consumed" });
   });
 
-  it("terminalizes a view-once Reload from a retired Reload token", async () => {
+  it("terminalizes a validated view-once Reload after its GET was aborted", async () => {
     let page: UsePastePageResult | null = null;
+    let terminal: unknown = null;
     const resolvers: Array<(response: Response) => void> = [];
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolvers.push(resolve); })));
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal as AbortSignal);
+      return new Promise<Response>((resolve) => { resolvers.push(resolve); });
+    }));
 
     function Probe() {
-      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      page = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0], { onTerminal: (handoff) => { terminal = handoff; } });
       return null;
     }
 
@@ -1047,10 +1478,11 @@ describe("Task 15 async lifecycle behavior", () => {
     await act(async () => {
       page!.actions.reload();
       page!.actions.reload();
-      for (let step = 0; step < 10; step += 1) await Promise.resolve();
+      expect(signals[0]?.aborted).toBe(true);
       resolvers[0]!(await resourceResponse("consumed", { viewOnce: true, version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
       for (let step = 0; step < 20; step += 1) await Promise.resolve();
     });
+    expect(terminal).toMatchObject({ page: { phase: "consumed", source: "initial", responseSource: "consumed", choiceAvailable: true } });
     expect(page!.snapshot.paste).toMatchObject({ phase: "consumed", serverCapabilities: false });
     expect(page!.snapshot.source).toBe("initial");
     expect(page!.snapshot.candidate).toEqual({ kind: "terminal", source: "consumed" });
@@ -2671,6 +3103,807 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(rendered.querySelector("[data-local-source]")?.textContent).toBe("latest draft");
   });
 
+  it.each([
+    ["malformed 204", () => new Response(null, { status: 204, headers: { "cache-control": "no-store", "content-type": "text/plain" } })],
+    ["uncertain 403", () => errorResponse(403, "FORBIDDEN", true)],
+  ] as const)("enters Delete uncertain for a %s response", async (_name, response) => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => response());
+    vi.stubGlobal("fetch", fetchMock);
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await clickButton(rendered, "Delete");
+    await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
+    await vi.waitFor(() => expect(rendered.querySelector('[aria-label="Delete uncertain"]')).not.toBeNull());
+    expect(rendered.querySelector("[data-server-controls]")).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses Autosync as forbidden after a definite Delete 403 and permits an explicit retry", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let deletes = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "DELETE") return resourceResponse("initial");
+      deletes += 1;
+      return deletes === 1 ? errorResponse(403, "FORBIDDEN") : new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      paste!.actions.retry("replacement");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(deletes).toBe(2);
+    expect(paste!.snapshot.paste.resource).toBe("deleted-root-handoff");
+  });
+
+  it("does not let Autosave Retry reissue a failed Delete without Delete recovery", async () => {
+    vi.useFakeTimers();
+    let deletes = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deletes += 1;
+        return errorResponse(403, "FORBIDDEN");
+      }
+      return resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await clickButton(rendered, "Delete");
+    await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
+    await vi.waitFor(() => expect(rendered.querySelector('input[name="deleteCredential"]')).not.toBeNull());
+    const autosaveRecovery = rendered.querySelector('section[aria-label="Autosave"]');
+    if (autosaveRecovery !== null) await clickButton(autosaveRecovery, "Retry");
+    expect(deletes).toBe(1);
+    expect(rendered.querySelector('section[aria-label="Autosave"]')).toBeNull();
+    expect(rendered.querySelector('section[aria-label="Delete"] input[name="deleteCredential"]')).not.toBeNull();
+  });
+
+  it("does not replay Delete from stale Settings Retry after failed Reconcile", async () => {
+    vi.useFakeTimers();
+    let deletes = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deletes += 1;
+        return errorResponse(403, "FORBIDDEN");
+      }
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      if (String(input).endsWith("/settings")) return jsonResponse(resourceBody("initial"), 200, { etag: '"generation.1"' });
+      return resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Changed");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(rendered.querySelector('button[data-settings-recovery-action="settings-title"]')).not.toBeNull());
+    await clickButton(rendered, "Delete");
+    await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
+    await vi.waitFor(() => expect(rendered.querySelector('input[name="deleteCredential"]')).not.toBeNull());
+    const staleRetry = rendered.querySelector<HTMLButtonElement>('button[data-settings-recovery-action="settings-title"]');
+    if (staleRetry !== null && !staleRetry.disabled) await act(async () => { staleRetry.click(); await Promise.resolve(); });
+    expect(deletes).toBe(1);
+  });
+
+  it("clears failed Settings recovery when a later content autosave starts", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let contentWrites = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH" && String(input).endsWith("/settings")) return uncertainWriteResponse();
+      if (init?.method === "PATCH") {
+        contentWrites += 1;
+        return mutationResponse("unsaved draft", { version: "generation.2" });
+      }
+      if (String(input).endsWith("/settings")) return jsonResponse(resourceBody("initial"), 200, { etag: '"generation.1"' });
+      return resourceResponse("initial");
+    }));
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.saveTitle("Changed");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.settings.result.state).toBe("reconciliation-required");
+    await act(async () => {
+      paste!.actions.reconcile();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.settings.result.state).toBe("retryable");
+    await act(async () => {
+      paste!.actions.autosaveInput("unsaved draft", 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(contentWrites).toBe(1);
+    expect(paste!.snapshot.settings.result.state).toBe("idle");
+  });
+
+  it("retains a successful Settings Reconcile outcome when queued content autosave begins", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let resolveSettings!: (response: Response) => void;
+    const settings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    let contentWrites = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH" && String(input).endsWith("/settings")) return uncertainWriteResponse();
+      if (init?.method === "PATCH") {
+        contentWrites += 1;
+        return mutationResponse("unsaved draft", { title: "Changed", version: "generation.3" });
+      }
+      if (String(input).endsWith("/settings")) return settings;
+      return resourceResponse("initial");
+    }));
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.saveTitle("Changed");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.settings.result.state).toBe("reconciliation-required");
+    await act(async () => {
+      paste!.actions.reconcile();
+      paste!.actions.autosaveInput("unsaved draft", 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(contentWrites).toBe(0);
+    await act(async () => {
+      resolveSettings(jsonResponse(resourceBody("initial", { title: "Changed", version: "generation.2" }), 200, { etag: '"generation.2"' }));
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(contentWrites).toBe(1);
+    expect(paste!.snapshot.settings.result.state).toBe("succeeded");
+  });
+
+  it("hides ContentRecovery while a relative-expiration Reconcile retry occupies the mutation slot", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let writes = 0;
+    let reads = 0;
+    let resolveRetry!: (response: Response) => void;
+    const retry = new Promise<Response>((resolve) => { resolveRetry = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return ++writes === 1 ? uncertainWriteResponse() : retry;
+      reads += 1;
+      return reads === 1 ? errorResponse(403, "FORBIDDEN") : jsonResponse(resourceBody("initial"), 200, { etag: '"generation.1"' });
+    }));
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.saveExpiration(60);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await act(async () => {
+      paste!.actions.reconcile();
+      paste!.actions.sourceEvent({ type: "input", content: "local draft", eventAt: 0 });
+      paste!.actions.autosaveInput("local draft", 0);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.mutation.state).toBe("metadata-reconciliation");
+    expect(paste!.snapshot.autosave.state).toBe("password-required");
+    await act(async () => {
+      paste!.actions.retry("replacement");
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(writes).toBe(2);
+    expect(paste!.snapshot.paste.mutation.state).toBe("in-flight");
+    expect(paste!.snapshot.contentRecoveryAllowed).toBe(false);
+    resolveRetry(mutationResponse("initial", { version: "generation.2" }));
+  });
+
+  it("retains a dirty content Retry after Delete 403 without retrying Delete", async () => {
+    vi.useFakeTimers();
+    let deletes = 0;
+    const writes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deletes += 1;
+        return errorResponse(403, "FORBIDDEN");
+      }
+      if (init?.method === "PATCH") {
+        writes.push(String(init.body));
+        return mutationResponse("unsaved draft", { version: "generation.2" });
+      }
+      return resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Edit");
+    await setInput(rendered, "textarea", "unsaved draft");
+    await selectTab(rendered, "Settings");
+    await clickButton(rendered, "Delete");
+    await clickButton(document.querySelector<HTMLElement>("[role=dialog]")!, "Delete");
+    await vi.waitFor(() => expect(rendered.querySelector('input[name="deleteCredential"]')).not.toBeNull());
+    const recovery = rendered.querySelector('section[aria-label="Autosave"]');
+    expect(recovery).not.toBeNull();
+    await setInput(recovery, 'input[name="contentRetryCredential"]', "replacement");
+    await clickButton(recovery, "Retry");
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(JSON.parse(writes[0]!)).toMatchObject({ content: "unsaved draft", password: "replacement" });
+    expect(deletes).toBe(1);
+  });
+
+  it("uses the ContentRecovery credential when retrying a forbidden content Reconcile", async () => {
+    vi.useFakeTimers();
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      reads.push(String(input));
+      return reads.length === 1 ? errorResponse(403, "FORBIDDEN") : resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Edit");
+    await act(async () => {
+      const textarea = rendered.querySelector<HTMLTextAreaElement>("textarea")!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "unsaved draft");
+      const input = new Event("input", { bubbles: true });
+      Object.defineProperty(input, "timeStamp", { value: 0 });
+      textarea.dispatchEvent(input);
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    const recovery = rendered.querySelector('section[aria-label="Autosave"]');
+    expect(recovery).not.toBeNull();
+    await clickButton(recovery, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    await vi.waitFor(() => expect(recovery!.querySelector('input[name="contentRetryCredential"]')).not.toBeNull());
+    await setInput(recovery, 'input[name="contentRetryCredential"]', "replacement");
+    await clickButton(recovery, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    expect(new URL(reads[1]!, location.href).searchParams.get("password")).toBe("replacement");
+  });
+
+  it("clears a rejected ContentRecovery credential before a blank Reconcile", async () => {
+    vi.useFakeTimers();
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      reads.push(String(input));
+      return errorResponse(403, "FORBIDDEN");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Edit");
+    await act(async () => {
+      const textarea = rendered.querySelector<HTMLTextAreaElement>("textarea")!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "unsaved draft");
+      const input = new Event("input", { bubbles: true });
+      Object.defineProperty(input, "timeStamp", { value: 0 });
+      textarea.dispatchEvent(input);
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    const recovery = rendered.querySelector('section[aria-label="Autosave"]');
+    await clickButton(recovery, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    await setInput(recovery, 'input[name="contentRetryCredential"]', "wrong");
+    await clickButton(recovery, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    await setInput(recovery, 'input[name="contentRetryCredential"]', "");
+    await clickButton(recovery, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(3));
+    expect(new URL(reads[1]!, location.href).searchParams.get("password")).toBe("wrong");
+    expect(new URL(reads[2]!, location.href).searchParams.has("password")).toBe(false);
+  });
+
+  it("offers Settings credential recovery instead of a blocked content Retry during metadata Reconcile", async () => {
+    vi.useFakeTimers();
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      if (String(input).endsWith("/settings") || String(input).includes("/settings?")) {
+        reads.push(String(input));
+        return reads.length === 1 ? errorResponse(403, "FORBIDDEN") : jsonResponse(resourceBody("initial"), 200);
+      }
+      return resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Changed");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    await selectTab(rendered, "Edit");
+    await setInput(rendered, "textarea", "unsaved draft");
+    await selectTab(rendered, "Settings");
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    expect(rendered.querySelector('[data-settings-result="reconciliation-required"] input[name="retryCredential"]')).not.toBeNull();
+    expect(rendered.querySelector('section[aria-label="Autosave"]')).toBeNull();
+    await setInput(rendered, 'input[name="retryCredential"]', "replacement");
+    const reconcile = rendered.querySelector<HTMLButtonElement>('button[data-settings-recovery-action="settings-reconcile"]');
+    expect(reconcile?.disabled).toBe(false);
+    await act(async () => { reconcile!.click(); await Promise.resolve(); });
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    expect(new URL(reads[1]!, location.href).searchParams.get("password")).toBe("replacement");
+  });
+
+  it("clears a rejected Settings Reconcile credential before a blank Reconcile", async () => {
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return uncertainWriteResponse();
+      reads.push(String(input));
+      return errorResponse(403, "FORBIDDEN");
+    }));
+    const rendered = await mountOrdinary();
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Changed");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
+    const reconcile = async () => act(async () => {
+      rendered.querySelector<HTMLButtonElement>('button[data-settings-recovery-action="settings-reconcile"]')!.click();
+      await Promise.resolve();
+    });
+    await reconcile();
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    await setInput(rendered, 'input[name="retryCredential"]', "wrong");
+    await reconcile();
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    await setInput(rendered, 'input[name="retryCredential"]', "");
+    await reconcile();
+    await vi.waitFor(() => expect(reads).toHaveLength(3));
+    expect(new URL(reads[1]!, location.href).searchParams.get("password")).toBe("wrong");
+    expect(new URL(reads[2]!, location.href).searchParams.has("password")).toBe(false);
+  });
+
+  it("resumes Autosync after a dirty content Retry resolves Delete 403", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    const writes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(403, "FORBIDDEN");
+      if (init?.method === "PATCH") {
+        writes.push(String(init.body));
+        return mutationResponse("unsaved draft", { version: "generation.2" });
+      }
+      reads += 1;
+      return resourceResponse("unsaved draft", { version: "generation.2" });
+    }));
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.autosaveInput("unsaved draft", 0);
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.retry("replacement", "content");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0]!)).toMatchObject({ content: "unsaved draft", password: "replacement" });
+    expect(paste!.snapshot.records.autosync.state).toBe("waiting");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(reads).toBe(1);
+  });
+
+  it("resumes Autosync after an authorized save resolves a definite Delete 403", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(403, "FORBIDDEN");
+      if (init?.method === "PATCH") return mutationResponse("initial", { title: "saved", version: "generation.2" });
+      reads += 1;
+      return resourceResponse("initial", { title: "saved", version: "generation.2" });
+    }));
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.saveTitle("saved");
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      paste!.actions.draftState("settings", false);
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("waiting");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(reads).toBe(1);
+  });
+
+  it("does not clear an earlier Autosync forbidden latch when Delete fails definitively", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "DELETE" ? errorResponse(400, "BAD_REQUEST") : errorResponse(403, "FORBIDDEN")
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Retry sync available after an earlier GET 403 and a definite Delete 400", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(400, "BAD_REQUEST");
+      reads += 1;
+      return reads === 1 ? errorResponse(403, "FORBIDDEN") : resourceResponse("initial");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(paste!.snapshot.candidate).toEqual({ kind: "forbidden", source: "" });
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(paste!.snapshot.candidate).toEqual({ kind: "forbidden", source: "" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(reads).toBe(1);
+    await act(async () => {
+      paste!.actions.retrySync("replacement");
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(reads).toBe(2);
+  });
+
+  it.each(["deadline", "offline"] as const)("does not restore a forbidden Retry sync after Delete spans %s", async (boundary) => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let resolveDelete: ((response: Response) => void) | undefined;
+    const deletion = new Promise<Response>((resolve) => { resolveDelete = resolve; });
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "DELETE" ? deletion : errorResponse(403, "FORBIDDEN")
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(paste!.snapshot.candidate?.kind).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      await Promise.resolve();
+    });
+    expect(paste!.snapshot.candidate).toBeNull();
+    if (boundary === "deadline") {
+      await act(async () => { await vi.advanceTimersByTimeAsync(297_000); });
+      expect(paste!.snapshot.records.autosync.state).toBe("inactive");
+    } else {
+      await act(async () => {
+        window.dispatchEvent(new Event("offline"));
+        await Promise.resolve();
+      });
+    }
+    await act(async () => {
+      resolveDelete!(errorResponse(400, "BAD_REQUEST"));
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.candidate).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (boundary === "offline") {
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+        await Promise.resolve();
+      });
+      expect(paste!.snapshot.candidate?.kind).toBe("forbidden");
+    }
+  });
+
+  it("restarts Autosync after a definite Delete validation failure releases its mutation slot", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "DELETE" ? errorResponse(400, "BAD_REQUEST") : resourceResponse("initial")
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("waiting");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Delete 409 in conflict until a confirmed Reload restores polling eligibility", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "DELETE"
+        ? errorResponse(409, "VERSION_CONFLICT")
+        : resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" })
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("conflict");
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("waiting");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [403, "FORBIDDEN", "forbidden"],
+    [409, "VERSION_CONFLICT", "conflict"],
+  ] as const)("retains Delete %s Autosync pause after an offline-online cycle", async (status, code, expected) => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    const fetchMock = vi.fn(async () => errorResponse(status, code));
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe(expected);
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+      await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("paused-offline");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe(expected);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [403, "FORBIDDEN", "forbidden"],
+    [409, "VERSION_CONFLICT", "conflict"],
+  ] as const)("keeps Autosync paused-offline when a pending Delete settles %s offline", async (status, code, expected) => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let resolveDelete: ((response: Response) => void) | undefined;
+    const deletion = new Promise<Response>((resolve) => { resolveDelete = resolve; });
+    const fetchMock = vi.fn(async () => deletion);
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      window.dispatchEvent(new Event("offline"));
+      await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("paused-offline");
+    await act(async () => {
+      resolveDelete!(errorResponse(status, code));
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe("paused-offline");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.autosync.state).toBe(expected);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes Autosync after confirmed Reload resolves Delete 409 following GET 403", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(409, "VERSION_CONFLICT");
+      reads += 1;
+      return reads === 1
+        ? errorResponse(403, "FORBIDDEN")
+        : resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(paste!.snapshot.candidate?.kind).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(false);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(true);
+    expect(reads).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(reads).toBe(3);
+  });
+
+  it("restores Autosync when a confirmed Reload commits offline after GET 403 and Delete 409", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let resolveReload: ((response: Response) => void) | undefined;
+    const reload = new Promise<Response>((resolve) => { resolveReload = resolve; });
+    let reads = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(409, "VERSION_CONFLICT");
+      reads += 1;
+      if (reads === 1) return errorResponse(403, "FORBIDDEN");
+      if (reads === 2) return reload;
+      return resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(false);
+    await act(async () => {
+      paste!.actions.reload();
+      await Promise.resolve();
+      window.dispatchEvent(new Event("offline"));
+      resolveReload!(await resourceResponse("remote", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" }));
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(true);
+    expect(paste!.snapshot.records.autosync.state).toBe("paused-offline");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(reads).toBe(3);
+  });
+
+  it("resumes Autosync after a successful same-identity Reload clears an earlier GET 403", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    const same = () => resourceResponse("initial", { version: "generation.2", contentRevision: 2, updatedAt: "2026-09-16T00:00:00.000Z" });
+    const fetchMock = vi.fn(async () => {
+      reads += 1;
+      return reads === 2 ? errorResponse(403, "FORBIDDEN") : same();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.responseEtag).toMatch(/^"sha256-/);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(paste!.snapshot.records.autosync.state).toBe("forbidden");
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 30; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.records.lastAction).toMatchObject({ key: "reload-server", state: "succeeded" });
+    expect(reads).toBe(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(reads).toBe(4);
+  });
+
+  it("does not report Reload success from the same cached version after Delete 409", async () => {
+    vi.useFakeTimers();
+    let paste: UsePastePageResult | null = null;
+    let reads = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return errorResponse(409, "VERSION_CONFLICT");
+      reads += 1;
+      return resourceResponse("remote", {
+        version: reads === 3 ? "generation.3" : "generation.2",
+        contentRevision: 2,
+        updatedAt: reads === 3 ? "2026-09-16T00:00:01.000Z" : "2026-09-16T00:00:00.000Z",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    function Probe() {
+      paste = usePastePage(ordinaryInitialPage() as Parameters<typeof usePastePage>[0]);
+      return null;
+    }
+    await mount(<Probe />);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 25; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.resource).toBe("active");
+    expect(paste!.snapshot.paste.responseEtag).toMatch(/^"sha256-/);
+    await act(async () => {
+      paste!.actions.deletePaste(null);
+      for (let step = 0; step < 50; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(false);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 50; step += 1) await Promise.resolve();
+    });
+    expect(reads).toBe(2);
+    expect(paste!.snapshot.paste.versionUsable).toBe(false);
+    expect(paste!.snapshot.records.lastAction).toMatchObject({ key: "reload-server", state: "failed" });
+    expect(paste!.snapshot.records.autosync.state).toBe("conflict");
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(reads).toBe(2);
+    await act(async () => {
+      paste!.actions.reload();
+      for (let step = 0; step < 25; step += 1) await Promise.resolve();
+    });
+    expect(paste!.snapshot.paste.versionUsable).toBe(true);
+    expect(paste!.snapshot.records.autosync.state).toBe("waiting");
+  });
+
   it("preserves a not-found draft and terminates uncertain and successful deletes", async () => {
     vi.useFakeTimers();
     const notFound = vi.fn(async () => errorResponse(404, "PASTE_NOT_FOUND"));
@@ -2826,5 +4059,116 @@ describe("Task 15 async lifecycle behavior", () => {
       await Promise.resolve();
     });
     expect(rendered.querySelector('[data-operation-record="last-action"]')?.textContent).toBe(settled);
+  });
+
+  it("retains distinct Settings outcomes after a View remount", async () => {
+    let patch = 0;
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return resourceResponse("initial");
+      patch += 1;
+      return patch === 1
+        ? mutationResponse("initial", { title: "Saved title", version: "generation.2" })
+        : mutationResponse("initial", { title: "Saved title", format: "markdown", version: "generation.3" });
+    }));
+    const rendered = await mountOrdinary();
+
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Saved title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Title saved")).toBeDefined());
+    const format = settingsSelect(rendered);
+    await act(async () => {
+      format.value = "markdown";
+      format.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickButton(rendered, "Save format");
+    await vi.waitFor(() => expect(button(rendered, "Format saved")).toBeDefined());
+
+    await selectTab(rendered, "View");
+    await selectTab(rendered, "Settings");
+
+    expect(button(rendered, "Title saved")).toBeDefined();
+    expect(button(rendered, "Format saved")).toBeDefined();
+  });
+
+  it("keeps the Settings recovery button mounted through its retry outcome", async () => {
+    let resolveRetry: ((response: Response) => void) | undefined;
+    let patch = 0;
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return resourceResponse("initial");
+      patch += 1;
+      if (patch === 1) return Promise.resolve(errorResponse(500, "INTERNAL_ERROR"));
+      return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+    }));
+    const rendered = await mountOrdinary();
+
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Recovered title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Retry")).toBeDefined());
+    const retry = button(rendered, "Retry");
+    await clickButton(rendered, "Retry");
+
+    await vi.waitFor(() => expect(rendered.contains(retry)).toBe(true));
+    expect(retry.textContent).toBe("Saving title");
+    expect(retry.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(button(rendered, "Save title").querySelector('svg[aria-hidden="true"]')).toBeNull();
+
+    await act(async () => {
+      resolveRetry!(mutationResponse("initial", { title: "Recovered title", version: "generation.2" }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(retry.textContent).toBe("Title saved"));
+    expect(retry.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it("binds reconciliation feedback to its recovery button without replacing field outcomes", async () => {
+    let resolveReconcile: ((response: Response) => void) | undefined;
+    let patch = 0;
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        patch += 1;
+        return patch === 1
+          ? Promise.resolve(mutationResponse("initial", { title: "Saved title", version: "generation.2" }))
+          : Promise.resolve(uncertainWriteResponse());
+      }
+      if (init?.method === "GET") return new Promise<Response>((resolve) => { resolveReconcile = resolve; });
+      return resourceResponse("initial");
+    }));
+    const rendered = await mountOrdinary();
+
+    await selectTab(rendered, "Settings");
+    await setInput(rendered, 'input[name="title"]', "Saved title");
+    await clickButton(rendered, "Save title");
+    await vi.waitFor(() => expect(button(rendered, "Title saved")).toBeDefined());
+    const format = settingsSelect(rendered);
+    await act(async () => {
+      format.value = "markdown";
+      format.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickButton(rendered, "Save format");
+    await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"] button')).not.toBeNull());
+    const reconcile = rendered.querySelector<HTMLButtonElement>('[data-settings-result="reconciliation-required"] button')!;
+    expect(reconcile.textContent).toBe("Reconcile");
+    await act(async () => {
+      reconcile.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(reconcile.textContent).toBe("Reconciling settings"));
+    expect(reconcile.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(button(rendered, "Title saved")).toBeDefined();
+    expect(button(rendered, "Format failed")).toBeDefined();
+
+    await act(async () => {
+      resolveReconcile!(jsonResponse(resourceBody("initial", { title: "Saved title", format: "markdown", version: "generation.2" }), 200, { etag: '"generation.2"' }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(reconcile.textContent).toBe("Settings reconciled"));
+    expect(reconcile.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(button(rendered, "Title saved")).toBeDefined();
+    expect(button(rendered, "Format failed")).toBeDefined();
   });
 });

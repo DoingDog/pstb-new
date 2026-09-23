@@ -354,10 +354,34 @@ describe("paste API", () => {
     expect(failed).toMatchObject({ kind: "failure", failure: { kind: "malformed", code: "MALFORMED_RESPONSE", status: 304, mutationMayHaveApplied: false } });
   });
 
+  it("recognizes only WebKit's normalized empty conditional 304 signature", async () => {
+    const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
+    const fetch = queuedFetch(emptyResponse(200, { ETag: validator }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() })).toEqual({
+      kind: "not-modified",
+      etag: validator,
+    });
+
+    const withContentLength = queuedFetch(emptyResponse(200, { ETag: validator, "Content-Length": "0" }));
+    expect(await api(withContentLength.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: validator, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE", mutationMayHaveApplied: false },
+    });
+  });
+
+  it("accepts a verified resource with the standard application/json media type", async () => {
+    const fetch = queuedFetch(await resourceResponse(snapshot, { "Content-Type": "application/json" }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "snapshot",
+      snapshot: { etag: await resourceEtag(snapshot), source: snapshot.content, summary: resourceSummary },
+    });
+  });
+
   it("rejects resource responses with invalid UTF-8, media, cache, schema, or content bytes", async () => {
     const cases = [
       new Response(new Uint8Array([0xff]), { status: 200, headers: { "Content-Type": jsonMediaType, "Cache-Control": noStore, ETag: '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' } }),
-      await resourceResponse(snapshot, { "Content-Type": "application/json" }),
       await resourceResponse(snapshot, { "Cache-Control": "private" }),
       await resourceResponse({ ...snapshot, unknown: true }, {}),
       await resourceResponse({ ...snapshot, id: "" }, {}),
@@ -568,6 +592,17 @@ describe("paste API", () => {
     expect(deletedReader).not.toHaveBeenCalled();
   });
 
+  it("accepts a browser-normalized empty gzip 204 and rejects nonempty gzip bodies", async () => {
+    const empty = emptyStreamResponse(204, { "Content-Encoding": "gzip" });
+    const nonempty = emptyStreamResponse(204, { "Content-Encoding": "gzip" });
+    nonempty.arrayBuffer.mockResolvedValue(new Uint8Array([1]).buffer);
+    const accepted = await api(queuedFetch(empty).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() });
+    const rejected = await api(queuedFetch(nonempty).fetch).deletePaste({ id: "paste-1", password: null, version: "v1", signal: signal() });
+    expect(accepted).toEqual({ ok: true, status: 204, value: null, etag: null });
+    expect(empty.arrayBuffer).toHaveBeenCalledOnce();
+    expect(rejected).toMatchObject({ ok: false, failure: { kind: "malformed", status: 204, mutationMayHaveApplied: true } });
+  });
+
   it("review round 1: rejects present zero-length 304 and 204 streams", async () => {
     const validator = '"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"';
     const notModified = emptyStreamResponse(304, { ETag: validator });
@@ -641,7 +676,6 @@ describe("paste API", () => {
   });
 
   it.each([
-    ["missing charset", "application/json", noStore],
     ["wrong charset", "application/json; charset=iso-8859-1", noStore],
     ["extra media parameter", "application/json; charset=utf-8; profile=full", noStore],
     ["malformed quoted-string", 'application/json; charset="UTF-8', noStore],

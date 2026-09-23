@@ -273,7 +273,6 @@ describe("initial page bootstrap", () => {
     const bootstraps: AppBootstrap[] = [
       { page: "create", locale: "en" },
       { page: "password", locale: "en", errorCode: null },
-      { page: "error", locale: "en", status: 500, errorCode: "INTERNAL_ERROR" },
     ];
 
     for (const bootstrap of bootstraps) {
@@ -285,6 +284,18 @@ describe("initial page bootstrap", () => {
       });
       expect(fixture.removeCalls()).toEqual(["bootstrap"]);
     }
+  });
+
+  it("preserves the server error for a duplicate password query", () => {
+    const bootstrap: AppBootstrap = { page: "error", locale: "en", status: 400, errorCode: "AMBIGUOUS_PASSWORD" };
+    const fixture = pageFixture({ bootstrap });
+
+    expect(extractInitialPage(fixture.document, new URL("https://paste.test/id?password=one&password=two"))).toEqual({
+      ok: true,
+      bootstrap,
+      password: null,
+    });
+    expect(fixture.removeCalls()).toEqual(["bootstrap"]);
   });
 
   it("rejects non-inert bootstrap, source, and preview nodes", () => {

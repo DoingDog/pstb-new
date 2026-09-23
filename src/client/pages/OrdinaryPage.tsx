@@ -66,7 +66,7 @@ function ContentRecovery({ state, reconciliationRequired, reconciliationRequestP
   reconciliationRequired: boolean;
   reconciliationRequestPending: boolean;
   retry(credential: string | null): void;
-  reconcile(): void;
+  reconcile(credential: string | null): void;
   reload(): void;
   overwrite(): void;
   activity(eventAt: number, kind?: "recovery-credential"): void;
@@ -78,7 +78,7 @@ function ContentRecovery({ state, reconciliationRequired, reconciliationRequestP
   return (
     <section aria-label={copy.autosave} className="flex flex-wrap items-end gap-2">
       {state === "password-required" && <label>{copy.currentPassword}<Input name="contentRetryCredential" type="password" value={credential} onInput={(event) => { setCredential(event.currentTarget.value); activity(event.timeStamp, "recovery-credential"); }} /></label>}
-      {reconciliationRequired && <Button type="button" disabled={reconciliationRequestPending} onClick={() => { if (reconciliationRequestPending) return; reconcile(); }}>{copy.reconcile}</Button>}
+      {reconciliationRequired && <Button type="button" disabled={reconciliationRequestPending} onClick={() => { if (reconciliationRequestPending) return; reconcile(credential === "" ? null : credential); }}>{copy.reconcile}</Button>}
       {!reconciliationRequired && state !== "conflict" && <Button type="button" onClick={() => retry(credential === "" ? null : credential)}>{copy.retry}</Button>}
       {state === "conflict" && <>
         <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>
@@ -194,17 +194,17 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
         />
       }
     />
-    <ContentRecovery
+    {snapshot.contentRecoveryAllowed && <ContentRecovery
       state={snapshot.autosave.state}
       reconciliationRequired={snapshot.paste.resource === "active" && snapshot.paste.reconciliation.owner === "content"}
       reconciliationRequestPending={snapshot.paste.resource === "active" && snapshot.paste.reconciliation.owner === "content" && snapshot.paste.reconciliation.requestPending}
-      retry={actions.retry}
-      reconcile={actions.reconcile}
+      retry={(credential) => actions.retry(credential, "content")}
+      reconcile={(credential) => actions.retry(credential, "content")}
       reload={requestReload}
       overwrite={() => setOverwriteOpen(true)}
       activity={actions.activity}
       locale={locale}
-    />
+    />}
     <SyncCandidate
       candidate={snapshot.candidate}
       locale={locale}

@@ -1,16 +1,23 @@
 import * as React from "react";
-import type { ActionKey, ExpirationInput } from "../contracts";
+import type { ExpirationInput } from "../contracts";
 import { dictionaries, labels, type Locale } from "../../i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 
 export type SettingsField = "title" | "format" | "expiration" | "viewOnce";
+export type SettingsActionKey = "settings-title" | "settings-format" | "settings-expiration" | "settings-view-once" | "settings-reconcile" | "reload-server";
+export type SettingsActionOutcome = {
+  state: "pending" | "succeeded" | "failed";
+  origin: "field" | "recovery";
+  attempt: number;
+};
 export type ManagementResultState = "idle" | "pending" | "succeeded" | "validation-error" | "credential-required" | "conflict" | "retryable" | "reconciliation-required";
 export type ReconciliationIntent = "permanent" | "relative" | "absolute";
 export type SettingsResult =
-  | { field: "expiration"; state: "reconciliation-required"; message: string | null; reconciliationIntent: ReconciliationIntent }
-  | { field: Exclude<SettingsField, "expiration"> | null; state: "reconciliation-required"; message: string | null; reconciliationIntent?: never }
-  | { field: SettingsField | null; state: Exclude<ManagementResultState, "reconciliation-required">; message: string | null; reconciliationIntent?: never };
+  | { field: "expiration"; state: "reconciliation-required"; message: string | null; reconciliationIntent: ReconciliationIntent; action?: SettingsActionKey; attempt?: number }
+  | { field: Exclude<SettingsField, "expiration"> | null; state: "reconciliation-required"; message: string | null; reconciliationIntent?: never; action?: SettingsActionKey; attempt?: number }
+  | { field: SettingsField | null; state: Exclude<ManagementResultState, "reconciliation-required">; message: string | null; reconciliationIntent?: never; action?: SettingsActionKey; attempt?: number };
 
 export interface SettingsPanelState {
   accepted: {
@@ -25,6 +32,7 @@ export interface SettingsPanelState {
   mutationOccupied?: boolean;
   reconciliationOwner?: "content" | SettingsField | "password" | null;
   reconciliationRequestPending?: boolean;
+  reconciliationCredentialRequired?: boolean;
   resultIdentity?: object;
   result: SettingsResult;
 }
@@ -44,12 +52,21 @@ export interface SettingsPanelProps {
   locale?: Locale;
 }
 
-const fieldActions: Record<SettingsField, ActionKey> = {
+const fieldActions: Record<SettingsField, SettingsActionKey> = {
   title: "settings-title",
   format: "settings-format",
   expiration: "settings-expiration",
   viewOnce: "settings-view-once",
 };
+
+const settingsActionKeys: readonly SettingsActionKey[] = [
+  "settings-title",
+  "settings-format",
+  "settings-expiration",
+  "settings-view-once",
+  "settings-reconcile",
+  "reload-server",
+];
 
 function inputExpiration(value: ExpirationInput): string {
   return value === null ? "permanent" : String(value);
@@ -122,21 +139,46 @@ function resultMessage(result: SettingsPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-function ResultActions({ result, versionUsable, mutationBlocked, ownsReconciliation, recoveryBlocked, retry, reconcile, reload, onActivity, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; versionUsable: boolean; mutationBlocked: boolean; ownsReconciliation: boolean; recoveryBlocked: boolean; locale: Locale }) {
+function resultAction(result: SettingsResult): SettingsActionKey | null {
+  if (result.state === "reconciliation-required" && result.action === undefined) return null;
+  return result.action ?? (result.field === null ? null : fieldActions[result.field]);
+}
+
+function outcomeState(result: SettingsResult): SettingsActionOutcome["state"] {
+  return result.state === "pending" ? "pending" : result.state === "succeeded" ? "succeeded" : "failed";
+}
+
+function outcomeLabel(action: SettingsActionKey, outcome: SettingsActionOutcome | undefined, locale: Locale, fallback: string) {
+  if (outcome === undefined) return fallback;
+  const Icon = outcome.state === "pending" ? LoaderCircle : outcome.state === "succeeded" ? CircleCheck : CircleX;
+  return <><Icon aria-hidden="true" className={outcome.state === "pending" ? "animate-spin" : undefined} /><span>{dictionaries[locale].actions[action][outcome.state]}</span></>;
+}
+
+function ResultActions({ result, outcomes, versionUsable, mutationBlocked, ownsReconciliation, recoveryBlocked, reconciliationCredentialRequired, retry, reconcile, reload, onActivity, onRecoveryDispatch, locale }: Pick<SettingsPanelProps, "retry" | "reconcile" | "reload" | "onActivity"> & { result: SettingsPanelState["result"]; outcomes: Partial<Record<SettingsActionKey, SettingsActionOutcome>>; versionUsable: boolean; mutationBlocked: boolean; ownsReconciliation: boolean; recoveryBlocked: boolean; reconciliationCredentialRequired: boolean; onRecoveryDispatch(key: SettingsActionKey): void; locale: Locale }) {
   const [credential, setCredential] = React.useState("");
   const copy = labels(locale);
-  if (result.state === "idle") return !versionUsable ? <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button> : null;
-  const recovery = result.state === "credential-required" || result.state === "retryable" || result.state === "conflict";
-  const rewriteExpiration = result.state === "reconciliation-required" && result.field === "expiration" && result.reconciliationIntent === "relative";
-  const role = result.state === "pending" || result.state === "succeeded" ? "status" : "alert";
+  const recovery = result.field !== null && (result.state === "credential-required" || result.state === "retryable" || result.state === "conflict")
+    ? { key: fieldActions[result.field], fallback: copy.retry, disabled: mutationBlocked, dispatch: () => { onRecoveryDispatch(fieldActions[result.field!]); retry(credential === "" ? null : credential); } }
+    : result.state === "reconciliation-required" && ownsReconciliation
+      ? { key: "settings-reconcile" as const, fallback: result.field === "expiration" && result.reconciliationIntent === "relative" ? copy.saveExpiration : copy.reconcile, disabled: recoveryBlocked, dispatch: () => { onRecoveryDispatch("settings-reconcile"); if (reconciliationCredentialRequired) retry(credential === "" ? null : credential); else reconcile(); } }
+      : null;
+  const recoveryOutcomes = settingsActionKeys.filter((key) => key !== "reload-server" && outcomes[key]?.origin === "recovery");
+  if (recovery !== null && !recoveryOutcomes.includes(recovery.key)) recoveryOutcomes.push(recovery.key);
+  const reloadOutcome = outcomes["reload-server"]?.origin === "recovery" ? outcomes["reload-server"] : undefined;
+  const showMessage = result.state !== "idle" && result.state !== "pending" && result.state !== "succeeded";
+  const showReload = !versionUsable || result.state === "conflict";
+  if (!showMessage && recoveryOutcomes.length === 0 && !showReload && reloadOutcome === undefined) return null;
 
   return (
-    <div data-settings-result={result.state} className="flex flex-wrap items-center gap-2">
-      <p role={role} className="basis-full">{resultMessage(result, locale)}</p>
-      {result.state === "credential-required" && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label>}
-      {recovery && <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; retry(credential === "" ? null : credential); }}>{copy.retry}</Button>}
-      {(!versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      {result.state === "reconciliation-required" && ownsReconciliation && <Button type="button" disabled={recoveryBlocked} onClick={() => { if (!ownsReconciliation || recoveryBlocked) return; reconcile(); }}>{rewriteExpiration ? copy.saveExpiration : copy.reconcile}</Button>}
+    <div data-settings-result={result.state === "idle" ? undefined : result.state} className="flex flex-wrap items-center gap-2">
+      <p hidden={!showMessage} role={showMessage ? "alert" : undefined} className="basis-full">{showMessage ? resultMessage(result, locale) : null}</p>
+      {(result.state === "credential-required" || (result.state === "reconciliation-required" && reconciliationCredentialRequired)) && <label>{copy.currentPassword}<Input name="retryCredential" type="password" aria-label={copy.currentPassword} value={credential} onInput={(event) => { setCredential(event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label>}
+      {recoveryOutcomes.map((key) => {
+        const outcome = outcomes[key]?.origin === "recovery" ? outcomes[key] : undefined;
+        const current = recovery?.key === key ? recovery : null;
+        return <Button key={key} data-settings-recovery-action={key} type="button" disabled={current === null || current.disabled || outcome?.state === "pending"} onClick={() => { if (current === null || current.disabled || outcome?.state === "pending") return; current.dispatch(); }}>{outcomeLabel(key, outcome, locale, current?.fallback ?? copy.reconcile)}</Button>;
+      })}
+      {(showReload || reloadOutcome !== undefined) && <Button data-settings-recovery-action="reload-server" data-settings-action-result={reloadOutcome?.state} type="button" variant="outline" aria-busy={reloadOutcome?.state === "pending" || undefined} disabled={!showReload || reloadOutcome?.state === "pending"} onClick={() => { if (!showReload || reloadOutcome?.state === "pending") return; onRecoveryDispatch("reload-server"); reload(); }}>{outcomeLabel("reload-server", reloadOutcome, locale, copy.reload)}</Button>}
     </div>
   );
 }
@@ -146,8 +188,16 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
   const format = useDraft(state.accepted.format);
   const expiration = useDraft(inputExpiration(state.accepted.expiration));
   const viewOnce = useDraft(state.accepted.viewOnce);
+  const [outcomes, setOutcomes] = React.useState<Partial<Record<SettingsActionKey, SettingsActionOutcome>>>(() => {
+    const action = resultAction(state.result);
+    return action === null || state.result.state === "idle"
+      ? {}
+      : { [action]: { state: outcomeState(state.result), origin: action === "settings-reconcile" || action === "reload-server" ? "recovery" : "field", attempt: state.result.attempt ?? 0 } };
+  });
+  const pageIdentity = React.useRef(state.accepted.id);
   const discardedResult = React.useRef<SettingsPanelState["result"] | null>(null);
   const settledResult = React.useRef<object | null>(null);
+  const recoveryAction = React.useRef<SettingsActionKey | null>(null);
   const [, render] = React.useState(0);
   const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
   const copy = labels(locale);
@@ -158,10 +208,36 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
   const resultOwnsReconciliation = ownsReconciliation && (result.field === null || state.reconciliationOwner === result.field);
   const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
   const discardBlocked = pending || foreignReconciliation || (!ownsReconciliation && state.mutationOccupied === true) || recoveryBlocked;
-  const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31536000"];
+  const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31104000"];
   const reportDraftState = (eventAt?: number) => onDraftState?.(title.dirty() || format.dirty() || expiration.dirty() || viewOnce.dirty(), eventAt);
   const resultIdentity = state.resultIdentity ?? state.result;
   const invalid = (field: SettingsField) => result.field === field && result.state === "validation-error";
+  const retainedOutcomes = pageIdentity.current === state.accepted.id ? outcomes : {};
+  const action = resultAction(result);
+  const currentOutcome = action === null || result.state === "idle"
+    ? undefined
+    : { state: outcomeState(result), origin: action === "settings-reconcile" || action === "reload-server" || recoveryAction.current === action ? "recovery" : "field", attempt: result.attempt ?? retainedOutcomes[action]?.attempt ?? 0 } as SettingsActionOutcome;
+  const displayedOutcomes = currentOutcome === undefined || action === null ? retainedOutcomes : { ...retainedOutcomes, [action]: currentOutcome };
+  const outcome = (field: SettingsField) => displayedOutcomes[fieldActions[field]]?.origin === "field" ? displayedOutcomes[fieldActions[field]] : undefined;
+
+  React.useEffect(() => {
+    if (pageIdentity.current === state.accepted.id) return;
+    pageIdentity.current = state.accepted.id;
+    discardedResult.current = null;
+    settledResult.current = null;
+    recoveryAction.current = null;
+    setOutcomes({});
+  }, [state.accepted.id]);
+
+  React.useEffect(() => {
+    if (action === null || currentOutcome === undefined) return;
+    setOutcomes((current) => {
+      const previous = current[action];
+      return previous?.state === currentOutcome.state && previous.origin === currentOutcome.origin && previous.attempt === currentOutcome.attempt
+        ? current
+        : { ...current, [action]: currentOutcome };
+    });
+  }, [action, currentOutcome]);
 
   React.useEffect(() => {
     if (result.state !== "succeeded" || result.field === null || settledResult.current === resultIdentity) return;
@@ -190,31 +266,35 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
     render((value) => value + 1);
     discard();
   };
+  const titleOutcome = outcome("title");
+  const formatOutcome = outcome("format");
+  const expirationOutcome = outcome("expiration");
+  const viewOnceOutcome = outcome("viewOnce");
 
   return (
-    <section aria-label={copy.settings} className="grid gap-4">
+    <section aria-label={copy.settings} className="grid gap-4 [&_button]:min-h-11 [&_button]:min-w-11 [&_input:not([type=checkbox])]:min-h-11 [&_select]:min-h-11 [&_select]:min-w-11">
       <label>{copy.customId}<Input name="id" value={state.accepted.id} readOnly /></label>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
-        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveTitle(title.submit()); }}>{copy.saveTitle}</Button>
+        <Button type="button" data-settings-field="title" data-settings-action-result={titleOutcome?.state} aria-busy={titleOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveTitle(title.submit()); }}>{outcomeLabel("settings-title", titleOutcome, locale, copy.saveTitle)}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); reportDraftState(event.timeStamp); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
-        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveFormat(format.submit()); }}>{copy.saveFormat}</Button>
+        <Button type="button" data-settings-field="format" data-settings-action-result={formatOutcome?.state} aria-busy={formatOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveFormat(format.submit()); }}>{outcomeLabel("settings-format", formatOutcome, locale, copy.saveFormat)}</Button>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }}>
           {!standardExpirations.includes(expiration.value) && <option value={expiration.value}>{expiration.value}</option>}
-          <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31536000">{copy.oneYear}</option>
+          <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31104000">{copy.oneYear}</option>
         </select></label>
-        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveExpiration(parseExpiration(expiration.submit())); }}>{copy.saveExpiration}</Button>
+        <Button type="button" data-settings-field="expiration" data-settings-action-result={expirationOutcome?.state} aria-busy={expirationOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveExpiration(parseExpiration(expiration.submit())); }}>{outcomeLabel("settings-expiration", expirationOutcome, locale, copy.saveExpiration)}</Button>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} />{copy.viewOnce}</label>
-        <Button type="button" disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; saveViewOnce(viewOnce.submit()); }}>{copy.saveViewOnce}</Button>
+        <label className="inline-flex min-h-11 items-center"><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} />{copy.viewOnce}</label>
+        <Button type="button" data-settings-field="viewOnce" data-settings-action-result={viewOnceOutcome?.state} aria-busy={viewOnceOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveViewOnce(viewOnce.submit()); }}>{outcomeLabel("settings-view-once", viewOnceOutcome, locale, copy.saveViewOnce)}</Button>
       </div>
       {!foreignReconciliation && <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>}
-      <ResultActions result={result} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} ownsReconciliation={resultOwnsReconciliation} recoveryBlocked={recoveryBlocked} onActivity={onActivity} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
+      <ResultActions result={result} outcomes={displayedOutcomes} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} ownsReconciliation={resultOwnsReconciliation} recoveryBlocked={recoveryBlocked} reconciliationCredentialRequired={state.reconciliationCredentialRequired === true} onActivity={onActivity} onRecoveryDispatch={(key) => { recoveryAction.current = key; }} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );
 }

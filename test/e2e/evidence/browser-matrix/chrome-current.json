@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "releaseDate": "2026-09-23",
+  "product": "Chrome",
+  "slot": "current",
+  "environment": "windows-chrome-current",
+  "capturedAt": "2026-09-23T03:55:42.164Z",
+  "testedAt": "2026-09-23T05:25:51.816Z",
+  "captureReceipt": {
+    "path": "test/e2e/evidence/browser-matrix/chrome-current-capture.json",
+    "sha256": "cd7e7aadf994873d3c380f0f54e00f75b6c00aa3c8b607e4c830ce8255cdd546"
+  },
+  "target": {
+    "sourceArtifact": "test/e2e/evidence/browser-target-sources/chrome-stable.json",
+    "sourceSha256": "9e1cb24b7472bf71cd4fa3648b87a494119a5c0545761a18a8459e21d7a7af94",
+    "exactVersion": "154.0.8037.58",
+    "major": 154
+  },
+  "observed": { "exactVersion": "154.0.8037.58", "major": 154 },
+  "tester": "Claude Code, script-driven headed Playwright 1.63.0 using exact signed Chrome executable; not human manual testing",
+  "checks": [
+    { "id": "root-create", "status": "passed", "notes": "test/e2e/create-password.spec.ts:20 created a protected paste through the React root and retained the credential-free view URL." },
+    { "id": "password-post-hard-refresh", "status": "passed", "notes": "The same browser test posted the native password form, checked the sole URL-encoded password query and hard-refreshed the authorized URL." },
+    { "id": "ordinary-edit-autosave", "status": "passed", "notes": "The same browser test edited Content, measured the one-second autosave and checked saved source after refresh." },
+    { "id": "tabs-sheet", "status": "passed", "notes": "test/e2e/accessibility.spec.ts:351,408,425 exercised Tabs keys, Dialog and mobile Sheet focus, Escape and return focus." },
+    { "id": "raw-html-md-file", "status": "passed", "notes": "test/e2e/view-once-representations.spec.ts:112 checked raw bytes, Markdown safe rendering, the file attachment and active top-level HTML using same-origin fixture content only." },
+    { "id": "delete-root-handoff", "status": "passed", "notes": "test/e2e/create-password.spec.ts:20 deleted through its dialog, observed the root handoff and checked refresh removed stale feedback." }
+  ]
+}

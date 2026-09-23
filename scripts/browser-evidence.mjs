@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -16,6 +16,23 @@ const versionPattern = /^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,3}$/u;
 const hashPattern = /^[0-9a-f]{64}$/u;
 const productNames = Object.freeze(["Chrome", "Edge", "Firefox", "Safari"]);
 const slots = Object.freeze(["current", "previous"]);
+const windowsMetadataExtractionMethod = "windows-powershell-authenticode-fileversion-v1";
+const windowsMetadataPathEnvironment = "CFPB_BROWSER_EXECUTABLE_LITERAL";
+const windowsBrowserIdentities = Object.freeze({
+  Chrome: Object.freeze({ productName: "Google Chrome", publisher: "Google LLC" }),
+  Edge: Object.freeze({ productName: "Microsoft Edge", publisher: "Microsoft Corporation" }),
+});
+const windowsMetadataScript = [
+  "$ErrorActionPreference = 'Stop'",
+  "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)",
+  `$LiteralPath = [Environment]::GetEnvironmentVariable('${windowsMetadataPathEnvironment}')`,
+  "if ([string]::IsNullOrWhiteSpace($LiteralPath)) { throw 'Browser executable path is missing' }",
+  "$file = Get-Item -LiteralPath $LiteralPath",
+  "if ($file.PSIsContainer) { throw 'Browser executable path is not a file' }",
+  "$signature = Get-AuthenticodeSignature -LiteralPath $LiteralPath",
+  "$version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($file.FullName)",
+  "[PSCustomObject]@{ path = $file.FullName; productName = $version.ProductName; productVersion = $version.ProductVersion; authenticodeStatus = [string]$signature.Status; publisher = if ($null -eq $signature.SignerCertificate) { $null } else { $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) }; bytes = [long]$file.Length; sha256 = (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json -Compress",
+].join("; ");
 export const accessibilityCategories = Object.freeze(["screen-reader", "contrast", "zoom-reflow-200", "physical-touch"]);
 export const browserCheckIds = Object.freeze([
   "root-create",
@@ -143,26 +160,66 @@ function pathFromAbsolute(repoRoot, path) {
   return normalized;
 }
 
-async function readBytes(repoRoot, path) {
-  return readFile(absolute(repoRoot, path));
+async function readBytes(repoRoot, path, options = {}) {
+  const checkpoint = options.checkpoint ?? (() => options.signal?.throwIfAborted());
+  checkpoint();
+  const bytes = await (options.readFileImpl ?? readFile)(
+    absolute(repoRoot, path),
+    options.signal === undefined ? undefined : { signal: options.signal },
+  );
+  checkpoint();
+  return bytes;
 }
 
-async function readJson(repoRoot, path, name = path) {
-  return json((await readBytes(repoRoot, path)).toString("utf8"), name);
+async function readJson(repoRoot, path, name = path, options = {}) {
+  return json((await readBytes(repoRoot, path, options)).toString("utf8"), name);
 }
 
-export async function writeAtomic(path, contents) {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, contents, { encoding: typeof contents === "string" ? "utf8" : undefined, flag: "wx" });
-  await rename(temporary, path);
+export async function writeAtomic(path, contents, options = {}) {
+  const operations = options.operations ?? { mkdir, writeFile, rename, rm };
+  const checkpoint = options.checkpoint ?? (() => options.signal?.throwIfAborted());
+  let temporary;
+  let committed = false;
+  try {
+    checkpoint();
+    await operations.mkdir(dirname(path), { recursive: true });
+    checkpoint();
+    temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    await operations.writeFile(temporary, contents, {
+      encoding: typeof contents === "string" ? "utf8" : undefined,
+      flag: "wx",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    checkpoint();
+    if (options.signal === undefined) await operations.rename(temporary, path);
+    else (operations.renameSync ?? renameSync)(temporary, path);
+    committed = true;
+    checkpoint();
+  } catch (error) {
+    if (committed) {
+      (operations.rmSync ?? rmSync)(path, { force: true });
+    } else if (temporary !== undefined) {
+      await operations.rm(temporary, { force: true });
+    }
+    throw error;
+  }
 }
 
-async function stage(path, contents) {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, contents, { encoding: typeof contents === "string" ? "utf8" : undefined, flag: "wx" });
-  return { path, temporary };
+async function stage(path, contents, options = {}) {
+  const checkpoint = options.checkpoint ?? (() => options.signal?.throwIfAborted());
+  let temporary;
+  try {
+    checkpoint();
+    await mkdir(dirname(path), { recursive: true });
+    checkpoint();
+    temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, contents, { encoding: typeof contents === "string" ? "utf8" : undefined, flag: "wx", ...(options.signal === undefined ? {} : { signal: options.signal }) });
+    checkpoint();
+    return { path, temporary };
+  } catch (error) {
+    if (temporary !== undefined) await rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 async function discardStages(stages) {
@@ -675,18 +732,38 @@ function bodyHash(bodies) {
 async function deadlineOperation(context, action, options = {}) {
   const delay = options.deadlineMilliseconds ?? context.remaining;
   if (delay <= 0) fail("Evidence operation deadline expired");
+  const monotonicClock = options.monotonicClock ?? (() => performance.now());
+  const expiresAt = monotonicClock() + delay;
   const controller = new AbortController();
   let expired = false;
-  const timeout = setTimeout(() => {
+  const deadlineError = new Error("Evidence operation deadline expired");
+  const expire = () => {
+    if (expired) return;
     expired = true;
-    controller.abort();
-  }, delay);
+    controller.abort(deadlineError);
+  };
+  const checkpoint = () => {
+    if (expired || controller.signal.aborted || monotonicClock() >= expiresAt) {
+      expire();
+      throw deadlineError;
+    }
+  };
+  let timeout;
+  const timeoutPromise = new Promise((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      expire();
+      reject(deadlineError);
+    }, delay);
+  });
   try {
-    const result = await action(controller.signal);
-    if (expired) fail("Evidence operation deadline expired");
+    const result = await Promise.race([
+      Promise.resolve().then(() => action(controller.signal, checkpoint)),
+      timeoutPromise,
+    ]);
+    checkpoint();
     return result;
   } catch (error) {
-    if (expired || error?.name === "AbortError") fail("Evidence operation deadline expired");
+    if (expired || error?.name === "AbortError" || error === deadlineError) fail("Evidence operation deadline expired");
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -830,9 +907,33 @@ function allMatrixTargets(matrix, derivedByProduct) {
   }
 }
 
-export function captureReceipt(value, name, mapping, expectedTarget, context) {
-  sameKeys(value, ["schemaVersion", "releaseDate", "product", "slot", "environment", "capturedAt", "target", "rawVersionOutput", "observed"], name);
-  equal(value.schemaVersion, 1, `${name}.schemaVersion`);
+function windowsPathKey(value, name) {
+  string(value, name, true);
+  if (!win32.isAbsolute(value) || win32.parse(value).root.length <= 1) fail(`${name} must be a fully qualified absolute Windows path`);
+  return win32.normalize(value).toLowerCase();
+}
+
+function binaryProvenance(value, name, product, expectedExecutable, expectedVersion) {
+  sameKeys(value, ["extractionMethod", "path", "productName", "productVersion", "authenticodeStatus", "publisher", "bytes", "sha256"], name);
+  equal(value.extractionMethod, windowsMetadataExtractionMethod, `${name}.extractionMethod`);
+  const pathKey = windowsPathKey(value.path, `${name}.path`);
+  if (expectedExecutable !== undefined) equal(pathKey, windowsPathKey(expectedExecutable, "browser executable"), `${name}.path`);
+  const identity = windowsBrowserIdentities[product];
+  if (identity === undefined) fail(`${name} is only valid for Windows Chrome or Edge`);
+  equal(value.productName, identity.productName, `${name}.productName`);
+  version(value.productVersion, `${name}.productVersion`);
+  if (expectedVersion !== undefined) equal(value.productVersion, expectedVersion, `${name}.productVersion`);
+  equal(value.authenticodeStatus, "Valid", `${name}.authenticodeStatus`);
+  equal(value.publisher, identity.publisher, `${name}.publisher`);
+  safeInteger(value.bytes, `${name}.bytes`, 1);
+  if (!hashPattern.test(string(value.sha256, `${name}.sha256`))) fail(`${name}.sha256 must be lowercase SHA-256`);
+  return value;
+}
+
+export function captureReceipt(value, name, mapping, expectedTarget, context, expectedExecutable) {
+  const windowsCapture = Object.hasOwn(windowsBrowserIdentities, mapping.product);
+  sameKeys(value, ["schemaVersion", "releaseDate", "product", "slot", "environment", "capturedAt", "target", windowsCapture ? "binaryProvenance" : "rawVersionOutput", "observed"], name);
+  equal(value.schemaVersion, windowsCapture ? 2 : 1, `${name}.schemaVersion`);
   tuple(value, name, mapping);
   validateReleaseDate(value.releaseDate);
   if (context !== undefined) {
@@ -840,15 +941,19 @@ export function captureReceipt(value, name, mapping, expectedTarget, context) {
     assertEvidenceTimestamp(value.capturedAt, `${name}.capturedAt`, context);
   } else canonicalTimestamp(value.capturedAt, `${name}.capturedAt`);
   target(value.target, `${name}.target`, expectedTarget);
-  sameKeys(value.rawVersionOutput, ["stdout", "stderr"], `${name}.rawVersionOutput`);
-  string(value.rawVersionOutput.stdout, `${name}.rawVersionOutput.stdout`);
-  string(value.rawVersionOutput.stderr, `${name}.rawVersionOutput.stderr`);
   sameKeys(value.observed, ["exactVersion", "major"], `${name}.observed`);
   version(value.observed.exactVersion, `${name}.observed.exactVersion`);
   equal(value.observed.major, versionMajor(value.observed.exactVersion, `${name}.observed.exactVersion`), `${name}.observed.major`);
-  const rawVersion = parseVersionOutput(mapping.product, value.rawVersionOutput);
-  equal(value.observed.exactVersion, rawVersion, `${name}.observed.exactVersion`);
-  equal(value.observed.major, versionMajor(rawVersion, "raw version"), `${name}.observed.major`);
+  if (windowsCapture) {
+    binaryProvenance(value.binaryProvenance, `${name}.binaryProvenance`, mapping.product, expectedExecutable, value.observed.exactVersion);
+  } else {
+    sameKeys(value.rawVersionOutput, ["stdout", "stderr"], `${name}.rawVersionOutput`);
+    string(value.rawVersionOutput.stdout, `${name}.rawVersionOutput.stdout`);
+    string(value.rawVersionOutput.stderr, `${name}.rawVersionOutput.stderr`);
+    const rawVersion = parseVersionOutput(mapping.product, value.rawVersionOutput);
+    equal(value.observed.exactVersion, rawVersion, `${name}.observed.exactVersion`);
+    equal(value.observed.major, versionMajor(rawVersion, "raw version"), `${name}.observed.major`);
+  }
   if (expectedTarget !== undefined) {
     equal(value.observed.exactVersion, expectedTarget.exactVersion, `${name}.observed.exactVersion`);
     equal(value.observed.major, expectedTarget.major, `${name}.observed.major`);
@@ -1094,7 +1199,7 @@ export function validateEngineReporter(value, project, releaseDate, testedAt, ru
     if (result.error !== undefined && result.error !== null) fail("Engine reporter result has error");
     if (!Array.isArray(result.errors) || result.errors.length !== 0) fail("Engine reporter result errors must be empty");
     const annotations = Array.isArray(test.annotations) ? test.annotations.filter((annotation) => isObject(annotation) && annotation.type === "cfpb-engine-observation") : [];
-    if (test.title === "records browser.version() for record-engine") {
+    if (spec.title === "records browser.version() for record-engine") {
       if (sentinel !== null) fail("Engine reporter has duplicate sentinel");
       if (annotations.length !== 1) fail("Engine reporter sentinel annotation is missing or duplicate");
       const description = json(string(annotations[0].description, "Engine reporter sentinel annotation"), "Engine reporter sentinel annotation");
@@ -1157,15 +1262,15 @@ function options(args, permitted) {
   return output;
 }
 
-async function loadSource(repoRoot, product, releaseDate, context) {
+async function loadSource(repoRoot, product, releaseDate, context, options = {}) {
   const config = sourceConfigurations[product];
-  const bytes = await readBytes(repoRoot, config.artifact);
+  const bytes = await readBytes(repoRoot, config.artifact, options);
   const artifact = sourceArtifact(json(bytes.toString("utf8"), config.artifact), config.artifact, product, releaseDate, context);
   return { artifact, hash: sha256(bytes), bytes };
 }
 
-async function loadMatrix(repoRoot, releaseDate) {
-  return browserMatrix(await readJson(repoRoot, matrixPath), matrixPath, releaseDate);
+async function loadMatrix(repoRoot, releaseDate, options = {}) {
+  return browserMatrix(await readJson(repoRoot, matrixPath, matrixPath, options), matrixPath, releaseDate);
 }
 
 async function derivedSources(repoRoot, releaseDate, context) {
@@ -1185,46 +1290,60 @@ function removeCampaignOutputs(repoRoot) {
   return Promise.all(paths.map((path) => rm(absolute(repoRoot, path), { force: true })));
 }
 
-export async function acquireTargets({ repoRoot = root, releaseDate, clock = Date.now, fetchImpl = fetch, deadlineMilliseconds } = {}) {
+export async function acquireTargets({ repoRoot = root, releaseDate, clock = Date.now, fetchImpl = fetch, deadlineMilliseconds, stageImpl = stage } = {}) {
   const context = captureContext(releaseDate, clock);
-  const vendors = await deadlineOperation(context, async (signal) => {
-    const acquired = {};
-    for (const product of productNames) acquired[product] = await acquireVendor(product, context, fetchImpl, signal);
-    return acquired;
-  }, { deadlineMilliseconds });
-  const sources = {};
-  const sourceStage = [];
-  const hashes = {};
-  try {
-    for (const product of productNames) {
-      sources[product] = makeSourceArtifact(product, context.releaseDate, context.commandNow, vendors[product].bodies, vendors[product].releases);
-      const body = jsonText(sources[product]);
-      hashes[product] = sha256(Buffer.from(body));
-      sourceStage.push(await stage(absolute(repoRoot, sourceConfigurations[product].artifact), body));
-    }
-    const derived = Object.fromEntries(productNames.map((product) => [product, deriveTargets(sources[product], sourceConfigurations[product].artifact, hashes[product])]));
-    const matrix = {
-      schemaVersion: 4,
-      releaseDate: context.releaseDate,
-      targets: Object.values(browserMappings).map((mapping) => targetEntry(mapping.product, mapping.slot, derived[mapping.product][mapping.slot])),
-      rows: [],
-      engineCoverage: [],
+  return deadlineOperation(context, async (signal, checkpoint) => {
+    const vendors = {};
+    for (const product of productNames) vendors[product] = await acquireVendor(product, context, fetchImpl, signal);
+    checkpoint();
+    const sources = {};
+    const sourceStage = [];
+    const hashes = {};
+    const removeStagedOnAbort = () => {
+      for (const { temporary } of sourceStage) rmSync(temporary, { force: true });
     };
-    browserMatrix(matrix, "new browser matrix", context.releaseDate);
-    const accessibility = { schemaVersion: 1, releaseDate: context.releaseDate, rows: [] };
-    accessibilityAggregate(accessibility, "new accessibility aggregate", context.releaseDate);
-    const matrixStage = await stage(absolute(repoRoot, matrixPath), jsonText(matrix));
-    const accessibilityStage = await stage(absolute(repoRoot, accessibilityPath), jsonText(accessibility));
-    sourceStage.push(matrixStage, accessibilityStage);
-    await withLock(repoRoot, matrixLockPath, async () => {
-      for (const staged of sourceStage) await rename(staged.temporary, staged.path);
-      await removeCampaignOutputs(repoRoot);
-    });
-    return matrix;
-  } catch (error) {
-    await discardStages(sourceStage);
-    throw error;
-  }
+    signal.addEventListener("abort", removeStagedOnAbort, { once: true });
+    try {
+      for (const product of productNames) {
+        sources[product] = makeSourceArtifact(product, context.releaseDate, context.commandNow, vendors[product].bodies, vendors[product].releases);
+        const body = jsonText(sources[product]);
+        hashes[product] = sha256(Buffer.from(body));
+        sourceStage.push(await stageImpl(absolute(repoRoot, sourceConfigurations[product].artifact), body, { signal, checkpoint }));
+        checkpoint();
+      }
+      const derived = Object.fromEntries(productNames.map((product) => [product, deriveTargets(sources[product], sourceConfigurations[product].artifact, hashes[product])]));
+      const matrix = {
+        schemaVersion: 4,
+        releaseDate: context.releaseDate,
+        targets: Object.values(browserMappings).map((mapping) => targetEntry(mapping.product, mapping.slot, derived[mapping.product][mapping.slot])),
+        rows: [],
+        engineCoverage: [],
+      };
+      browserMatrix(matrix, "new browser matrix", context.releaseDate);
+      const accessibility = { schemaVersion: 1, releaseDate: context.releaseDate, rows: [] };
+      accessibilityAggregate(accessibility, "new accessibility aggregate", context.releaseDate);
+      sourceStage.push(await stageImpl(absolute(repoRoot, matrixPath), jsonText(matrix), { signal, checkpoint }));
+      checkpoint();
+      sourceStage.push(await stageImpl(absolute(repoRoot, accessibilityPath), jsonText(accessibility), { signal, checkpoint }));
+      checkpoint();
+      await withLock(repoRoot, matrixLockPath, async () => {
+        checkpoint();
+        for (const staged of sourceStage) {
+          checkpoint();
+          await rename(staged.temporary, staged.path);
+        }
+        checkpoint();
+        await removeCampaignOutputs(repoRoot);
+      });
+      checkpoint();
+      return matrix;
+    } catch (error) {
+      await discardStages(sourceStage);
+      throw error;
+    } finally {
+      signal.removeEventListener("abort", removeStagedOnAbort);
+    }
+  }, { deadlineMilliseconds });
 }
 
 function targetForMatrix(matrix, mapping) {
@@ -1236,11 +1355,17 @@ function assertMatrixTargetAgainstSource(matrixTargetValue, mapping, sourceDeriv
   return matrixTargetValue;
 }
 
-async function spawnVersion(executable, args, context, spawnImpl = spawn) {
-  return deadlineOperation(context, (signal) => new Promise((resolvePromise, reject) => {
+async function spawnOutput(executable, args, context, spawnImpl = spawn, options = {}) {
+  const run = (signal) => new Promise((resolvePromise, reject) => {
+    signal.throwIfAborted();
     let child;
     try {
-      child = spawnImpl(executable, args, { shell: false, signal });
+      child = spawnImpl(executable, args, {
+        shell: false,
+        signal,
+        ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.windowsHide === true ? { windowsHide: true } : {}),
+      });
     } catch (error) {
       reject(error);
       return;
@@ -1251,10 +1376,21 @@ async function spawnVersion(executable, args, context, spawnImpl = spawn) {
     child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
     child.once("error", reject);
     child.once("close", (code) => {
-      if (code !== 0) reject(new Error(`Branded browser version command failed: ${code}`));
+      if (code !== 0) reject(new Error(`${options.failureLabel ?? "Branded browser version command"} failed: ${code}`));
       else resolvePromise({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
     });
-  }));
+    if (options.stdin !== undefined) {
+      try {
+        if (typeof child.stdin?.end !== "function") fail("Metadata command stdin is unavailable");
+        child.stdin.end(options.stdin);
+      } catch (error) {
+        reject(error);
+      }
+    }
+  });
+  return options.signal === undefined
+    ? deadlineOperation(context, run, { deadlineMilliseconds: options.deadlineMilliseconds })
+    : run(options.signal);
 }
 
 function fatalUtf8(bytes, name) {
@@ -1265,81 +1401,210 @@ function fatalUtf8(bytes, name) {
   }
 }
 
-function launchDetached(executable, args, spawnImpl = spawn) {
-  const child = spawnImpl(executable, args, { shell: false, detached: true, stdio: "ignore" });
-  child.unref?.();
+function windowsPowerShellExecutable() {
+  if (process.platform !== "win32") return "powershell.exe";
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  string(systemRoot, "Windows system root", true);
+  return resolve(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-export async function captureBrowser({ repoRoot = root, releaseDate, product, slot, environment, executableEnv, clock = Date.now, spawnImpl = spawn, deadlineMilliseconds } = {}) {
+async function captureWindowsBinaryProvenance(product, executable, context, spawnImpl, signal) {
+  windowsPathKey(executable, "browser executable");
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    const normalized = key.toLowerCase();
+    if (normalized === windowsMetadataPathEnvironment.toLowerCase() || normalized === "psmodulepath") delete environment[key];
+  }
+  environment[windowsMetadataPathEnvironment] = executable;
+  const raw = await spawnOutput(
+    windowsPowerShellExecutable(),
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"],
+    context,
+    spawnImpl,
+    { env: environment, stdin: `${windowsMetadataScript}\n`, windowsHide: true, failureLabel: "Windows browser metadata command", signal },
+  );
+  const stdout = fatalUtf8(raw.stdout, "Windows metadata stdout");
+  const stderr = fatalUtf8(raw.stderr, "Windows metadata stderr");
+  if (splitNonemptyLines(stderr).length !== 0) fail("Windows metadata command wrote stderr");
+  const lines = splitNonemptyLines(stdout);
+  if (lines.length !== 1) fail("Windows metadata command must return exactly one JSON line");
+  const metadata = json(lines[0], "Windows metadata command output");
+  sameKeys(metadata, ["path", "productName", "productVersion", "authenticodeStatus", "publisher", "bytes", "sha256"], "Windows metadata command output");
+  const provenance = { extractionMethod: windowsMetadataExtractionMethod, ...metadata };
+  return binaryProvenance(provenance, "Windows binary provenance", product, executable);
+}
+
+async function launchDetached(executable, args, signal, spawnImpl = spawn) {
+  await new Promise((resolvePromise, reject) => {
+    signal.throwIfAborted();
+    let child;
+    try {
+      child = spawnImpl(executable, args, { shell: false, detached: true, stdio: "ignore", signal });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    if (typeof child.once !== "function") {
+      child.unref?.();
+      resolvePromise();
+      return;
+    }
+    let settled = false;
+    let graceTimer;
+    const onAbort = () => finish(signal.reason instanceof Error ? signal.reason : Object.assign(new Error("aborted"), { name: "AbortError" }));
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
+      signal.removeEventListener("abort", onAbort);
+      if (error !== undefined) reject(error);
+      else {
+        child.unref?.();
+        resolvePromise();
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    child.once("error", finish);
+    child.once("close", (code) => finish(new Error(`Branded browser exited before launch settled: ${code}`)));
+    child.once("spawn", () => {
+      graceTimer = setTimeout(() => finish(), 1_000);
+    });
+  });
+}
+
+async function captureBrowserForPlatform(options = {}) {
+  const repoRoot = options.repoRoot ?? root;
+  const mapping = mappingFor(options.product, options.slot, options.environment);
+  return withLock(repoRoot, `${mapping.capture}.lock`, () => captureBrowserLocked(options));
+}
+
+async function captureBrowserLocked({ repoRoot = root, releaseDate, product, slot, environment, executableEnv, clock = Date.now, spawnImpl = spawn, deadlineMilliseconds, platform, profileRoot = resolve(tmpdir(), "cfpb-browser-evidence"), readFileImpl = readFile, writeReceiptImpl = writeAtomic } = {}) {
   const context = captureContext(releaseDate, clock);
   const mapping = mappingFor(product, slot, environment);
   if (product === "Safari") fail("Use capture-safari for Safari");
+  if (platform !== "win32") fail(`${product} capture requires win32`);
   string(executableEnv, "executable environment variable", true);
   const executable = process.env[executableEnv];
   string(executable, `${executableEnv}`, true);
-  const matrix = await loadMatrix(repoRoot, context.releaseDate);
-  const source = await loadSource(repoRoot, product, context.releaseDate, context);
-  const derived = deriveTargets(source.artifact, mapping.sourceArtifact, source.hash);
-  const targetValue = targetForMatrix(matrix, mapping);
-  assertMatrixTargetAgainstSource(targetValue, mapping, derived);
-  for (const path of [mapping.capture, mapping.smoke, mapping.unavailable].filter(Boolean)) if (existsSync(absolute(repoRoot, path))) fail("Mapped branded output already exists");
-  const raw = await spawnVersion(executable, ["--version"], context, spawnImpl);
-  const rawVersionOutput = { stdout: fatalUtf8(raw.stdout, "version stdout"), stderr: fatalUtf8(raw.stderr, "version stderr") };
-  const observedVersion = parseVersionOutput(product, rawVersionOutput);
-  equal(observedVersion, targetValue.exactVersion, "observed branded version");
-  const receipt = {
-    schemaVersion: 1,
-    releaseDate: context.releaseDate,
-    product,
-    slot,
-    environment: mapping.environment,
-    capturedAt: context.commandNow,
-    target: { sourceArtifact: targetValue.sourceArtifact, sourceSha256: targetValue.sourceSha256, exactVersion: targetValue.exactVersion, major: targetValue.major },
-    rawVersionOutput,
-    observed: { exactVersion: observedVersion, major: versionMajor(observedVersion, "observed branded version") },
-  };
-  captureReceipt(receipt, "new branded capture", mapping, targetValue, context);
   const path = absolute(repoRoot, mapping.capture);
-  const bytes = Buffer.from(jsonText(receipt));
-  await writeAtomic(path, bytes);
-  const hash = sha256(bytes);
-  process.stdout.write(`${mapping.capture} ${hash}\n`);
-  launchDetached(executable, ["http://127.0.0.1:8787/"], spawnImpl);
-  return receipt;
+  let committed = false;
+  try {
+    const result = await deadlineOperation(context, async (signal, checkpoint) => {
+      const operation = { signal, checkpoint, readFileImpl };
+      const matrix = await loadMatrix(repoRoot, context.releaseDate, operation);
+      const source = await loadSource(repoRoot, product, context.releaseDate, context, operation);
+      const derived = deriveTargets(source.artifact, mapping.sourceArtifact, source.hash);
+      const targetValue = targetForMatrix(matrix, mapping);
+      assertMatrixTargetAgainstSource(targetValue, mapping, derived);
+      for (const output of [mapping.capture, mapping.smoke, mapping.unavailable].filter(Boolean)) if (existsSync(absolute(repoRoot, output))) fail("Mapped branded output already exists");
+      const windowsCapture = Object.hasOwn(windowsBrowserIdentities, product);
+      let rawVersionOutput;
+      let binaryProvenanceValue;
+      let observedVersion;
+      if (windowsCapture) {
+        binaryProvenanceValue = await captureWindowsBinaryProvenance(product, executable, context, spawnImpl, signal);
+        checkpoint();
+        observedVersion = binaryProvenanceValue.productVersion;
+      } else {
+        const raw = await spawnOutput(executable, ["--version"], context, spawnImpl, { signal });
+        checkpoint();
+        rawVersionOutput = { stdout: fatalUtf8(raw.stdout, "version stdout"), stderr: fatalUtf8(raw.stderr, "version stderr") };
+        observedVersion = parseVersionOutput(product, rawVersionOutput);
+      }
+      equal(observedVersion, targetValue.exactVersion, "observed branded version");
+      const receipt = {
+        schemaVersion: windowsCapture ? 2 : 1,
+        releaseDate: context.releaseDate,
+        product,
+        slot,
+        environment: mapping.environment,
+        capturedAt: context.commandNow,
+        target: { sourceArtifact: targetValue.sourceArtifact, sourceSha256: targetValue.sourceSha256, exactVersion: targetValue.exactVersion, major: targetValue.major },
+        ...(windowsCapture ? { binaryProvenance: binaryProvenanceValue } : { rawVersionOutput }),
+        observed: { exactVersion: observedVersion, major: versionMajor(observedVersion, "observed branded version") },
+      };
+      captureReceipt(receipt, "new branded capture", mapping, targetValue, context, windowsCapture ? executable : undefined);
+      const profilePath = resolve(profileRoot, mapping.environment, windowsCapture ? binaryProvenanceValue.sha256 : observedVersion);
+      await mkdir(dirname(profilePath), { recursive: true });
+      const launchArgs = windowsCapture
+        ? [`--user-data-dir=${profilePath}`, "--no-first-run", "--no-default-browser-check", "http://127.0.0.1:8787/"]
+        : ["-wait-for-browser", "-no-remote", "-profile", profilePath, "http://127.0.0.1:8787/"];
+      await launchDetached(executable, launchArgs, signal, spawnImpl);
+      checkpoint();
+      const bytes = Buffer.from(jsonText(receipt));
+      await writeReceiptImpl(path, bytes, { signal, checkpoint });
+      committed = true;
+      checkpoint();
+      return { receipt, hash: sha256(bytes) };
+    }, { deadlineMilliseconds });
+    process.stdout.write(`${mapping.capture} ${result.hash}\n`);
+    return result.receipt;
+  } catch (error) {
+    if (committed) await rm(path, { force: true });
+    throw error;
+  }
 }
 
-export async function captureSafari({ repoRoot = root, releaseDate, slot, environment, clock = Date.now, spawnImpl = spawn, deadlineMilliseconds } = {}) {
+export async function captureBrowser(options = {}) {
+  return captureBrowserForPlatform({ ...options, platform: process.platform });
+}
+
+async function captureSafariForPlatform(options = {}) {
+  const repoRoot = options.repoRoot ?? root;
+  const mapping = mappingFor("Safari", options.slot, options.environment);
+  return withLock(repoRoot, `${mapping.capture}.lock`, () => captureSafariLocked(options));
+}
+
+async function captureSafariLocked({ repoRoot = root, releaseDate, slot, environment, clock = Date.now, spawnImpl = spawn, deadlineMilliseconds, platform, readFileImpl = readFile, writeReceiptImpl = writeAtomic } = {}) {
   const context = captureContext(releaseDate, clock);
   const mapping = mappingFor("Safari", slot, environment);
-  const matrix = await loadMatrix(repoRoot, context.releaseDate);
-  const source = await loadSource(repoRoot, "Safari", context.releaseDate, context);
-  const derived = deriveTargets(source.artifact, mapping.sourceArtifact, source.hash);
-  const targetValue = targetForMatrix(matrix, mapping);
-  assertMatrixTargetAgainstSource(targetValue, mapping, derived);
-  for (const path of [mapping.capture, mapping.smoke, mapping.unavailable].filter(Boolean)) if (existsSync(absolute(repoRoot, path))) fail("Mapped Safari output already exists");
-  const raw = await spawnVersion("/usr/bin/safaridriver", ["--version"], context, spawnImpl);
-  const rawVersionOutput = { stdout: fatalUtf8(raw.stdout, "Safari version stdout"), stderr: fatalUtf8(raw.stderr, "Safari version stderr") };
-  const observedVersion = parseVersionOutput("Safari", rawVersionOutput);
-  equal(observedVersion, targetValue.exactVersion, "observed Safari version");
-  const receipt = {
-    schemaVersion: 1,
-    releaseDate: context.releaseDate,
-    product: "Safari",
-    slot,
-    environment: mapping.environment,
-    capturedAt: context.commandNow,
-    target: { sourceArtifact: targetValue.sourceArtifact, sourceSha256: targetValue.sourceSha256, exactVersion: targetValue.exactVersion, major: targetValue.major },
-    rawVersionOutput,
-    observed: { exactVersion: observedVersion, major: versionMajor(observedVersion, "observed Safari version") },
-  };
-  captureReceipt(receipt, "new Safari capture", mapping, targetValue, context);
+  if (platform !== "darwin") fail("Safari capture requires darwin");
   const path = absolute(repoRoot, mapping.capture);
-  const bytes = Buffer.from(jsonText(receipt));
-  await writeAtomic(path, bytes);
-  const hash = sha256(bytes);
-  process.stdout.write(`${mapping.capture} ${hash}\n`);
-  launchDetached("/usr/bin/open", ["-a", "Safari", "http://127.0.0.1:8787/"], spawnImpl);
-  return receipt;
+  let committed = false;
+  try {
+    const result = await deadlineOperation(context, async (signal, checkpoint) => {
+      const operation = { signal, checkpoint, readFileImpl };
+      const matrix = await loadMatrix(repoRoot, context.releaseDate, operation);
+      const source = await loadSource(repoRoot, "Safari", context.releaseDate, context, operation);
+      const derived = deriveTargets(source.artifact, mapping.sourceArtifact, source.hash);
+      const targetValue = targetForMatrix(matrix, mapping);
+      assertMatrixTargetAgainstSource(targetValue, mapping, derived);
+      for (const output of [mapping.capture, mapping.smoke, mapping.unavailable].filter(Boolean)) if (existsSync(absolute(repoRoot, output))) fail("Mapped Safari output already exists");
+      const raw = await spawnOutput("/usr/bin/safaridriver", ["--version"], context, spawnImpl, { signal });
+      checkpoint();
+      const rawVersionOutput = { stdout: fatalUtf8(raw.stdout, "Safari version stdout"), stderr: fatalUtf8(raw.stderr, "Safari version stderr") };
+      const observedVersion = parseVersionOutput("Safari", rawVersionOutput);
+      equal(observedVersion, targetValue.exactVersion, "observed Safari version");
+      const receipt = {
+        schemaVersion: 1,
+        releaseDate: context.releaseDate,
+        product: "Safari",
+        slot,
+        environment: mapping.environment,
+        capturedAt: context.commandNow,
+        target: { sourceArtifact: targetValue.sourceArtifact, sourceSha256: targetValue.sourceSha256, exactVersion: targetValue.exactVersion, major: targetValue.major },
+        rawVersionOutput,
+        observed: { exactVersion: observedVersion, major: versionMajor(observedVersion, "observed Safari version") },
+      };
+      captureReceipt(receipt, "new Safari capture", mapping, targetValue, context);
+      await spawnOutput("/usr/bin/open", ["-a", "Safari", "http://127.0.0.1:8787/"], context, spawnImpl, { signal, failureLabel: "Safari launcher command" });
+      checkpoint();
+      const bytes = Buffer.from(jsonText(receipt));
+      await writeReceiptImpl(path, bytes, { signal, checkpoint });
+      committed = true;
+      checkpoint();
+      return { receipt, hash: sha256(bytes) };
+    }, { deadlineMilliseconds });
+    process.stdout.write(`${mapping.capture} ${result.hash}\n`);
+    return result.receipt;
+  } catch (error) {
+    if (committed) await rm(path, { force: true });
+    throw error;
+  }
+}
+
+export async function captureSafari(options = {}) {
+  return captureSafariForPlatform({ ...options, platform: process.platform });
 }
 
 export async function recordPass({ repoRoot = root, releaseDate, product, slot, environment, evidence, clock = Date.now } = {}) {
@@ -1411,7 +1676,7 @@ async function spawnEngine(repoRoot, project, context, runToken, spawnImpl = spa
   const args = [
     resolve(repoRoot, "node_modules/@playwright/test/cli.js"), "test",
     ...engineSuiteFiles,
-    `--project=${project}`, "--reporter=json",
+    `--project=${project}`, "--reporter=json", "--workers=1", "--retries=0",
   ];
   await deadlineOperation(context, (signal) => new Promise((resolvePromise, reject) => {
     let child;
@@ -1520,11 +1785,26 @@ function syntheticRawVersion(product, exactVersion) {
   return { stdout: lines[product], stderr: "" };
 }
 
+function syntheticBinaryProvenance(mapping, exactVersion) {
+  const identity = windowsBrowserIdentities[mapping.product];
+  const executableName = mapping.product === "Chrome" ? "chrome.exe" : "msedge.exe";
+  return {
+    extractionMethod: windowsMetadataExtractionMethod,
+    path: `C:\\Synthetic Browsers\\${mapping.product}\\${mapping.slot}\\${executableName}`,
+    productName: identity.productName,
+    productVersion: exactVersion,
+    authenticodeStatus: "Valid",
+    publisher: identity.publisher,
+    bytes: 1_000_000 + mapping.environment.length,
+    sha256: sha256(Buffer.from(`${mapping.product}/${mapping.slot}/${exactVersion}`)),
+  };
+}
+
 function syntheticReporter(project, observation) {
   const specs = engineSuiteFiles.map((file, index) => ({
     file,
+    title: index === engineSuiteFiles.length - 1 ? "records browser.version() for record-engine" : `fixture ${index}`,
     tests: [{
-      title: index === engineSuiteFiles.length - 1 ? "records browser.version() for record-engine" : `fixture ${index}`,
       projectName: project,
       expectedStatus: "passed",
       status: "expected",
@@ -1555,11 +1835,14 @@ export async function createSyntheticCampaign(repoRoot, releaseDate = "2026-09-1
   };
   for (const mapping of Object.values(browserMappings)) {
     const targetValue = findMatrixTarget(matrix, mapping);
+    const windowsCapture = Object.hasOwn(windowsBrowserIdentities, mapping.product);
     const capture = {
-      schemaVersion: 1, releaseDate, product: mapping.product, slot: mapping.slot, environment: mapping.environment, capturedAt: commandNow,
+      schemaVersion: windowsCapture ? 2 : 1, releaseDate, product: mapping.product, slot: mapping.slot, environment: mapping.environment, capturedAt: commandNow,
       target: { sourceArtifact: targetValue.sourceArtifact, sourceSha256: targetValue.sourceSha256, exactVersion: targetValue.exactVersion, major: targetValue.major },
-      rawVersionOutput: syntheticRawVersion(mapping.product, targetValue.exactVersion), observed: { exactVersion: targetValue.exactVersion, major: targetValue.major },
+      ...(windowsCapture ? { binaryProvenance: syntheticBinaryProvenance(mapping, targetValue.exactVersion) } : { rawVersionOutput: syntheticRawVersion(mapping.product, targetValue.exactVersion) }),
+      observed: { exactVersion: targetValue.exactVersion, major: targetValue.major },
     };
+    captureReceipt(capture, "synthetic capture", mapping, targetValue, context);
     const captureBytes = Buffer.from(jsonText(capture));
     await writeAtomic(absolute(repoRoot, mapping.capture), captureBytes);
     const checks = browserCheckIds.map((id) => ({ id, status: "passed", notes: "fixture" }));
@@ -1620,8 +1903,19 @@ async function expectThrows(action, name) {
   fail(`Self-test expected rejection: ${name}`);
 }
 
+async function expectThrowsMessage(action, expected, name) {
+  try {
+    await action();
+  } catch (error) {
+    equal(error instanceof Error ? error.message : String(error), expected, name);
+    return;
+  }
+  fail(`Self-test expected rejection: ${name}`);
+}
+
 function engineChildStub(mode) {
-  return (_executable, _args, options) => {
+  return (_executable, args, options) => {
+    if (!args.includes("--workers=1") || !args.includes("--retries=0")) fail("Engine producer did not pin one worker and zero retries");
     const child = new EventEmitter();
     queueMicrotask(async () => {
       try {
@@ -1649,6 +1943,197 @@ function engineChildStub(mode) {
     });
     return child;
   };
+}
+
+function windowsMetadataFixture(fixture, productVersion) {
+  return {
+    path: fixture.executable,
+    productName: fixture.productName,
+    productVersion,
+    authenticodeStatus: "Valid",
+    publisher: fixture.publisher,
+    bytes: fixture.bytes,
+    sha256: fixture.sha256,
+  };
+}
+
+const expectedWindowsMetadataScript = [
+  "$ErrorActionPreference = 'Stop'",
+  "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)",
+  `$LiteralPath = [Environment]::GetEnvironmentVariable('${windowsMetadataPathEnvironment}')`,
+  "if ([string]::IsNullOrWhiteSpace($LiteralPath)) { throw 'Browser executable path is missing' }",
+  "$file = Get-Item -LiteralPath $LiteralPath",
+  "if ($file.PSIsContainer) { throw 'Browser executable path is not a file' }",
+  "$signature = Get-AuthenticodeSignature -LiteralPath $LiteralPath",
+  "$version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($file.FullName)",
+  "[PSCustomObject]@{ path = $file.FullName; productName = $version.ProductName; productVersion = $version.ProductVersion; authenticodeStatus = [string]$signature.Status; publisher = if ($null -eq $signature.SignerCertificate) { $null } else { $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) }; bytes = [long]$file.Length; sha256 = (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json -Compress",
+].join("; ");
+
+function windowsCaptureChildStub({ executable, environment, metadata, profileRoot, metadataExitCode = 0, metadataDelayMilliseconds = 0, launchError = null, launchExitCode = null, launchExitDelayMilliseconds = 0 }) {
+  let calls = 0;
+  let unrefs = 0;
+  let metadataSignal;
+  let launchSignal;
+  const expectedMetadataArgs = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"];
+  const expectedLaunchArgs = [
+    `--user-data-dir=${resolve(profileRoot, environment, metadata?.sha256 ?? "missing")}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "http://127.0.0.1:8787/",
+  ];
+  const spawnStub = (command, args, options) => {
+    calls += 1;
+    if (calls === 1) {
+      if (!/(?:^|[\\/])powershell\.exe$/iu.test(command)) fail("Windows branded capture did not query PE metadata with Windows PowerShell");
+      if (JSON.stringify(args) !== JSON.stringify(expectedMetadataArgs)) fail("Windows metadata command arguments are not fixed");
+      if (options.shell !== false || options.windowsHide !== true || options.signal === undefined) fail("Windows metadata command spawn options are invalid");
+      metadataSignal = options.signal;
+      equal(options.env.CFPB_BROWSER_EXECUTABLE_LITERAL, executable, "Windows metadata literal path environment");
+      if (Object.keys(options.env).some((key) => key.toLowerCase() === "psmodulepath")) fail("Windows metadata command inherited PSModulePath");
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = {
+        end(script) {
+          if (typeof script !== "string" || script.includes(executable)) fail("Windows metadata command interpolated the executable path");
+          equal(script, `${expectedWindowsMetadataScript}\n`, "Windows metadata stdin script");
+          const complete = () => {
+            if (metadata !== undefined) child.stdout.emit("data", Buffer.from(`${typeof metadata === "string" ? metadata : JSON.stringify(metadata)}\r\n`));
+            child.emit("close", metadataExitCode);
+          };
+          if (metadataDelayMilliseconds === 0) {
+            queueMicrotask(complete);
+          } else {
+            const timer = setTimeout(complete, metadataDelayMilliseconds);
+            options.signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              child.emit("error", Object.assign(new Error("aborted"), { name: "AbortError" }));
+            }, { once: true });
+          }
+        },
+      };
+      return child;
+    }
+    if (calls === 2) {
+      equal(command, executable, "isolated Windows browser launch executable");
+      if (JSON.stringify(args) !== JSON.stringify(expectedLaunchArgs)) fail("isolated Windows browser launch arguments are invalid");
+      if (options.shell !== false || options.detached !== true || options.stdio !== "ignore" || options.signal === undefined) fail("isolated Windows browser launch options are invalid");
+      launchSignal = options.signal;
+      const child = new EventEmitter();
+      child.unref = () => { unrefs += 1; };
+      queueMicrotask(() => {
+        child.emit(launchError === null ? "spawn" : "error", launchError);
+        if (launchError === null && launchExitCode !== null) {
+          setTimeout(() => child.emit("close", launchExitCode), launchExitDelayMilliseconds);
+        }
+      });
+      return child;
+    }
+    fail("Windows branded capture spawned an unexpected process");
+  };
+  spawnStub.assertCalls = (expected, expectedUnrefs = expected === 2 && launchError === null && launchExitCode === null ? 1 : 0) => {
+    equal(calls, expected, "Windows branded capture process count");
+    equal(unrefs, expectedUnrefs, "Windows branded capture unref count");
+  };
+  spawnStub.assertMetadataAborted = () => equal(metadataSignal?.aborted, true, "Windows metadata command shares the capture deadline signal");
+  spawnStub.assertLaunchAborted = () => equal(launchSignal?.aborted, true, "Windows browser launch shares the capture deadline signal");
+  return spawnStub;
+}
+
+function firefoxCaptureChildStub({ executable, exactVersion, environment, profileRoot, versionDelayMilliseconds = 0, launchExitCode = null }) {
+  let calls = 0;
+  let unrefs = 0;
+  let versionSignal;
+  let launchSignal;
+  const spawnStub = (command, args, options) => {
+    calls += 1;
+    if (calls === 1) {
+      equal(command, executable, "Firefox version executable");
+      if (JSON.stringify(args) !== JSON.stringify(["--version"]) || options.shell !== false || options.signal === undefined) fail("Firefox version command changed");
+      versionSignal = options.signal;
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      const complete = () => {
+        child.stdout.emit("data", Buffer.from(`Mozilla Firefox ${exactVersion}\n`));
+        child.emit("close", 0);
+      };
+      if (versionDelayMilliseconds === 0) {
+        queueMicrotask(complete);
+      } else {
+        const timer = setTimeout(complete, versionDelayMilliseconds);
+        options.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          child.emit("error", Object.assign(new Error("aborted"), { name: "AbortError" }));
+        }, { once: true });
+      }
+      return child;
+    }
+    if (calls === 2) {
+      equal(command, executable, "Firefox launch executable");
+      const expectedArgs = [
+        "-wait-for-browser",
+        "-no-remote",
+        "-profile",
+        resolve(profileRoot, environment, exactVersion),
+        "http://127.0.0.1:8787/",
+      ];
+      if (JSON.stringify(args) !== JSON.stringify(expectedArgs) || options.shell !== false || options.detached !== true || options.stdio !== "ignore" || options.signal === undefined) fail("Firefox launch is not isolated by exact version");
+      launchSignal = options.signal;
+      const child = new EventEmitter();
+      child.unref = () => { unrefs += 1; };
+      queueMicrotask(() => {
+        child.emit("spawn");
+        if (launchExitCode !== null) child.emit("close", launchExitCode);
+      });
+      return child;
+    }
+    fail("Firefox capture spawned an unexpected process");
+  };
+  spawnStub.assertCalls = (expected = 2, expectedUnrefs = expected === 2 ? 1 : 0) => {
+    equal(calls, expected, "Firefox capture process count");
+    equal(unrefs, expectedUnrefs, "Firefox capture unref count");
+  };
+  spawnStub.assertVersionAborted = () => equal(versionSignal?.aborted, true, "Firefox version command shares the capture deadline signal");
+  spawnStub.assertLaunchAborted = () => equal(launchSignal?.aborted, true, "Firefox launch shares the capture deadline signal");
+  return spawnStub;
+}
+
+function safariCaptureChildStub(exactVersion, launchDelayMilliseconds = 0) {
+  let calls = 0;
+  let launchSignal;
+  const spawnStub = (command, args, options) => {
+    calls += 1;
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    queueMicrotask(() => {
+      if (calls === 1) {
+        equal(command, "/usr/bin/safaridriver", "Safari version executable");
+        if (JSON.stringify(args) !== JSON.stringify(["--version"]) || options.shell !== false || options.signal === undefined) fail("Safari version command changed");
+        child.stdout.emit("data", Buffer.from(`Included with Safari ${exactVersion}\n`));
+      } else if (calls === 2) {
+        equal(command, "/usr/bin/open", "Safari launcher executable");
+        if (JSON.stringify(args) !== JSON.stringify(["-a", "Safari", "http://127.0.0.1:8787/"]) || options.shell !== false || options.signal === undefined) fail("Safari launcher command changed");
+        launchSignal = options.signal;
+        if (launchDelayMilliseconds > 0) {
+          const timer = setTimeout(() => child.emit("close", 0), launchDelayMilliseconds);
+          launchSignal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            child.emit("error", Object.assign(new Error("aborted"), { name: "AbortError" }));
+          }, { once: true });
+          return;
+        }
+      } else {
+        fail("Safari capture spawned an unexpected process");
+      }
+      child.emit("close", 0);
+    });
+    return child;
+  };
+  spawnStub.assertCalls = () => equal(calls, 2, "Safari capture process count");
+  spawnStub.assertLaunchAborted = () => equal(launchSignal?.aborted, true, "Safari launcher shares the capture deadline signal");
+  return spawnStub;
 }
 
 async function producerEngineSelfTest(repoRoot, oneCallClock) {
@@ -1683,6 +2168,8 @@ async function producerEngineSelfTest(repoRoot, oneCallClock) {
 
 async function browserSelfTest() {
   const dir = await mkdtemp(resolve(tmpdir(), "cfpb-browser-evidence-"));
+  const profileRoot = resolve(dir, "profiles");
+  if (relative(dir, profileRoot) !== "profiles") fail("Self-test profiles must stay inside the disposable fixture");
   const oneCallClock = () => {
     let calls = 0;
     return () => {
@@ -1692,6 +2179,548 @@ async function browserSelfTest() {
     };
   };
   try {
+    await expectThrowsMessage(
+      () => captureBrowserForPlatform({ repoRoot: resolve(dir, "wrong-firefox-platform"), releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: "windows-firefox-current", executableEnv: "CFPB_SELF_TEST_WRONG_PLATFORM", clock: oneCallClock(), platform: "linux", profileRoot }),
+      "Firefox capture requires win32",
+      "Firefox capture rejects a non-Windows runner",
+    );
+    await expectThrowsMessage(
+      () => captureSafariForPlatform({ repoRoot: resolve(dir, "wrong-safari-platform"), releaseDate: "2026-09-13", slot: "current", environment: "macos-safari-current", clock: oneCallClock(), platform: "win32" }),
+      "Safari capture requires darwin",
+      "Safari capture rejects a non-macOS runner",
+    );
+    if (process.platform === "win32") {
+      const executableEnv = "CFPB_SELF_TEST_PUBLIC_PLATFORM_EXECUTABLE";
+      const previous = process.env[executableEnv];
+      delete process.env[executableEnv];
+      try {
+        await expectThrowsMessage(
+          () => captureBrowser({ repoRoot: resolve(dir, "public-platform-browser"), releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: "windows-firefox-current", executableEnv, clock: oneCallClock(), platform: "linux" }),
+          `${executableEnv} must be a nonempty string`,
+          "Public browser capture ignores a spoofed platform",
+        );
+        await expectThrowsMessage(
+          () => captureSafari({ repoRoot: resolve(dir, "public-platform-safari"), releaseDate: "2026-09-13", slot: "current", environment: "macos-safari-current", clock: oneCallClock(), platform: "darwin" }),
+          "Safari capture requires darwin",
+          "Public Safari capture ignores a spoofed platform",
+        );
+      } finally {
+        if (previous === undefined) delete process.env[executableEnv]; else process.env[executableEnv] = previous;
+      }
+    } else {
+      await expectThrowsMessage(
+        () => captureBrowser({ repoRoot: resolve(dir, "public-platform-browser"), releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: "windows-firefox-current", executableEnv: "CFPB_SELF_TEST_PUBLIC_PLATFORM_EXECUTABLE", clock: oneCallClock(), platform: "win32" }),
+        "Firefox capture requires win32",
+        "Public browser capture uses the actual non-Windows platform",
+      );
+      if (process.platform !== "darwin") {
+        await expectThrowsMessage(
+          () => captureSafari({ repoRoot: resolve(dir, "public-platform-safari"), releaseDate: "2026-09-13", slot: "current", environment: "macos-safari-current", clock: oneCallClock(), platform: "darwin" }),
+          "Safari capture requires darwin",
+          "Public Safari capture uses the actual non-macOS platform",
+        );
+      } else {
+        const repoRoot = resolve(dir, "public-platform-safari-darwin");
+        const campaign = await createSyntheticCampaign(repoRoot);
+        const mapping = browserMappings["Safari/current"];
+        for (const path of [mapping.capture, mapping.smoke, mapping.unavailable]) await rm(absolute(repoRoot, path), { force: true });
+        const spawnImpl = safariCaptureChildStub(campaign.derived.Safari.current.exactVersion);
+        await captureSafari({ repoRoot, releaseDate: "2026-09-13", slot: "current", environment: mapping.environment, clock: oneCallClock(), spawnImpl, platform: "win32" });
+        spawnImpl.assertCalls();
+      }
+    }
+
+    const deadlineContext = contextFor("2026-09-13", "2026-09-13T12:00:00.000Z");
+    await expectThrowsMessage(
+      () => Promise.race([
+        deadlineOperation(deadlineContext, () => new Promise(() => {}), { deadlineMilliseconds: 10 }),
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error("deadlineOperation remained pending")), 200)),
+      ]),
+      "Evidence operation deadline expired",
+      "Evidence deadline rejects an action that never settles",
+    );
+    await expectThrowsMessage(
+      () => deadlineOperation(deadlineContext, async () => {
+        const blockedUntil = performance.now() + 30;
+        while (performance.now() < blockedUntil) {}
+      }, { deadlineMilliseconds: 5 }),
+      "Evidence operation deadline expired",
+      "Evidence deadline detects event-loop blocking from elapsed monotonic time",
+    );
+
+    const delayedReadPath = resolve(dir, "deadline-read.txt");
+    await writeFile(delayedReadPath, "fixture");
+    await expectThrowsMessage(
+      () => deadlineOperation(deadlineContext, (signal, checkpoint) => readBytes(dir, "deadline-read.txt", {
+        signal,
+        checkpoint,
+        readFileImpl: async (path, options) => {
+          equal(options?.signal, signal, "deadline read signal");
+          const blockedUntil = performance.now() + 30;
+          while (performance.now() < blockedUntil) {}
+          return readFile(path, options);
+        },
+      }), { deadlineMilliseconds: 5 }),
+      "Evidence operation deadline expired",
+      "Evidence deadline spans a delayed filesystem read",
+    );
+
+    for (const capture of ["browser", "safari"]) {
+      const repoRoot = resolve(dir, `capture-read-deadline-${capture}`);
+      await createSyntheticCampaign(repoRoot);
+      const product = capture === "browser" ? "Firefox" : "Safari";
+      const mapping = browserMappings[`${product}/current`];
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      if (mapping.unavailable !== null) await rm(absolute(repoRoot, mapping.unavailable), { force: true });
+      let readSignal;
+      const delayedRead = async (path, options) => {
+        readSignal = options?.signal;
+        if (readSignal === undefined) fail(`${product} capture read has no AbortSignal`);
+        await new Promise((_resolve, reject) => {
+          if (readSignal.aborted) {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            return;
+          }
+          readSignal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+        });
+        return readFile(path, options);
+      };
+      const executableEnv = "CFPB_SELF_TEST_READ_DEADLINE_EXECUTABLE";
+      if (capture === "browser") process.env[executableEnv] = "C:\\Pinned Browsers\\Firefox\\current\\firefox.exe";
+      try {
+        await expectThrowsMessage(
+          () => capture === "browser"
+            ? captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product, slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), platform: "win32", profileRoot, readFileImpl: delayedRead, deadlineMilliseconds: 20 })
+            : captureSafariForPlatform({ repoRoot, releaseDate: "2026-09-13", slot: "current", environment: mapping.environment, clock: oneCallClock(), platform: "darwin", readFileImpl: delayedRead, deadlineMilliseconds: 20 }),
+          "Evidence operation deadline expired",
+          `${product} capture deadline aborts an in-flight read`,
+        );
+        equal(readSignal?.aborted, true, `${product} capture read shares the deadline signal`);
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, `${product} read deadline leaves no receipt`);
+      } finally {
+        if (capture === "browser") delete process.env[executableEnv];
+      }
+    }
+
+    const delayedCommitPath = resolve(dir, "deadline-commit.json");
+    await expectThrowsMessage(
+      () => deadlineOperation(deadlineContext, (signal, checkpoint) => writeAtomic(delayedCommitPath, "fixture", {
+        signal,
+        checkpoint,
+        operations: {
+          mkdir,
+          writeFile,
+          rename: async (...args) => {
+            await rename(...args);
+            await new Promise(() => {});
+          },
+          renameSync: (...args) => {
+            renameSync(...args);
+            const blockedUntil = performance.now() + 30;
+            while (performance.now() < blockedUntil) {}
+          },
+          rm,
+          rmSync,
+        },
+      }), { deadlineMilliseconds: 5 }),
+      "Evidence operation deadline expired",
+      "Evidence deadline spans atomic receipt commit",
+    );
+    equal(existsSync(delayedCommitPath), false, "expired atomic receipt commit leaves no receipt");
+
+    const windowsCaptureCases = [
+      { product: "Chrome", slot: "current", executable: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", productName: "Google Chrome", publisher: "Google LLC", bytes: 3_456_789, sha256: "1".repeat(64) },
+      { product: "Chrome", slot: "previous", executable: "C:\\Pinned Browsers\\Chrome\\previous\\chrome.exe", productName: "Google Chrome", publisher: "Google LLC", bytes: 3_456_788, sha256: "2".repeat(64) },
+      { product: "Edge", slot: "current", executable: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", productName: "Microsoft Edge", publisher: "Microsoft Corporation", bytes: 5_418_312, sha256: "3".repeat(64) },
+      { product: "Edge", slot: "previous", executable: "C:\\Pinned Browsers\\Edge\\previous\\msedge.exe", productName: "Microsoft Edge", publisher: "Microsoft Corporation", bytes: 5_418_311, sha256: "4".repeat(64) },
+    ];
+    {
+      const fixture = windowsCaptureCases[0];
+      const barePowerShellStub = windowsCaptureChildStub({ executable: fixture.executable, environment: "windows-chrome-current", metadata: fixture, profileRoot });
+      barePowerShellStub("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"], {
+        shell: false,
+        windowsHide: true,
+        signal: new AbortController().signal,
+        env: { CFPB_BROWSER_EXECUTABLE_LITERAL: fixture.executable },
+      });
+      barePowerShellStub.assertCalls(1);
+    }
+    for (const [index, fixture] of windowsCaptureCases.entries()) {
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, `windows-capture-${index}`);
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const exactVersion = campaign.derived[fixture.product][fixture.slot].exactVersion;
+      const metadata = windowsMetadataFixture(fixture, exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = `CFPB_SELF_TEST_${fixture.product.toUpperCase()}_${fixture.slot.toUpperCase()}_EXECUTABLE`;
+      const priorExecutable = process.env[executableEnv];
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, profileRoot });
+        const receipt = await captureBrowserForPlatform({
+          repoRoot,
+          releaseDate: "2026-09-13",
+          product: fixture.product,
+          slot: fixture.slot,
+          environment: mapping.environment,
+          executableEnv,
+          clock: oneCallClock(),
+          spawnImpl,
+          platform: "win32",
+          profileRoot,
+        });
+        spawnImpl.assertCalls(2);
+        equal(receipt.schemaVersion, 2, `${fixture.product}/${fixture.slot} Windows capture schema`);
+        const expectedProvenance = { extractionMethod: "windows-powershell-authenticode-fileversion-v1", ...metadata };
+        if (JSON.stringify(receipt.binaryProvenance) !== JSON.stringify(expectedProvenance)) fail(`${fixture.product}/${fixture.slot} Windows binary provenance differs from PE metadata`);
+        if (Object.hasOwn(receipt, "rawVersionOutput")) fail(`${fixture.product}/${fixture.slot} Windows capture retained direct --version output`);
+      } finally {
+        if (priorExecutable === undefined) delete process.env[executableEnv]; else process.env[executableEnv] = priorExecutable;
+      }
+    }
+
+    const rejectedWindowsMetadata = [
+      ["unsigned binary", (metadata) => { metadata.authenticodeStatus = "NotSigned"; }, 0],
+      ["wrong publisher", (metadata) => { metadata.publisher = "Wrong Publisher"; }, 0],
+      ["wrong product", (metadata) => { metadata.productName = "Wrong Product"; }, 0],
+      ["malformed metadata", (metadata) => { delete metadata.bytes; }, 0],
+      ["path mismatch", (metadata) => { metadata.path = "C:\\Other\\chrome.exe"; }, 0],
+      ["unexpected version", (metadata) => { metadata.productVersion = "121.0.0.0"; }, 0],
+      ["uppercase SHA-256", (metadata) => { metadata.sha256 = "A".repeat(64); }, 0],
+      ["nonzero metadata command", () => {}, 7],
+    ];
+    for (const [index, [name, mutateMetadata, metadataExitCode]] of rejectedWindowsMetadata.entries()) {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, `windows-capture-rejected-${index}`);
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived[fixture.product][fixture.slot].exactVersion);
+      mutateMetadata(metadata);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = `CFPB_SELF_TEST_REJECTED_${index}_EXECUTABLE`;
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata: metadataExitCode === 0 ? metadata : undefined, metadataExitCode, profileRoot });
+        await expectThrows(() => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: fixture.product, slot: fixture.slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot }), `Windows capture rejects ${name}`);
+        spawnImpl.assertCalls(1);
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, `Windows capture ${name} leaves no receipt`);
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, "windows-capture-metadata-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived[fixture.product][fixture.slot].exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_METADATA_DEADLINE_EXECUTABLE";
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, metadataDelayMilliseconds: 200, profileRoot });
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: fixture.product, slot: fixture.slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot, deadlineMilliseconds: 20 }),
+          "Evidence operation deadline expired",
+          "Windows capture deadline aborts the metadata command",
+        );
+        spawnImpl.assertCalls(1);
+        spawnImpl.assertMetadataAborted();
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Windows metadata deadline leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, "windows-capture-launch-failure");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived[fixture.product][fixture.slot].exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_LAUNCH_FAILURE_EXECUTABLE";
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, profileRoot, launchError: new Error("synthetic isolated launch failure") });
+        await expectThrows(() => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: fixture.product, slot: fixture.slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot }), "Windows capture launch failure leaves no receipt");
+        spawnImpl.assertCalls(2);
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Windows capture launch failure leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, "windows-capture-immediate-exit");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived[fixture.product][fixture.slot].exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_IMMEDIATE_EXIT_EXECUTABLE";
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, profileRoot, launchExitCode: 0, launchExitDelayMilliseconds: 900 });
+        await expectThrows(() => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: fixture.product, slot: fixture.slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot }), "Windows capture rejects a browser that exits during launch");
+        spawnImpl.assertCalls(2);
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Windows capture immediate exit leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings[`${fixture.product}/${fixture.slot}`];
+      const repoRoot = resolve(dir, "windows-capture-shared-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived[fixture.product][fixture.slot].exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_SHARED_DEADLINE_EXECUTABLE";
+      process.env[executableEnv] = fixture.executable;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, profileRoot });
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: fixture.product, slot: fixture.slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot, deadlineMilliseconds: 300 }),
+          "Evidence operation deadline expired",
+          "Windows capture deadline spans metadata and launch settling",
+        );
+        spawnImpl.assertCalls(2, 0);
+        spawnImpl.assertLaunchAborted();
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Windows capture deadline leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const fixture = windowsCaptureCases[0];
+      const mapping = browserMappings["Chrome/current"];
+      const repoRoot = resolve(dir, "windows-capture-commit-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const metadata = windowsMetadataFixture(fixture, campaign.derived.Chrome.current.exactVersion);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_WINDOWS_COMMIT_DEADLINE_EXECUTABLE";
+      process.env[executableEnv] = fixture.executable;
+      let writeSignal;
+      let writeCalls = 0;
+      try {
+        const spawnImpl = windowsCaptureChildStub({ executable: fixture.executable, environment: mapping.environment, metadata, profileRoot });
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Chrome", slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot, deadlineMilliseconds: 2_500,
+            writeReceiptImpl: (_path, _bytes, options) => {
+              writeCalls += 1;
+              writeSignal = options.signal;
+              return new Promise((_resolvePromise, reject) => writeSignal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true }));
+            },
+          }),
+          "Evidence operation deadline expired",
+          "Windows capture deadline aborts an in-flight receipt commit",
+        );
+        spawnImpl.assertCalls(2);
+        equal(writeCalls, 1, "Windows capture reaches the receipt commit");
+        equal(writeSignal?.aborted, true, "Windows receipt commit shares the capture deadline signal");
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Windows receipt commit timeout leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const slot = "current";
+      const mapping = browserMappings[`Firefox/${slot}`];
+      const repoRoot = resolve(dir, "firefox-version-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const exactVersion = campaign.derived.Firefox[slot].exactVersion;
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_FIREFOX_VERSION_DEADLINE_EXECUTABLE";
+      const executable = "C:\\Pinned Browsers\\Firefox\\deadline\\firefox.exe";
+      process.env[executableEnv] = executable;
+      try {
+        const spawnImpl = firefoxCaptureChildStub({ executable, exactVersion, environment: mapping.environment, profileRoot, versionDelayMilliseconds: 200 });
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot, deadlineMilliseconds: 20 }),
+          "Evidence operation deadline expired",
+          "Firefox capture deadline aborts the version command",
+        );
+        spawnImpl.assertCalls(1);
+        spawnImpl.assertVersionAborted();
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Firefox version deadline leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const mapping = browserMappings["Firefox/current"];
+      const repoRoot = resolve(dir, "firefox-launch-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_FIREFOX_LAUNCH_DEADLINE_EXECUTABLE";
+      const executable = "C:\\Pinned Browsers\\Firefox\\current\\firefox.exe";
+      process.env[executableEnv] = executable;
+      try {
+        const spawnImpl = firefoxCaptureChildStub({ executable, exactVersion: campaign.derived.Firefox.current.exactVersion, environment: mapping.environment, profileRoot });
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot, deadlineMilliseconds: 300 }),
+          "Evidence operation deadline expired",
+          "Firefox capture deadline aborts the browser launch",
+        );
+        spawnImpl.assertCalls(2, 0);
+        spawnImpl.assertLaunchAborted();
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Firefox launch deadline leaves no receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const mapping = browserMappings["Firefox/current"];
+      const repoRoot = resolve(dir, "firefox-concurrent-capture");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const exactVersion = campaign.derived.Firefox.current.exactVersion;
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_CONCURRENT_CAPTURE_EXECUTABLE";
+      const executable = "C:\\Pinned Browsers\\Firefox\\current\\firefox.exe";
+      process.env[executableEnv] = executable;
+      const firstSpawn = firefoxCaptureChildStub({ executable, exactVersion, environment: mapping.environment, profileRoot, versionDelayMilliseconds: 200 });
+      const secondSpawn = firefoxCaptureChildStub({ executable, exactVersion, environment: mapping.environment, profileRoot });
+      let versionStarted;
+      const enteredVersion = new Promise((resolvePromise) => { versionStarted = resolvePromise; });
+      const first = captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl: (...args) => {
+        const child = firstSpawn(...args);
+        if (args[1][0] === "--version") versionStarted();
+        return child;
+      }, platform: "win32", profileRoot, deadlineMilliseconds: 2_000 });
+      try {
+        await enteredVersion;
+        await expectThrowsMessage(
+          () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl: secondSpawn, platform: "win32", profileRoot, deadlineMilliseconds: 2_000 }),
+          `Evidence lock is held: ${mapping.capture}.lock`,
+          "Concurrent capture cannot overwrite another capture's receipt",
+        );
+        secondSpawn.assertCalls(0);
+        await first;
+        equal(existsSync(absolute(repoRoot, mapping.capture)), true, "concurrent capture preserves the first receipt");
+      } finally {
+        await Promise.allSettled([first]);
+        delete process.env[executableEnv];
+      }
+    }
+
+    for (const slot of slots) {
+      const mapping = browserMappings[`Firefox/${slot}`];
+      const repoRoot = resolve(dir, `firefox-capture-${slot}`);
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const exactVersion = campaign.derived.Firefox[slot].exactVersion;
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = `CFPB_SELF_TEST_FIREFOX_${slot.toUpperCase()}_EXECUTABLE`;
+      const executable = `C:\\Pinned Browsers\\Firefox\\${slot}\\firefox.exe`;
+      process.env[executableEnv] = executable;
+      try {
+        const spawnImpl = firefoxCaptureChildStub({ executable, exactVersion, environment: mapping.environment, profileRoot });
+        const receipt = await captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot, environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot });
+        spawnImpl.assertCalls();
+        equal(receipt.schemaVersion, 1, `Firefox/${slot} direct version capture schema`);
+        if (JSON.stringify(receipt.rawVersionOutput) !== JSON.stringify(syntheticRawVersion("Firefox", exactVersion))) fail(`Firefox/${slot} direct version output changed`);
+        if (Object.hasOwn(receipt, "binaryProvenance")) fail(`Firefox/${slot} capture inherited Windows binary provenance`);
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const mapping = browserMappings["Firefox/current"];
+      const repoRoot = resolve(dir, "firefox-launch-early-exit");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      await rm(absolute(repoRoot, mapping.capture), { force: true });
+      await rm(absolute(repoRoot, mapping.smoke), { force: true });
+      const executableEnv = "CFPB_SELF_TEST_FIREFOX_EARLY_EXIT_EXECUTABLE";
+      const executable = "C:\\Pinned Browsers\\Firefox\\current\\firefox.exe";
+      process.env[executableEnv] = executable;
+      try {
+        const spawnImpl = firefoxCaptureChildStub({ executable, exactVersion: campaign.derived.Firefox.current.exactVersion, environment: mapping.environment, profileRoot, launchExitCode: 0 });
+        const capture = () => captureBrowserForPlatform({ repoRoot, releaseDate: "2026-09-13", product: "Firefox", slot: "current", environment: mapping.environment, executableEnv, clock: oneCallClock(), spawnImpl, platform: "win32", profileRoot });
+        await expectThrows(capture, "Firefox launch that exits before settle is rejected");
+        spawnImpl.assertCalls(2, 0);
+        equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Firefox early-exit cannot write a receipt");
+      } finally {
+        delete process.env[executableEnv];
+      }
+    }
+
+    {
+      const mapping = browserMappings["Safari/current"];
+      const repoRoot = resolve(dir, "safari-capture");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      const exactVersion = campaign.derived.Safari.current.exactVersion;
+      for (const path of [mapping.capture, mapping.smoke, mapping.unavailable]) await rm(absolute(repoRoot, path), { force: true });
+      const spawnImpl = safariCaptureChildStub(exactVersion);
+      const receipt = await captureSafariForPlatform({ repoRoot, releaseDate: "2026-09-13", slot: "current", environment: mapping.environment, clock: oneCallClock(), spawnImpl, platform: "darwin" });
+      spawnImpl.assertCalls();
+      equal(receipt.schemaVersion, 1, "Safari launcher success capture schema");
+      equal(existsSync(absolute(repoRoot, mapping.capture)), true, "Safari launcher success writes capture receipt");
+    }
+
+    {
+      const mapping = browserMappings["Safari/current"];
+      const repoRoot = resolve(dir, "safari-launch-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      for (const path of [mapping.capture, mapping.smoke, mapping.unavailable]) await rm(absolute(repoRoot, path), { force: true });
+      const spawnImpl = safariCaptureChildStub(campaign.derived.Safari.current.exactVersion, 1_500);
+      await expectThrowsMessage(
+        () => captureSafariForPlatform({ repoRoot, releaseDate: "2026-09-13", slot: "current", environment: mapping.environment, clock: oneCallClock(), spawnImpl, platform: "darwin", deadlineMilliseconds: 300 }),
+        "Evidence operation deadline expired",
+        "Safari capture deadline aborts the launcher",
+      );
+      spawnImpl.assertCalls();
+      spawnImpl.assertLaunchAborted();
+      equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Safari launch deadline leaves no receipt");
+    }
+
+    {
+      const mapping = browserMappings["Safari/current"];
+      const repoRoot = resolve(dir, "safari-capture-commit-deadline");
+      const campaign = await createSyntheticCampaign(repoRoot);
+      for (const path of [mapping.capture, mapping.smoke, mapping.unavailable]) await rm(absolute(repoRoot, path), { force: true });
+      let writeSignal;
+      let writeCalls = 0;
+      await expectThrowsMessage(
+        () => captureSafariForPlatform({ repoRoot, releaseDate: "2026-09-13", slot: "current", environment: mapping.environment, clock: oneCallClock(), spawnImpl: safariCaptureChildStub(campaign.derived.Safari.current.exactVersion), platform: "darwin", deadlineMilliseconds: 300,
+          writeReceiptImpl: (path, contents, options) => writeAtomic(path, contents, { ...options, operations: {
+            mkdir,
+            writeFile: (_temporary, _contents, writeOptions) => {
+              writeCalls += 1;
+              writeSignal = writeOptions.signal;
+              return new Promise((_resolvePromise, reject) => writeSignal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true }));
+            },
+            renameSync,
+            rm,
+            rmSync,
+          } }),
+        }),
+        "Evidence operation deadline expired",
+        "Safari capture deadline aborts an in-flight receipt write",
+      );
+      equal(writeCalls, 1, "Safari capture reaches the receipt commit");
+      equal(writeSignal?.aborted, true, "Safari receipt write shares the capture deadline signal");
+      equal(existsSync(absolute(repoRoot, mapping.capture)), false, "Safari receipt write timeout leaves no receipt");
+    }
+
     const retrievedAt = "2026-09-13T12:00:00.000Z";
     const chromeGoogleTimestampCases = [
       { source: "2026-09-10T01:02:03Z", canonical: "2026-09-10T01:02:03.000Z" },
@@ -1836,6 +2865,77 @@ async function browserSelfTest() {
     if (expiredLaterVendorFailure === undefined) fail("Self-test expected rejection: Acquire targets deadline spans later vendors");
     equal(expiredLaterVendorFailure instanceof Error ? expiredLaterVendorFailure.message : String(expiredLaterVendorFailure), "Evidence operation deadline expired", "Acquire targets deadline spans later vendors");
     equal(existsSync(expiredLaterVendorRoot), false, "Acquire targets deadline across vendors performs no writes");
+
+    const delayedStageRoot = resolve(dir, "acquisition-staging-deadline");
+    await createSyntheticCampaign(delayedStageRoot);
+    const campaignPaths = [...productNames.map((product) => sourceConfigurations[product].artifact), matrixPath, accessibilityPath];
+    const oldCampaignBytes = await Promise.all(campaignPaths.map((path) => readFile(absolute(delayedStageRoot, path))));
+    let stagingStarted = false;
+    await expectThrowsMessage(() => acquireTargets({
+      repoRoot: delayedStageRoot,
+      releaseDate: "2026-09-13",
+      clock: oneCallClock(),
+      deadlineMilliseconds: 200,
+      fetchImpl: queuedFetch(new Map([
+        [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+        [chromeContinuationUrl, [{ status: 200, body: chromeContinuationBody }]],
+        ...vendorResponses.map(([url, body]) => [url, [{ status: 200, body }]]),
+      ]), []),
+      stageImpl: async (path, contents, operation) => {
+        stagingStarted = true;
+        const signal = operation?.signal;
+        if (signal === undefined) fail("Acquisition staging has no shared deadline signal");
+        await new Promise((resolvePromise) => {
+          if (signal.aborted) resolvePromise();
+          else signal.addEventListener("abort", resolvePromise, { once: true });
+        });
+        return stage(path, contents, operation);
+      },
+    }), "Evidence operation deadline expired", "Acquire targets deadline spans asynchronous staging");
+    equal(stagingStarted, true, "Acquisition reached post-fetch staging before deadline");
+    for (const [index, path] of campaignPaths.entries()) {
+      equal(Buffer.compare(await readFile(absolute(delayedStageRoot, path)), oldCampaignBytes[index]), 0, `${path} unchanged after staging deadline`);
+    }
+    for (const path of [
+      ...Object.values(browserMappings).flatMap((mapping) => [mapping.capture, mapping.smoke]),
+      ...Object.values(engineMappings).flatMap((mapping) => [mapping.report, mapping.observation, mapping.receipt]),
+    ]) equal(existsSync(absolute(delayedStageRoot, path)), true, `${path} retained after staging deadline`);
+
+    const stagedThenBlockedRoot = resolve(dir, "acquisition-staged-then-blocked");
+    let firstTemporary;
+    let laterStageBlocked = false;
+    let watchdog;
+    try {
+      await expectThrowsMessage(() => Promise.race([
+        acquireTargets({
+          repoRoot: stagedThenBlockedRoot,
+          releaseDate: "2026-09-13",
+          clock: oneCallClock(),
+          deadlineMilliseconds: 200,
+          fetchImpl: queuedFetch(new Map([
+            [sourceConfigurations.Chrome.url, [{ status: 200, body: chromeFirstBody }]],
+            [chromeContinuationUrl, [{ status: 200, body: chromeContinuationBody }]],
+            ...vendorResponses.map(([url, body]) => [url, [{ status: 200, body }]]),
+          ]), []),
+          stageImpl: async (path, contents, operation) => {
+            if (firstTemporary === undefined) {
+              const staged = await stage(path, contents, operation);
+              firstTemporary = staged.temporary;
+              return staged;
+            }
+            laterStageBlocked = true;
+            equal(existsSync(firstTemporary), true, "First source scratch exists when later staging blocks");
+            return new Promise(() => {});
+          },
+        }),
+        new Promise((_resolve, reject) => { watchdog = setTimeout(() => reject(new Error("acquireTargets remained pending")), 1000); }),
+      ]), "Evidence operation deadline expired", "Acquire targets deadline rejects blocked later staging");
+    } finally {
+      clearTimeout(watchdog);
+    }
+    equal(laterStageBlocked, true, "Acquisition reached later staging after first source was staged");
+    equal(existsSync(firstTemporary), false, "Acquisition deadline removes earlier source scratch before rejection");
+    equal(existsSync(absolute(stagedThenBlockedRoot, sourceConfigurations.Chrome.artifact)), false, "Acquisition deadline does not commit staged source");
 
     const acquisitionRoot = resolve(dir, "acquisition");
     const acquisitionCalls = [];
