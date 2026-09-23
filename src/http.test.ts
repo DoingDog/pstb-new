@@ -214,7 +214,7 @@ describe("HTTP slice 1", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
-    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("cache-control")).toBe("no-store, no-transform");
     expect(response.headers.get("location")).toBe(`/${id}`);
     const paste = await response.json() as PasteSummary;
     expect(response.headers.get("etag")).toBe(`"${paste.version}"`);
@@ -496,7 +496,7 @@ describe("HTTP slice 1", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
-    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("cache-control")).toBe("no-store, no-transform");
     const result = await response.json() as MutationResult;
     expect(response.headers.get("etag")).toBe(`"${result.paste.version}"`);
     expect(result).toMatchObject({ changed: true, paste: { id, contentBytes: 11, protected: true } });

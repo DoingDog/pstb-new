@@ -591,7 +591,7 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
     return {
       paste,
       autosave,
-      contentRecoveryAllowed: (paste.mutation.state === "idle" || paste.mutation.state === "content-reconciliation") && (runtime.lastIntent?.kind === "content" || autosave.draft !== autosave.acceptedSource),
+      contentRecoveryAllowed: (paste.mutation.state === "idle" || paste.mutation.state === "content-reconciliation" || (paste.mutation.state === "in-flight" && paste.mutation.intent.kind === "content")) && (runtime.lastIntent?.kind === "content" || autosave.draft !== autosave.acceptedSource),
       records: { ...runtime.records, autosave: { ...runtime.records.autosave }, autosync: { ...runtime.records.autosync }, network: { ...runtime.records.network }, lastAction: paste.lastAction },
       history: shallowHistory(runtime),
       settings: {

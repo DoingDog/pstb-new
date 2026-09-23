@@ -3374,6 +3374,37 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(new URL(reads[1]!, location.href).searchParams.get("password")).toBe("replacement");
   });
 
+  it("keeps the replacement credential across an uncertain content Retry before Reconcile", async () => {
+    vi.useFakeTimers();
+    let writes = 0;
+    const reads: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return ++writes === 1 ? errorResponse(403, "FORBIDDEN") : uncertainWriteResponse();
+      reads.push(String(input));
+      return errorResponse(403, "FORBIDDEN");
+    }));
+    const rendered = await mountOrdinary("initial", "old");
+    await selectTab(rendered, "Edit");
+    await act(async () => {
+      const textarea = rendered.querySelector<HTMLTextAreaElement>("textarea")!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "unsaved draft");
+      const input = new Event("input", { bubbles: true });
+      Object.defineProperty(input, "timeStamp", { value: 0 });
+      textarea.dispatchEvent(input);
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    const recovery = rendered.querySelector('section[aria-label="Autosave"]');
+    await vi.waitFor(() => expect(recovery?.querySelector('input[name="contentRetryCredential"]')).not.toBeNull());
+    await setInput(recovery, 'input[name="contentRetryCredential"]', "replacement");
+    await clickButton(recovery, "Retry");
+    await vi.waitFor(() => expect(writes).toBe(2));
+    await vi.waitFor(() => expect(rendered.querySelector('section[aria-label="Autosave"] button')).not.toBeNull());
+    await clickButton(rendered.querySelector('section[aria-label="Autosave"]'), "Reconcile");
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    expect(new URL(reads[0]!, location.href).searchParams.get("password")).toBe("replacement");
+  });
+
   it("clears a rejected ContentRecovery credential before a blank Reconcile", async () => {
     vi.useFakeTimers();
     const reads: string[] = [];

@@ -646,7 +646,7 @@ async function parseCreate(request: Request): Promise<CreateInput> {
 
 function jsonResponseHeaders(headers?: HeadersInit): Headers {
   const responseHeaders = new Headers({
-    "Cache-Control": "no-store",
+    "Cache-Control": "no-store, no-transform",
     "Content-Type": "application/json; charset=utf-8",
   });
   if (headers !== undefined) {
@@ -910,7 +910,7 @@ export function createHttpApp(env: Env): Hono {
     const error = pastePathError(context.req.raw);
     if (error !== undefined) return routeErrorResponse(context.req.raw, error);
     await next();
-    context.res.headers.set("Cache-Control", "no-store");
+    if (context.res.headers.get("Cache-Control") !== "no-store, no-transform") context.res.headers.set("Cache-Control", "no-store");
   });
 
   app.onError((error) => errorResponse(isPasteError(error) ? error : new PasteError("INTERNAL_ERROR", 500)));

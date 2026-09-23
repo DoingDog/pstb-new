@@ -403,19 +403,21 @@ function isJsonMediaType(value: string | null): boolean {
   return skipOws(value, charset[1]) === value.length;
 }
 
-function isNoStore(value: string | null): boolean {
+function isNoStore(value: string | null, allowNoTransform = false): boolean {
   if (value === null) return false;
   const start = skipOws(value, 0);
   let end = value.length;
   while (end > start && isOws(value[end - 1])) end -= 1;
-  return equalsAsciiIgnoreCase(value.slice(start, end), noStore);
+  const directive = value.slice(start, end);
+  return equalsAsciiIgnoreCase(directive, noStore)
+    || (allowNoTransform && equalsAsciiIgnoreCase(directive, "no-store, no-transform"));
 }
 
 function hasJsonHeaders(response: Response): boolean {
-  return isJsonMediaType(response.headers.get("content-type")) && isNoStore(response.headers.get("cache-control"));
+  return isJsonMediaType(response.headers.get("content-type")) && isNoStore(response.headers.get("cache-control"), true);
 }
 
-async function webkitNormalizedNotModifiedEtag(response: Response, ifNoneMatch: string | null): Promise<`"sha256-${string}"` | null> {
+async function webkitNormalizedNotModifiedEtag(response: Response, ifNoneMatch: string | null, crypto: Pick<Crypto, "subtle">): Promise<`"sha256-${string}"` | null> {
   if (response.status !== 200
     || !isResourceEtag(ifNoneMatch)
     || response.headers.get("etag") !== ifNoneMatch
@@ -425,7 +427,10 @@ async function webkitNormalizedNotModifiedEtag(response: Response, ifNoneMatch: 
     || response.headers.has("trailer")) return null;
 
   try {
-    return (await response.arrayBuffer()).byteLength === 0 ? ifNoneMatch : null;
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength === 0) return ifNoneMatch;
+    if (response.headers.get("content-encoding") !== "gzip") return null;
+    return `"sha256-${base64Url(await crypto.subtle.digest("SHA-256", bytes))}"` === ifNoneMatch ? ifNoneMatch : null;
   } catch {
     return null;
   }
@@ -451,6 +456,7 @@ async function readJson(response: Response): Promise<unknown> {
 
 async function readError(response: Response, mutationMayHaveApplied: boolean): Promise<ApiFailure> {
   try {
+    if (!isNoStore(response.headers.get("cache-control"))) return malformed(response.status, mutationMayHaveApplied);
     const body = await readJson(response);
     return isErrorResponse(body) ? httpFailure(response.status, body.error) : malformed(response.status, mutationMayHaveApplied);
   } catch {
@@ -585,7 +591,7 @@ export function createPasteApi({ fetch, crypto }: ApiDependencies): PasteApi {
         return { kind: "failure", failure: await readError(response, false) };
       }
 
-      const normalizedEtag = await webkitNormalizedNotModifiedEtag(response, input.ifNoneMatch);
+      const normalizedEtag = await webkitNormalizedNotModifiedEtag(response, input.ifNoneMatch, crypto);
       if (normalizedEtag !== null) return { kind: "not-modified", etag: normalizedEtag };
 
       try {

@@ -556,7 +556,7 @@ KV read-then-delete 不建立全球 ownership。两个 region 可能都读到 st
 * JSON request 必须是 `Content-Type: application/json`，允许 `charset=utf-8`。JSON object unknown fields、duplicate JSON keys、wrong primitive type均返回 422。实现使用保留 duplicate-key 信息的 parser 或在 parse 前检测 duplicate keys，不能让后值静默覆盖 credential 或 version。
 * `multipart/form-data` 只用于 create。每个命名 field 必须恰好出现一次，未声明 field 返回 422。
 * API JSON 与 MCP HTTP request wire body 上限 64 MiB；已知 `Content-Length` 先检查，未知长度由 counting stream 检查。content 解码后仍执行 10 MiB 限制。
-* dynamic application shell、API 和 representation response，包括 304 与所有 error，使用 `Cache-Control: no-store`。Vite assets 使用 content-hashed filename 与 `Cache-Control: public, max-age=31536000, immutable`。
+* dynamic application shell、API 和 representation response，包括 304 与所有 error，使用 `Cache-Control: no-store`。带 ETag 的成功 API JSON response 使用 `Cache-Control: no-store, no-transform`，避免 Cloudflare 自动压缩将 strong ETag 改成 weak ETag；304、204 与 error仍只使用 `no-store`。Vite assets 使用 content-hashed filename 与 `Cache-Control: public, max-age=31536000, immutable`。
 * API success/error 为 `application/json; charset=utf-8`。React application shell 和 `/md` document 为 `text/html; charset=utf-8`。除 `/html/:id` 外的 browser HTML response 增加 `X-Content-Type-Options: nosniff`。
 * 注册 route 的 unsupported method 返回 405 并带准确 `Allow`。不存在 route 返回 404。
 * 每个 GET route 都显式支持 HEAD。HEAD 执行 existence、schema、expiry 与 password 校验并返回同 GET 的 status 和 representation headers，不返回 body、不消费 view-once。只有 `GET|HEAD /api/pastes/:id` 为计算 strong response ETag 而序列化 selected representation bytes；其他 HEAD 不生成 representation body。Browser/direct routes `/`、`/:id`、`/raw/:id`、`/html/:id`、`/md/:id`和 `/file/:id`不注册 OPTIONS success；OPTIONS不读取、授权或消费，直接返回405。其准确 `Allow`分别为 `GET,HEAD`、`GET,HEAD,POST`及四个 direct routes的 `GET,HEAD`。API OPTIONS仍按12.5返回204，`/ip-trace` OPTIONS按第14节返回200，`/mcp` OPTIONS按15.1返回204。
@@ -569,7 +569,7 @@ KV read-then-delete 不建立全球 ownership。两个 region 可能都读到 st
 3. 304 不含 body、`Content-Type`、`Content-Length` 或 trailers；它只带当前 `ETag`、`Cache-Control: no-store` 和平台自动 headers。304 不属于 content-bearing read，不创建 history、不 mutation、不消费。
 4. 不匹配或没有 validator 时返回 200 `PasteResource` 和当前 strong ETag。HEAD 使用相同选择与 comparison，匹配可返回 304，不匹配返回 200 headers-only。
 5. View-once resource 完全忽略 `If-None-Match`，包括 malformed value。授权 GET 仍按第 10 节准备完整 200 body并 consume；HEAD 返回普通 200 headers-only且不 consume。conditional header 绝不能把 view-once GET 转为 304、提前证明存在或绕过 consume-on-body semantics。
-6. Authorization、404、storage 503 和 view-once状态判断先于 ordinary validator parse，因此不存在或未授权资源不会通过 validator error暴露额外信息。200、304 和 error全部 `no-store`；不得使用 Cache API 缓存该 route。
+6. Authorization、404、storage 503 和 view-once状态判断先于 ordinary validator parse，因此不存在或未授权资源不会通过 validator error暴露额外信息。200 使用 `no-store, no-transform`，304 和 error只使用 `no-store`；不得使用 Cache API 缓存该 route。
 7. `version`、`contentRevision`、`updatedAt` 仍在 `PasteResource` 中承担 mutation conflict与 stale-order判断。Create/mutation/settings response 中既有 `ETag: "<version>"` 保持 mutation-token语义；只有本 read route 的 ETag 是上述 response validator。
 
 ### 12.2 Browser 与 representation route matrix
@@ -789,7 +789,7 @@ password DELETE strict schema 为 `{password?,version?}`，语义等同 `newPass
 
 | 响应类别 | 必须 headers |
 |---|---|
-| API JSON | `Content-Type: application/json; charset=utf-8`、`Cache-Control: no-store`；create/mutation/settings/history及 `GET|HEAD|POST /api/pastes/:id/read`使用 current-version ETag，只有 `GET|HEAD /api/pastes/:id`使用 strong response ETag |
+| API JSON | `Content-Type: application/json; charset=utf-8`；带 ETag 的成功响应 `Cache-Control: no-store, no-transform`，error为 `no-store`；create/mutation/settings/history及 `GET|HEAD|POST /api/pastes/:id/read`使用 current-version ETag，只有 `GET|HEAD /api/pastes/:id`使用 strong response ETag |
 | API 304 | `ETag`、`Cache-Control: no-store`；无 body、`Content-Type`、`Content-Length` 或 trailers |
 | React application shell | `Content-Type: text/html; charset=utf-8`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、本规格 16.5 的 CSP |
 | raw | `Content-Type: text/plain; charset=utf-8`、`Cache-Control: no-store` |

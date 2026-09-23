@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   expect,
   test,
@@ -66,8 +67,20 @@ function waitForResourceResponse(page: Page, id: string): Promise<Response> {
 
 async function expectConditionalResourceResponse(response: Response, etag: string): Promise<void> {
   expect(response.headers()["etag"]).toBe(etag);
-  expect(response.headers()["cache-control"]).toBe("no-store");
-  if (response.status() === 304) return;
+  const headers = response.headers();
+  const normalized304 = response.status() === 200
+    && headers["content-type"] === undefined
+    && headers["content-length"] === undefined
+    && headers.trailer === undefined
+    && (await response.body()).byteLength === 0;
+  const cached304 = response.status() === 200
+    && headers["content-type"] === undefined
+    && headers["content-length"] === undefined
+    && headers.trailer === undefined
+    && headers["content-encoding"] === "gzip"
+    && `"sha256-${createHash("sha256").update(await response.body()).digest("base64url")}"` === etag;
+  expect(headers["cache-control"]).toBe(response.status() === 304 || normalized304 || cached304 ? "no-store" : "no-store, no-transform");
+  if (response.status() === 304 || normalized304 || cached304) return;
 
   expect(response.status()).toBe(200);
 }

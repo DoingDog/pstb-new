@@ -370,12 +370,45 @@ describe("paste API", () => {
     });
   });
 
+  it("accepts WebKit's cached 304 body only when its bytes match the conditional ETag", async () => {
+    const etag = await resourceEtag(snapshot);
+    const headers = { ETag: etag, "Content-Encoding": "gzip" };
+    const accepted = new Response(resourceBytes(snapshot), { headers: { "Cache-Control": noStore, ...headers } });
+    const rejected = new Response(resourceBytes({ ...snapshot, content: "other" }), { headers: { "Cache-Control": noStore, ...headers } });
+
+    expect(await api(queuedFetch(accepted).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: etag, signal: signal() })).toEqual({
+      kind: "not-modified",
+      etag,
+    });
+    expect(await api(queuedFetch(rejected).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: etag, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", status: 200, code: "MALFORMED_RESPONSE" },
+    });
+  });
+
   it("accepts a verified resource with the standard application/json media type", async () => {
     const fetch = queuedFetch(await resourceResponse(snapshot, { "Content-Type": "application/json" }));
 
     expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
       kind: "snapshot",
       snapshot: { etag: await resourceEtag(snapshot), source: snapshot.content, summary: resourceSummary },
+    });
+  });
+
+  it("rejects no-transform on error JSON", async () => {
+    const error = errorResponse(403, { code: "FORBIDDEN", message: "Wrong password" }, { "Cache-Control": "no-store, no-transform" });
+    expect(await api(queuedFetch(error).fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "failure",
+      failure: { kind: "malformed", status: 403, code: "MALFORMED_RESPONSE" },
+    });
+  });
+
+  it("accepts no-transform alongside no-store for an exact response validator", async () => {
+    const fetch = queuedFetch(await resourceResponse(snapshot, { "Cache-Control": "no-store, no-transform" }));
+
+    expect(await api(fetch.fetch).readResource({ id: "paste-1", password: null, ifNoneMatch: null, signal: signal() })).toMatchObject({
+      kind: "snapshot",
+      snapshot: { etag: await resourceEtag(snapshot), source: snapshot.content },
     });
   });
 

@@ -23,7 +23,7 @@
 - 不增加 React Router、RSC、Next.js、Vercel runtime、auth/query/chart/admin package、第二个 backend、SSE、WebSocket、long polling、Web Push、KV event subscription或 hidden server polling。
 - ordinary controlled paste page只用 `GET /api/pastes/:id`进行每3,000 ms的顺序 conditional polling；每个 load/真实 user activity window精确300,000 ms，最多一个 timer和一个 fetch，deadline不 round、不 grace、不因 dispatch/Retry/settle延长。
 - 所有 browser mutation携带可用 current version；authoritative 409使 `versionUsable=false`，只有完整 Reload恢复。明确用户选择的 Overwrite可省略 version；curl/MCP省略 version仍是冻结的 last-write-wins。
-- dynamic application/API/representation/error/304全部 `Cache-Control: no-store`；content-hashed Vite assets为一年 immutable。initial JS、CSS、lazy Markdown、lazy Crepe、diff worker和总静态输出必须逐项满足规格第18节预算。
+- dynamic application/API/representation/error/304全部 `Cache-Control: no-store`；带 ETag 的成功 API JSON 同时使用 `no-transform`，避免 Cloudflare 自动压缩弱化 ETag；304/204/error仍只用 `no-store`。content-hashed Vite assets为一年 immutable。initial JS、CSS、lazy Markdown、lazy Crepe、diff worker和总静态输出必须逐项满足规格第18节预算。
 - `wrangler.jsonc`只声明一个 `PASTE_DB` binding并绑定现有 namespace `cd0ebbaba15e486a8e1071bb21e31a9f`；Worker name固定为`cf-pastebin-new`，`workers_dev:false`、`preview_urls:false`，唯一 route为`{ "pattern": "b-new.awsl.app", "custom_domain": true, "previews_enabled": false }`。Tasks 1至17和Task 18 final integration gate前只允许local/types/dry-run；全部release gates、legacy removal、final review和clean integration通过后，Task 18必须执行一次production `wrangler deploy`并完成线上smoke。不得使用`wrangler versions upload`、preview URL、preview alias、preview mode或push。
 - 不恢复 `GET|POST /api`、legacy response shape、`GET /delete/:id`或 destructive GET；`aioapi.js`只作为 `/ip-trace`参考且保持不变。
 - 不引入 `react-hook-form`或 `@hookform/resolvers`：所有表单是受控 React state，client只做 UX validation，现有 server/domain strict validation继续是 authority；这两项不能提供本计划所需的 mutation serialization、credential precedence或 reconciliation，因此没有具体缺口可证明其必要性。本计划不得使用 `useForm`、`Controller`或 `zodResolver`。只有未来出现受控 state 无法直接满足的具体 form/schema need，并先修改 binding spec与当时 implementation plan证明该需要时，才可加入这些 packages或APIs。
@@ -353,7 +353,7 @@ API errors useJSON`{error:{code,message,details?}}` withfixedEnglish safe messag
 
 | Response | Exact required headers |
 |---|---|
-| API JSON | `Content-Type: application/json; charset=utf-8`、`Cache-Control: no-store` androute-specific ETag above |
+| API JSON | `Content-Type: application/json; charset=utf-8`；带 ETag 的成功响应 `Cache-Control: no-store, no-transform`，error仍为 `no-store`；route-specific ETag as above |
 | API 304 | `ETag`、`Cache-Control: no-store` only（plusplatform automatic headers） |
 | React application andMarkdown shell | `Content-Type: text/html; charset=utf-8`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、exact application CSP |
 | raw | `Content-Type: text/plain; charset=utf-8`、`Cache-Control: no-store` |
