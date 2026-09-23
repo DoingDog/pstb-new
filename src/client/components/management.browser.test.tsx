@@ -403,11 +403,6 @@ function passwordState(overrides: Record<string, unknown> = {}) {
     protected: false,
     versionUsable: true,
     result: { action: null, state: "idle" as const, message: null },
-    currentUrl: "/demo",
-    representations: [
-      { label: "Raw", href: "/raw/demo" },
-      { label: "HTML", href: "/html/demo" },
-    ],
     ...overrides,
   };
 }
@@ -437,6 +432,34 @@ function change(element: { value: string; dispatchEvent(event: Event): boolean }
 }
 
 describe("settings result table", () => {
+  it("aligns each setting and password field with its action without duplicate links or Discard buttons", async () => {
+    await page.viewport(1000, 720);
+    const fixture = await mount(<div>
+      <SettingsPanel state={settingsState()} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />
+      <PasswordPanel state={passwordState({ protected: true })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />
+    </div>);
+    expect(fixture.element.querySelectorAll('[data-settings-row]')).toHaveLength(7);
+    const title = fixture.element.querySelector<HTMLElement>('[data-settings-row="title"]')!;
+    const format = fixture.element.querySelector<HTMLElement>('[data-settings-row="format"]')!;
+    const password = fixture.element.querySelector<HTMLElement>('[data-settings-row="newPassword"]')!;
+    expect(title.querySelector('input')!.getBoundingClientRect().left).toBeCloseTo(format.querySelector('select')!.getBoundingClientRect().left, 0);
+    expect(title.querySelector('input')!.getBoundingClientRect().left).toBeCloseTo(password.querySelector('input')!.getBoundingClientRect().left, 0);
+    expect(title.querySelector('button')!.getBoundingClientRect().left).toBeCloseTo(password.querySelector('button')!.getBoundingClientRect().left, 0);
+    expect(fixture.element.querySelectorAll('button').length).toBeGreaterThan(0);
+    expect(Array.from(fixture.element.querySelectorAll('button')).some((button) => button.textContent === "Discard")).toBe(false);
+    expect(fixture.element.querySelector('nav[aria-label="Representations"]')).toBeNull();
+    for (const select of fixture.element.querySelectorAll('select[name]')) expect(getComputedStyle(select).appearance).toBe("none");
+    expect(getComputedStyle(fixture.element.querySelector<HTMLInputElement>('input[name="viewOnce"]')!).appearance).toBe("none");
+
+    await page.viewport(320, 720);
+    for (const row of fixture.element.querySelectorAll<HTMLElement>('[data-settings-row]')) {
+      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+      const controls = Array.from(row.children).map((child) => child.getBoundingClientRect());
+      expect(controls[0]!.right).toBeLessThanOrEqual(controls[1]!.left + 1);
+      if (controls[2] !== undefined) expect(controls[1]!.right).toBeLessThanOrEqual(controls[2]!.left + 1);
+    }
+  });
+
   it("keeps separate controlled drafts, reports owner draft state for field input, and saves one field at a time", async () => {
     const activity = vi.fn();
     const draftState = vi.fn();
@@ -456,7 +479,6 @@ describe("settings result table", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
 
@@ -489,7 +511,7 @@ describe("settings result table", () => {
 
   it("submits the specified 360-day one-year expiration from Settings", async () => {
     const saveExpiration = vi.fn();
-    const fixture = await mount(<SettingsPanel state={settingsState()} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={saveExpiration} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />);
+    const fixture = await mount(<SettingsPanel state={settingsState()} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={saveExpiration} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />);
     const select = fixture.element.querySelector('select[name="expiration"]') as unknown as HTMLSelectElement;
     const oneYear = Array.from(select.options).find((option) => option.textContent === "1 year");
     expect(oneYear?.value).toBe("31104000");
@@ -508,7 +530,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const titlePending = { field: "title" as const, state: "pending" as const, message: null };
     const fixture = await mount(<SettingsPanel state={settingsState({ result: titlePending })} {...props} />);
@@ -543,7 +564,6 @@ describe("settings result table", () => {
       retry,
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const fixture = await mount(
       <SettingsPanel state={settingsState({ result: { field: "title", state: "retryable", message: "Storage write failed." } })} {...props} />,
@@ -586,7 +606,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile,
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const initial = settingsState({
       reconciliationOwner: "expiration",
@@ -635,7 +654,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload,
-      discard: vi.fn(),
     };
     const fixture = await mount(
       <SettingsPanel state={settingsState({ versionUsable: false, result: { field: "title", state: "conflict", message: null } })} {...props} />,
@@ -672,7 +690,7 @@ describe("settings result table", () => {
     expect(fixture.element.querySelector("[aria-live], [role=status]")).toBeNull();
   });
 
-  it("retains field outcomes through Discard and clears them when paste identity changes", async () => {
+  it("retains field outcomes and clears them when paste identity changes", async () => {
     const props = {
       onActivity: vi.fn(),
       saveTitle: vi.fn(),
@@ -682,7 +700,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const fixture = await mount(
       <SettingsPanel state={settingsState({ result: { field: "title", state: "succeeded", message: null } })} {...props} />,
@@ -692,7 +709,7 @@ describe("settings result table", () => {
     await fixture.render(
       <SettingsPanel state={settingsState({ result: { field: "format", state: "succeeded", message: null } })} {...props} />,
     );
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
     expect(outcome("title").textContent).toBe("Title saved");
     expect(outcome("format").textContent).toBe("Format saved");
 
@@ -719,7 +736,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     function IdentityProbe({ state }: { state: SettingsPanelState }) {
       const host = React.useRef<HTMLDivElement>(null);
@@ -750,7 +766,6 @@ describe("settings result table", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const fixture = await mount(
       <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: null } })} {...props} />,
@@ -781,7 +796,6 @@ describe("settings result table", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     expect(fixture.element.querySelector('[name="title"]')?.getAttribute("aria-invalid")).toBe("true");
@@ -800,14 +814,13 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     expect(fixture.element.textContent).toContain("Password is missing or incorrect.");
     expect(fixture.element.querySelector('input[name="retryCredential"]')).not.toBeNull();
   });
 
-  it("offers the outcome-specific recovery and restores the latest accepted draft on Discard", async () => {
+  it("offers the outcome-specific recovery without discarding another field's draft", async () => {
     const retry = vi.fn();
     const reload = vi.fn();
     const reconcile = vi.fn();
@@ -822,7 +835,6 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
     const retryButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
@@ -841,7 +853,6 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!);
@@ -858,23 +869,21 @@ describe("settings result table", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
     const reconcileButton = fixture.element.querySelector<HTMLButtonElement>("[data-settings-result] button")!;
     click(reconcileButton);
     expect(reconcile).toHaveBeenCalledTimes(1);
     const title = fixture.element.querySelector<HTMLInputElement>('input[name="title"]')!;
-    input(title, "Discard me");
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
-    expect(title.value).toBe("Discard me");
+    input(title, "Keep this draft");
+    expect(title.value).toBe("Keep this draft");
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
   });
 });
 
 describe("reconciliation ownership", () => {
   it("keeps owner recovery enabled while blocking unrelated settings writes", async () => {
     const reconcile = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({
@@ -891,20 +900,18 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={reconcile}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
     expect(fixture.element.querySelector<HTMLButtonElement>('button[data-settings-field="title"]')?.disabled).toBe(true);
     const recovery = fixture.element.querySelector("[data-settings-result]")!;
     click(Array.from(recovery.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
     expect(reconcile).toHaveBeenCalledOnce();
-    expect(discard).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
   });
 
-  it("keeps an owner Discard enabled when an unrelated Last action is pending", async () => {
-    const discard = vi.fn();
+  it("keeps owner Reconcile enabled when an unrelated Last action is pending", async () => {
+    const reconcile = vi.fn();
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({
@@ -920,21 +927,20 @@ describe("reconciliation ownership", () => {
         saveExpiration={vi.fn()}
         saveViewOnce={vi.fn()}
         retry={vi.fn()}
-        reconcile={vi.fn()}
+        reconcile={reconcile}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
-    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
-    expect(discardButton.disabled).toBe(false);
-    click(discardButton);
-    expect(discard).toHaveBeenCalledOnce();
+    const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!;
+    expect(reconcileButton.disabled).toBe(false);
+    click(reconcileButton);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
   });
 
-  it("blocks only the owner's Reconcile and Discard while its GET is pending", async () => {
+  it("blocks the owner's Reconcile while its GET is pending without showing Discard", async () => {
     const reconcile = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({
@@ -952,22 +958,17 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={reconcile}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
     const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!;
-    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
     expect(reconcileButton.disabled).toBe(true);
-    expect(discardButton.disabled).toBe(true);
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
     click(reconcileButton);
-    click(discardButton);
     expect(reconcile).not.toHaveBeenCalled();
-    expect(discard).not.toHaveBeenCalled();
   });
 
-  it("resets only the reconciliation owner field on Settings Discard", async () => {
-    const discard = vi.fn();
+  it("keeps both settings drafts when reconciliation is required without a Discard control", async () => {
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({
@@ -982,7 +983,6 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
@@ -990,15 +990,13 @@ describe("reconciliation ownership", () => {
     const format = fixture.element.querySelector('select[name="format"]') as unknown as { value: string; dispatchEvent(event: Event): boolean };
     input(title, "Uncertain title");
     change(format, "markdown");
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
-    expect(title.value).toBe("Accepted title");
+    expect(title.value).toBe("Uncertain title");
     expect(format.value).toBe("markdown");
-    expect(discard).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
   });
 
   it("keeps password recovery enabled while global occupancy blocks password writes", async () => {
     const reconcile = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <PasswordPanel
         state={passwordState({
@@ -1013,20 +1011,17 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={reconcile}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
     expect(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Set password")?.disabled).toBe(true);
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
     expect(reconcile).toHaveBeenCalledOnce();
-    expect(discard).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
   });
 
   it("does not render foreign reconciliation controls or invoke their handlers", async () => {
     const settingsReconcile = vi.fn();
-    const settingsDiscard = vi.fn();
     const settingsFixture = await mount(
       <SettingsPanel
         state={settingsState({
@@ -1043,15 +1038,12 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={settingsReconcile}
         reload={vi.fn()}
-        discard={settingsDiscard}
       />,
     );
     expect(Array.from(settingsFixture.element.querySelectorAll("button")).some((item) => item.textContent === "Reconcile" || item.textContent === "Discard")).toBe(false);
     expect(settingsReconcile).not.toHaveBeenCalled();
-    expect(settingsDiscard).not.toHaveBeenCalled();
 
     const passwordReconcile = vi.fn();
-    const passwordDiscard = vi.fn();
     const passwordFixture = await mount(
       <PasswordPanel
         state={passwordState({
@@ -1066,12 +1058,10 @@ describe("reconciliation ownership", () => {
         retry={vi.fn()}
         reconcile={passwordReconcile}
         reload={vi.fn()}
-        discard={passwordDiscard}
       />,
     );
     expect(Array.from(passwordFixture.element.querySelectorAll("button")).some((item) => item.textContent === "Reconcile" || item.textContent === "Discard")).toBe(false);
     expect(passwordReconcile).not.toHaveBeenCalled();
-    expect(passwordDiscard).not.toHaveBeenCalled();
   });
 });
 
@@ -1089,7 +1079,6 @@ describe("retained success settlement", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const settingsFixture = await mount(<SettingsPanel state={settingsState({ result: settingsResult })} {...settingsProps} />);
     expect(settingsDraftState).toHaveBeenCalledTimes(1);
@@ -1108,7 +1097,6 @@ describe("retained success settlement", () => {
       retry: vi.fn(),
       reconcile: vi.fn(),
       reload: vi.fn(),
-      discard: vi.fn(),
     };
     const passwordFixture = await mount(<PasswordPanel state={passwordState({ result: passwordResult })} {...passwordProps} />);
     expect(passwordDraftState).toHaveBeenCalledTimes(1);
@@ -1134,7 +1122,6 @@ describe("password result table", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     const next = fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')!;
@@ -1145,19 +1132,17 @@ describe("password result table", () => {
 
     await fixture.render(
       <PasswordPanel
-        state={passwordState({ protected: true, result: { action: "set", state: "succeeded", message: "Password saved." }, currentUrl: "/demo?password=intended%20password", representations: [{ label: "Raw", href: "/raw/demo?password=intended%20password" }] })}
+        state={passwordState({ protected: true, result: { action: "set", state: "succeeded", message: "Password saved." } })}
         onActivity={vi.fn()}
         setPassword={setPassword}
         clearPassword={clearPassword}
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     expect(fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')?.value).toBe("");
-    expect(fixture.element.querySelector('a[aria-label="Paste"]')?.getAttribute("href")).toBe("/demo?password=intended%20password");
-    expect(fixture.element.querySelector('a[href="/raw/demo?password=intended%20password"]')?.textContent).toBe("Raw");
+    expect(fixture.element.querySelector('nav[aria-label="Representations"]')).toBeNull();
     expect(fixture.element.textContent).not.toContain("intended password");
     const exposed = Array.from(fixture.element.querySelectorAll("[data-password-status], [data-password-result]"))
       .flatMap((element) => Array.from(element.attributes))
@@ -1182,7 +1167,6 @@ describe("password result table", () => {
         retry={retry}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     input(fixture.element.querySelector<HTMLInputElement>('input[name="newPassword"]')!, "new password");
@@ -1198,7 +1182,6 @@ describe("password result table", () => {
         retry={retry}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     const replacement = fixture.element.querySelector<HTMLInputElement>('input[name="retryCredential"]')!;
@@ -1216,10 +1199,9 @@ describe("password result table", () => {
         retry={retry}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
-    expect(fixture.element.querySelector('a[aria-label="Paste"]')?.getAttribute("href")).toBe("/demo");
+    expect(fixture.element.querySelector('nav[aria-label="Representations"]')).toBeNull();
   });
 
   it("asks the controller to reconcile uncertain password state without exposing a credential", async () => {
@@ -1233,7 +1215,6 @@ describe("password result table", () => {
         retry={vi.fn()}
         reconcile={reconcile}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!);
@@ -1332,7 +1313,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
 
@@ -1364,7 +1344,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1375,9 +1354,7 @@ describe("management hardening regressions", () => {
     expect(viewOnce.checked).toBe(false);
   });
 
-  it("retires settings and password recovery when Discard resets local drafts", async () => {
-    const settingsDiscard = vi.fn();
-    const passwordDiscard = vi.fn();
+  it("keeps settings and password recovery available without Discard buttons", async () => {
     const fixture = await mount(
       <>
         <SettingsPanel
@@ -1390,7 +1367,6 @@ describe("management hardening regressions", () => {
           retry={vi.fn()}
           reconcile={vi.fn()}
           reload={vi.fn()}
-          discard={settingsDiscard}
         />
         <PasswordPanel
           state={passwordState({ reconciliationOwner: "password", result: { action: "set", state: "reconciliation-required", message: "Request outcome is uncertain." } })}
@@ -1400,27 +1376,22 @@ describe("management hardening regressions", () => {
           retry={vi.fn()}
           reconcile={vi.fn()}
           reload={vi.fn()}
-          discard={passwordDiscard}
         />
       </>,
     );
 
-    const discards = Array.from(fixture.element.querySelectorAll("button")).filter((button) => button.textContent === "Discard");
-    expect(discards).toHaveLength(2);
-    click(discards[0]!);
-    click(discards[1]!);
-    expect(settingsDiscard).toHaveBeenCalledOnce();
-    expect(passwordDiscard).toHaveBeenCalledOnce();
-    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Retry" || button.textContent === "Reconcile")).toBe(false);
+    const buttons = Array.from(fixture.element.querySelectorAll("button"));
+    expect(buttons.some((button) => button.textContent === "Discard")).toBe(false);
+    expect(buttons.some((button) => button.textContent === "Retry")).toBe(true);
+    expect(buttons.some((button) => button.textContent === "Reconcile")).toBe(true);
   });
 
-  it("keeps settings writes blocked and Reload visible after Discard on an unusable version", async () => {
+  it("keeps settings writes blocked and Reload visible on an unusable version", async () => {
     const saveTitle = vi.fn();
     const saveFormat = vi.fn();
     const saveExpiration = vi.fn();
     const saveViewOnce = vi.fn();
     const reload = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({ versionUsable: false, result: { field: "title", state: "conflict", message: "The paste changed." } })}
@@ -1432,12 +1403,10 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={reload}
-        discard={discard}
       />,
     );
 
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
-    expect(discard).toHaveBeenCalledOnce();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
     const saves = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button[data-settings-field]"));
     expect(saves).toHaveLength(4);
     for (const save of saves) {
@@ -1455,12 +1424,11 @@ describe("management hardening regressions", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it("retains authoritative pending settings authority after Discard and forced saves", async () => {
+  it("retains authoritative pending settings authority when disabled saves are forced", async () => {
     const saveTitle = vi.fn();
     const saveFormat = vi.fn();
     const saveExpiration = vi.fn();
     const saveViewOnce = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <SettingsPanel
         state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })}
@@ -1472,22 +1440,12 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
     const result = () => fixture.element.querySelector("[data-settings-action-result]")?.getAttribute("data-settings-action-result");
-    const discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
     expect(result()).toBe("pending");
-    expect(discardButton.disabled).toBe(true);
-    click(discardButton);
-    expect(discard).not.toHaveBeenCalled();
-    expect(result()).toBe("pending");
-    discardButton.disabled = false;
-    click(discardButton);
-    React.act(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(discard).not.toHaveBeenCalled();
-    expect(result()).toBe("pending");
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
 
     const saves = Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("button[data-settings-field]"));
     expect(saves).toHaveLength(4);
@@ -1514,7 +1472,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
 
@@ -1528,7 +1485,7 @@ describe("management hardening regressions", () => {
     expect(password.value).toBe("newer password");
   });
 
-  it("keeps password writes blocked and Reload visible after Discard on an unusable version", async () => {
+  it("keeps password writes blocked and Reload visible on an unusable version", async () => {
     const setPassword = vi.fn();
     const clearPassword = vi.fn();
     const retry = vi.fn();
@@ -1543,11 +1500,10 @@ describe("management hardening regressions", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
 
-    click(Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!);
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
     const changePassword = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Change password")!;
     const clearPasswordButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Clear password")!;
     expect(changePassword.disabled).toBe(true);
@@ -1567,7 +1523,6 @@ describe("management hardening regressions", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
     const retryButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
@@ -1584,7 +1539,6 @@ describe("management hardening regressions", () => {
         retry={retry}
         reconcile={reconcile}
         reload={reload}
-        discard={vi.fn()}
       />,
     );
     const reconcileButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Reconcile")!;
@@ -1593,10 +1547,9 @@ describe("management hardening regressions", () => {
     expect(reconcile).toHaveBeenCalledOnce();
   });
 
-  it("retains authoritative pending password authority after Discard and forced actions", async () => {
+  it("retains authoritative pending password authority when disabled actions are forced", async () => {
     const setPassword = vi.fn();
     const clearPassword = vi.fn();
-    const discard = vi.fn();
     const fixture = await mount(
       <PasswordPanel
         state={passwordState({ result: { action: "set", state: "pending", message: "Saving password" } })}
@@ -1606,22 +1559,12 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
 
     const result = () => fixture.element.querySelector("[data-password-result]")?.getAttribute("data-password-result");
-    let discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
     expect(result()).toBe("pending");
-    expect(discardButton.disabled).toBe(true);
-    click(discardButton);
-    expect(discard).not.toHaveBeenCalled();
-    expect(result()).toBe("pending");
-    discardButton.disabled = false;
-    click(discardButton);
-    React.act(() => discardButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(discard).not.toHaveBeenCalled();
-    expect(result()).toBe("pending");
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
 
     const set = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Set password")!;
     expect(set.disabled).toBe(true);
@@ -1640,16 +1583,12 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={discard}
       />,
     );
-    discardButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Discard")!;
     const changePassword = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Change password")!;
     const clearPasswordButton = Array.from(fixture.element.querySelectorAll("button")).find((button) => button.textContent === "Clear password")!;
     expect(result()).toBe("pending");
-    expect(discardButton.disabled).toBe(true);
-    click(discardButton);
-    expect(discard).not.toHaveBeenCalled();
+    expect(Array.from(fixture.element.querySelectorAll("button")).some((button) => button.textContent === "Discard")).toBe(false);
     for (const action of [changePassword, clearPasswordButton]) {
       expect(action.disabled).toBe(true);
       action.disabled = false;
@@ -1744,7 +1683,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     const expiration = fixture.element.querySelector('select[name="expiration"]') as unknown as { value: string; selectedOptions: { [index: number]: { textContent: string | null } | undefined } };
@@ -1764,7 +1702,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -1816,8 +1753,8 @@ describe("management hardening regressions", () => {
   it("localizes management names and status copy in Chinese", async () => {
     const fixture = await mount(history(
       <>
-        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: null } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} locale="zh-CN" />
-        <PasswordPanel state={passwordState({ result: { action: "set", state: "pending", message: null } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} locale="zh-CN" />
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: null } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} locale="zh-CN" />
+        <PasswordPanel state={passwordState({ result: { action: "set", state: "pending", message: null } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} locale="zh-CN" />
         <DeleteFlow state={deleteState({ result: { state: "pending", message: null } })} deletePaste={vi.fn()} retry={vi.fn()} reload={vi.fn()} locale="zh-CN" />
         <HistoryPanel active state={historyState({ diff: { state: "computing", lines: [] } })} openHistory={vi.fn()} selectRevision={vi.fn()} computeDiff={vi.fn()} back={vi.fn()} locale="zh-CN" />
       </>,
@@ -1844,7 +1781,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     const resultButtons = () => Array.from(fixture.element.querySelectorAll<HTMLButtonElement>("[data-settings-result] button"));
@@ -1863,7 +1799,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     expect(resultButtons()).toHaveLength(1);
@@ -1881,7 +1816,6 @@ describe("management hardening regressions", () => {
         retry={vi.fn()}
         reconcile={vi.fn()}
         reload={vi.fn()}
-        discard={vi.fn()}
       />,
     );
     expect(resultButtons()).toHaveLength(1);
@@ -1890,7 +1824,7 @@ describe("management hardening regressions", () => {
   });
 
   it("announces credential, conflict, and retryable Settings errors", async () => {
-    const props = { onActivity: vi.fn(), saveTitle: vi.fn(), saveFormat: vi.fn(), saveExpiration: vi.fn(), saveViewOnce: vi.fn(), retry: vi.fn(), reconcile: vi.fn(), reload: vi.fn(), discard: vi.fn() };
+    const props = { onActivity: vi.fn(), saveTitle: vi.fn(), saveFormat: vi.fn(), saveExpiration: vi.fn(), saveViewOnce: vi.fn(), retry: vi.fn(), reconcile: vi.fn(), reload: vi.fn() };
     const fixture = await mount(<SettingsPanel state={settingsState()} {...props} />);
     for (const [state, message] of [["credential-required", "Password required"], ["conflict", "Version conflict"], ["retryable", "Storage write failed"]] as const) {
       await fixture.render(<SettingsPanel state={settingsState({ result: { field: "title", state, message } })} {...props} />);
@@ -1901,10 +1835,10 @@ describe("management hardening regressions", () => {
   it("keeps button outcomes out of live regions and alerts for blocking validation", async () => {
     const fixture = await mount(
       <>
-        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
-        <PasswordPanel state={passwordState({ result: { action: "set", state: "succeeded", message: "Password saved." } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "pending", message: "Saving title" } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />
+        <PasswordPanel state={passwordState({ result: { action: "set", state: "succeeded", message: "Password saved." } })} onActivity={vi.fn()} setPassword={vi.fn()} clearPassword={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />
         <DeleteFlow state={deleteState({ result: { state: "pending", message: "Deleting" } })} deletePaste={vi.fn()} retry={vi.fn()} reload={vi.fn()} />
-        <SettingsPanel state={settingsState({ result: { field: "title", state: "validation-error", message: "Title is too long." } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} discard={vi.fn()} />
+        <SettingsPanel state={settingsState({ result: { field: "title", state: "validation-error", message: "Title is too long." } })} onActivity={vi.fn()} saveTitle={vi.fn()} saveFormat={vi.fn()} saveExpiration={vi.fn()} saveViewOnce={vi.fn()} retry={vi.fn()} reconcile={vi.fn()} reload={vi.fn()} />
       </>,
     );
     expect(fixture.element.querySelectorAll('[role="status"]')).toHaveLength(2);

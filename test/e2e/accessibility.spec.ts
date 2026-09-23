@@ -216,6 +216,12 @@ test.describe("accessibility branches", () => {
     await expectNoAxeViolations(page);
   });
 
+  test("runs Axe after the settled Settings branch", async ({ page, request }) => {
+    await openOrdinary(page, request);
+    await selectPasteTab(page, "Settings");
+    await expectNoAxeViolations(page);
+  });
+
   test("runs Axe after the settled ordinary Markdown branch", async ({ page, request }) => {
     await openOrdinary(page, request, { content: "# ordinary Markdown", format: "markdown" });
     await expectNoAxeViolations(page);
@@ -287,10 +293,12 @@ test.describe("accessibility branches", () => {
   test("runs Axe after ordinary autosync transitions to local not-found", async ({ page, request }) => {
     const source = "terminal-source".repeat(200);
     const { id } = await createPaste(request, { content: source });
-    await page.goto(`/${id}`);
-    await expect(page.locator("[data-ordinary-paste-page]")).toBeVisible();
     await page.clock.install({ time: new Date("2026-09-23T00:00:00.000Z") });
     await page.clock.pauseAt(new Date("2026-09-23T00:00:01.000Z"));
+    await page.goto(`/${id}`);
+    await page.waitForLoadState("networkidle");
+    await page.clock.runFor(300);
+    await expect(page.locator("[data-ordinary-paste-page]")).toBeVisible();
 
     const resource = await request.get(`/api/pastes/${id}`);
     expect(resource.status()).toBe(200);
@@ -424,6 +432,25 @@ test("traps Dialog focus, closes with Escape, and returns focus", async ({ page,
   await expect(trigger).toBeFocused();
 });
 
+test("keeps wide paste pages expanded and the create page collapsed after reload", async ({ page, request }) => {
+  const { id } = await createPaste(request, { content: "sidebar default" });
+  try {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    const trigger = page.locator("#workbench-sidebar-trigger");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await page.reload();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await page.goto(`/${id}`);
+    await expect(page.locator("#workbench-sidebar-trigger")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
+});
+
 test("traps Sheet focus on mobile and toggles the desktop sidebar", async ({ page }, testInfo) => {
   await page.goto("/");
   const trigger = page.locator("#workbench-sidebar-trigger");
@@ -441,6 +468,8 @@ test("traps Sheet focus on mobile and toggles the desktop sidebar", async ({ pag
     const sidebar = page.locator('[data-slot="sidebar"][data-state]');
     const hiddenContent = sidebar.locator('[data-slot="sidebar-inner"]');
     const rail = sidebar.locator('[data-sidebar="rail"]');
+    await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    await trigger.click();
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
     await trigger.click();
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");

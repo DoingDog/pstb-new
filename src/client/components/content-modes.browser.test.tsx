@@ -382,15 +382,37 @@ describe("default content mode", () => {
     expect(onSurfaceMounted).toHaveBeenLastCalledWith("preview", false);
   });
 
-  it("resets a hard remount to the format-defined view instead of the prior client tab", async () => {
-    const first = mount(<OrdinaryPastePage {...ordinaryPageProps()} />);
-    await clickRole("tab", "Edit");
-    const edit = Array.from(first.querySelectorAll('[role="tab"]')).find((tab) => tab.textContent === "Edit") as HTMLElement;
-    expect(edit.getAttribute("aria-selected")).toBe("true");
+  it("restores each paste's selected tab after a hard remount without sharing it with another ID", async () => {
+    const id = `remember-${crypto.randomUUID()}`;
+    const first = mount(<OrdinaryPastePage {...ordinaryPageProps({ pasteIdentity: id })} />);
+    await clickRole("tab", "Settings");
     unmount(first);
 
-    const second = mount(<OrdinaryPastePage {...ordinaryPageProps({ format: "markdown", initialMarkdown: trustedHtml("<p>exact</p>") })} />);
-    expect(second.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("View");
+    const restored = mount(<OrdinaryPastePage {...ordinaryPageProps({ pasteIdentity: id })} />);
+    expect(restored.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Settings");
+    unmount(restored);
+
+    const other = mount(<OrdinaryPastePage {...ordinaryPageProps({ pasteIdentity: `${id}-other` })} />);
+    expect(other.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("View");
+    unmount(other);
+    localStorage.removeItem(`cf-pastebin:tab:${id}`);
+  });
+
+  it.each(["Preview", "Visual"])("restores the selected Markdown %s mode after a hard remount", async (mode) => {
+    const id = `remember-${crypto.randomUUID()}`;
+    const props = ordinaryPageProps({ pasteIdentity: id, format: "markdown", source: "# source" });
+    const first = mount(<OrdinaryPastePage {...props} />);
+    await clickRole("tab", "Markdown");
+    await clickRole("tab", mode);
+    await nextTask();
+    unmount(first);
+
+    const restored = mount(<OrdinaryPastePage {...props} />);
+    expect(Array.from(restored.querySelectorAll('[role="tab"][aria-selected="true"]')).some((tab) => tab.textContent === "Markdown")).toBe(true);
+    await vi.waitFor(() => expect(Array.from(restored.querySelectorAll('[role="tab"][aria-selected="true"]')).some((tab) => tab.textContent === mode)).toBe(true));
+    unmount(restored);
+    localStorage.removeItem(`cf-pastebin:tab:${id}`);
+    localStorage.removeItem(`cf-pastebin:markdown-tab:${id}`);
   });
 
   it("uses initial trusted Markdown only for the immutable initial source", () => {

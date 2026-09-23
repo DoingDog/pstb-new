@@ -69,6 +69,8 @@ const mounted: Array<{ root: Root; element: HTMLDivElement }> = [];
 let consoleErrors: Array<unknown[]> = [];
 
 beforeEach(() => {
+  localStorage.removeItem("cf-pastebin:tab:example");
+  localStorage.removeItem("cf-pastebin:markdown-tab:example");
   consoleErrors = vi.spyOn(console, "error").mock.calls;
 });
 
@@ -448,6 +450,8 @@ afterEach(() => {
   });
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  localStorage.removeItem("cf-pastebin:tab:example");
+  localStorage.removeItem("cf-pastebin:markdown-tab:example");
   history.replaceState(null, "", "/");
 });
 
@@ -937,7 +941,7 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
   });
 
-  it("releases Settings after a relative expiration retry fails and is discarded", async () => {
+  it("keeps a failed relative expiration retry available for reconciliation", async () => {
     let writes = 0;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method !== "PATCH") return jsonResponse(resourceBody("initial", { version: "generation.2" }), 200, { etag: '"generation.2"' });
@@ -961,15 +965,15 @@ describe("Task 15 async lifecycle behavior", () => {
     });
     await vi.waitFor(() => expect(writes).toBe(2));
     await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
-    await clickButton(rendered, "Discard");
 
-    expect(settingsButton(rendered, "expiration").disabled).toBe(false);
-    expect(settingsButton(rendered, "title").disabled).toBe(false);
-    expect(expiration.value).toBe("permanent");
-    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    expect(settingsButton(rendered, "expiration").disabled).toBe(true);
+    expect(settingsButton(rendered, "title").disabled).toBe(true);
+    expect(expiration.value).toBe("60");
+    expect(rendered.querySelector('button[data-settings-recovery-action="settings-reconcile"]')).not.toBeNull();
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
   });
 
-  it("removes a failed Reconcile Retry after Settings Discard", async () => {
+  it("keeps a failed Settings Reconcile available for retry", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
       init?.method === "PATCH" ? uncertainWriteResponse() : errorResponse(500, "INTERNAL_ERROR")
     ));
@@ -981,13 +985,11 @@ describe("Task 15 async lifecycle behavior", () => {
     await vi.waitFor(() => expect(button(rendered, "Reconcile")).toBeDefined());
     await clickButton(rendered, "Reconcile");
     await vi.waitFor(() => expect(button(rendered, "Settings reconcile failed")).toBeDefined());
-    await clickButton(rendered, "Discard");
 
-    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Example");
-    expect(settingsButton(rendered, "title").disabled).toBe(false);
-    expect(rendered.querySelector('[data-settings-result="retryable"]')).toBeNull();
-    expect(rendered.querySelector('button[data-settings-recovery-action="settings-title"]')).toBeNull();
-    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");
+    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Unsaved title");
+    expect(settingsButton(rendered, "title").disabled).toBe(true);
+    expect(button(rendered, "Settings reconcile failed").disabled).toBe(false);
+    expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -1069,17 +1071,23 @@ describe("Task 15 async lifecycle behavior", () => {
     expect(settingsButton(rendered, "format").textContent).toContain("Format saved");
   });
 
-  it("keeps a Password draft dirty after Settings Discard clears only Settings", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => uncertainWriteResponse()));
+  it("keeps a Password draft dirty after Settings reconciliation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      init?.method === "PATCH"
+        ? uncertainWriteResponse()
+        : jsonResponse(resourceBody("initial", { title: "Changed", version: "generation.2" }), 200, { etag: '"generation.2"' })
+    )));
     const rendered = await mountOrdinary();
     await selectTab(rendered, "Settings");
     await setInput(rendered, 'input[name="title"]', "Changed");
     await setInput(rendered, 'input[name="newPassword"]', "replacement");
     await clickButton(rendered, "Save title");
     await vi.waitFor(() => expect(rendered.querySelector('[data-settings-result="reconciliation-required"]')).not.toBeNull());
-    await clickButton(rendered, "Discard");
+    await clickButton(rendered, "Reconcile");
+    await vi.waitFor(() => expect(button(rendered, "Settings reconciled")).toBeDefined());
 
-    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Example");
+    expect((rendered.querySelector('input[name="title"]') as HTMLInputElement).value).toBe("Changed");
+    expect((rendered.querySelector('input[name="newPassword"]') as HTMLInputElement).value).toBe("replacement");
     expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Paused for local changes");
     await setInput(rendered, 'input[name="newPassword"]', "");
     expect(rendered.querySelector('[data-operation-record="autosync"]')?.textContent).toContain("Waiting");

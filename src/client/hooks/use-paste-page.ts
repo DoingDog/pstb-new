@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createPasteApi, type ApiFailure, type ApiResult, type PasteApi } from "../api";
 import { AutosaveController, type AutosaveDispatch, type AutosaveSaveRequest, type AutosaveSaveResult, type AutosaveSnapshot } from "../autosave";
-import { commitPastePassword, withPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
+import { commitPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
 import type {
   AcceptedPasteState,
   ActionKey,
@@ -481,7 +481,7 @@ function initialView(initialPage: OrdinaryInitialPage): PastePageSnapshot {
     records: initialRecords(),
     history: emptyHistory(),
     settings,
-    password: { protected: accepted.summary.protected, versionUsable: true, mutationPending: false, result: { action: null, state: "idle", message: null }, currentUrl: location.href, representations: [] },
+    password: { protected: accepted.summary.protected, versionUsable: true, mutationPending: false, result: { action: null, state: "idle", message: null } },
     deleteFlow: { phase: "ordinary", result: { state: "idle", message: null }, mutationPending: false, versionUsable: true },
     candidate: null,
     source: accepted.draft,
@@ -620,13 +620,6 @@ export function usePastePage(initialPage: OrdinaryInitialPage, callbacks: PasteP
         reconciliationRequestPending: paste.reconciliation.requestPending,
         resultIdentity: paste.lastAction,
         result: { action: passwordAction, state: passwordState, message: null },
-        currentUrl: location.href,
-        representations: [
-          { label: "Raw", href: withPastePassword(new URL(paste.summary.links.raw, location.href), paste.credential.committed).toString() },
-          { label: "HTML", href: withPastePassword(new URL(paste.summary.links.html, location.href), paste.credential.committed).toString() },
-          { label: "Markdown", href: withPastePassword(new URL(paste.summary.links.markdown, location.href), paste.credential.committed).toString() },
-          { label: "File", href: withPastePassword(new URL(paste.summary.links.file, location.href), paste.credential.committed).toString() },
-        ],
       },
       deleteFlow: {
         phase: deletePhase,

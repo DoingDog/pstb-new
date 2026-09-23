@@ -10,6 +10,7 @@ export interface WorkbenchShellProps {
   locale: Locale;
   breadcrumb: readonly string[];
   headingId: string;
+  defaultSidebarOpen?: boolean;
   destinationGroups: readonly SidebarDestinationGroup[];
   metadata?: readonly SidebarMetadata[];
   actionGroups?: readonly SidebarActionGroup[];
@@ -22,6 +23,7 @@ export function WorkbenchShell({
   locale,
   breadcrumb,
   headingId,
+  defaultSidebarOpen = true,
   destinationGroups,
   metadata,
   actionGroups,
@@ -44,7 +46,7 @@ export function WorkbenchShell({
 
   return (
     <HelpProvider>
-      <SidebarProvider>
+      <SidebarProvider defaultOpen={defaultSidebarOpen}>
         <AppSidebar
           destinationGroups={destinationGroups}
           {...(metadata === undefined ? {} : { metadata, metadataLabel: copy.documentStatus })}
@@ -52,7 +54,7 @@ export function WorkbenchShell({
           onDestinationSelect={selectDestination}
         />
         <SidebarInset>
-          <header className="flex min-w-0 items-center gap-2 border-b px-2 sm:px-4">
+          <header className="relative z-30 flex min-w-0 items-center gap-2 border-b px-2 sm:px-4">
             <SidebarTrigger id="workbench-sidebar-trigger" aria-label={copy.toggleSidebar} className="size-11 shrink-0" />
             <Separator orientation="vertical" className="my-3 h-4" />
             <Breadcrumb className="min-w-0 flex-1">

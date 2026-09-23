@@ -3,7 +3,7 @@ import { labels, type Locale } from "../../i18n";
 import { withPastePassword, type TrustedMarkdownHtml } from "../bootstrap";
 import type { AutosaveControllerApi, AutosaveState } from "../autosave";
 import type { SourceEvent } from "../contracts";
-import type { MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
+import type { MarkdownMode, MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import type { DerivedSurface } from "../surface-apply";
 import type { PasteLinks } from "../../types";
 import { ContentModes, type ContentMode } from "./ContentModes";
@@ -40,6 +40,25 @@ export interface OrdinaryPastePageProps {
   onActionState?(state: LocalActionState): void;
   importBrowserMarkdown?: MarkdownModesOptions["loadPreview"];
   loadCrepeStyle?(): Promise<unknown>;
+}
+
+type PasteTab = ContentMode | "history" | "settings";
+
+function storedTab<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    return allowed.find((tab) => tab === value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveTab(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 无痕模式或禁用存储时，仍允许切换 tab。
+  }
 }
 
 function representationHref(href: string, password: string | null): string {
@@ -79,8 +98,16 @@ function OrdinaryPastePageBody({
 }: OrdinaryPastePageProps) {
   const copy = labels(locale);
   const [initialSource] = React.useState(source);
-  const [active, setActive] = React.useState<ContentMode | "history" | "settings">("view");
+  const tabKey = `cf-pastebin:tab:${pasteIdentity}`;
+  const markdownTabKey = `cf-pastebin:markdown-tab:${pasteIdentity}`;
+  const [active, setActive] = React.useState<PasteTab>(() => storedTab(tabKey, ["view", "edit", "markdown", "history", "settings"], "view"));
+  const [initialMarkdownMode] = React.useState<MarkdownMode>(() => storedTab(markdownTabKey, ["source", "visual", "preview"], "source"));
   const [wrap, setWrap] = React.useState(false);
+  const selectTab = (value: string) => {
+    const next = value as PasteTab;
+    setActive(next);
+    saveTab(tabKey, next);
+  };
   const sourceState = React.useRef({ source, revision: 0, compositionId: 0 });
   const lastPropSource = React.useRef(source);
   if (lastPropSource.current !== source) {
@@ -107,6 +134,8 @@ function OrdinaryPastePageBody({
     ...(onRetrySurface === undefined ? {} : { onRetrySurface }),
     initialSource,
     initialMarkdown,
+    initialMarkdownMode,
+    onMarkdownModeChange: (mode: MarkdownMode) => saveTab(markdownTabKey, mode),
     wrap: wrap ? "soft" as const : "off" as const,
     autosave,
     onSourceEvent: reportSourceEvent,
@@ -119,7 +148,7 @@ function OrdinaryPastePageBody({
 
   return (
     <section data-ordinary-paste-page="true" className="flex min-w-0 flex-col gap-4">
-      <Tabs value={active} onValueChange={(value) => setActive(value as ContentMode | "history" | "settings")} activationMode="automatic">
+      <Tabs value={active} onValueChange={selectTab} activationMode="automatic">
         <TabsList variant="line" aria-label={copy.pasteViews} className="justify-start [&_[data-slot=tabs-trigger]]:flex-none">
           <TabsTrigger value="view">{copy.view}</TabsTrigger>
           <TabsTrigger value="edit">{copy.edit}</TabsTrigger>

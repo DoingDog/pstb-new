@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import { page } from "vitest/browser";
 import { createRoot, type Root } from "react-dom/client";
 import type { ReactNode } from "react";
 import type { PasteSummary } from "../contracts";
@@ -144,6 +145,7 @@ afterEach(async () => {
     host.remove();
   }
   history.replaceState(null, "", "/");
+  await page.viewport(1280, 720);
   vi.unstubAllGlobals();
   markdownHarness.create.mockReset();
   const actWarnings = consoleErrors.filter(
@@ -161,6 +163,24 @@ describe("create interaction", () => {
     const sixLines = 6 * parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     expect(textarea.rows).toBe(6);
     expect(textarea.getBoundingClientRect().height).toBeGreaterThanOrEqual(sixLines - 1);
+  });
+
+  it("uses 6:4 columns and fills the remaining desktop page with the empty content editor", async () => {
+    await page.viewport(1280, 800);
+    const fixture = await mount(<div className="flex min-h-svh flex-col"><CreatePage locale="en" create={vi.fn()} /></div>);
+    const content = fixture.host.querySelector<HTMLElement>('[data-create-content-column]')!;
+    const options = fixture.host.querySelector<HTMLElement>('[data-create-options-column]')!;
+    const textarea = fixture.host.querySelector<HTMLTextAreaElement>('[name="content"]')!;
+    expect(content).not.toBeNull();
+    expect(options).not.toBeNull();
+    expect(content.getBoundingClientRect().width / options.getBoundingClientRect().width).toBeCloseTo(1.5, 1);
+    expect(textarea.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(Math.max(800, options.getBoundingClientRect().bottom) - 32);
+
+    await page.viewport(320, 800);
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    expect(content.getBoundingClientRect().left).toBeCloseTo(options.getBoundingClientRect().left, 0);
+    expect(content.getBoundingClientRect().width).toBeCloseTo(options.getBoundingClientRect().width, 0);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(320);
   });
 
   it("renders labeled controlled fields and the seven fixed expiration values", async () => {
@@ -183,6 +203,22 @@ describe("create interaction", () => {
     await fixture.input("title", "  title  ");
     expect((fixture.host.querySelector('[name="content"]') as HTMLTextAreaElement).value).toBe("exact\n🙂");
     expect((fixture.host.querySelector('[name="title"]') as HTMLInputElement).value).toBe("  title  ");
+  });
+
+  it("styles checkbox and native selects without replacing their native behavior", async () => {
+    const fixture = await mount(<CreatePage locale="en" create={vi.fn()} />);
+    const selects = Array.from(fixture.host.querySelectorAll('select[name]'));
+    expect(selects).toHaveLength(2);
+    for (const select of selects) {
+      expect(select.parentElement?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      expect(getComputedStyle(select).appearance).toBe("none");
+    }
+    const checkbox = fixture.host.querySelector<HTMLInputElement>('input[name="viewOnce"]')!;
+    expect(getComputedStyle(checkbox).appearance).toBe("none");
+    await fixture.click("viewOnce");
+    expect(checkbox.checked).toBe(true);
+    await fixture.input("format", "markdown");
+    expect((selects[0] as unknown as HTMLSelectElement).value).toBe("markdown");
   });
 
   it("submits pasted CRLF source unchanged and stays on root", async () => {

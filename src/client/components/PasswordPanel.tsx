@@ -15,8 +15,6 @@ export interface PasswordPanelState {
   reconciliationRequestPending?: boolean;
   resultIdentity?: object;
   result: { action: "set" | "clear" | null; state: PasswordResultState; message: string | null };
-  currentUrl: string;
-  representations: readonly { label: string; href: string }[];
 }
 
 export interface PasswordPanelProps {
@@ -28,7 +26,6 @@ export interface PasswordPanelProps {
   retry(authorizationPassword: string | null): void;
   reconcile(): void;
   reload(): void;
-  discard(): void;
   locale?: Locale;
 }
 
@@ -40,24 +37,19 @@ function resultMessage(result: PasswordPanelState["result"], locale: Locale): st
   return action?.failed ?? dictionaries[locale].status.lastAction.failed;
 }
 
-export function PasswordPanel({ state, onActivity, onDraftState, setPassword, clearPassword, retry, reconcile, reload, discard, locale = "en" }: PasswordPanelProps) {
+export function PasswordPanel({ state, onActivity, onDraftState, setPassword, clearPassword, retry, reconcile, reload, locale = "en" }: PasswordPanelProps) {
   const [newPassword, setNewPassword] = React.useState("");
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [retryCredential, setRetryCredential] = React.useState("");
   const passwords = React.useRef({ newPassword: "", currentPassword: "" });
   const generations = React.useRef<Record<PasswordField, number>>({ newPassword: 0, currentPassword: 0, retryCredential: 0 });
   const submitted = React.useRef<Partial<Record<PasswordField, number>>>({});
-  const discardedResult = React.useRef<PasswordPanelState["result"] | null>(null);
   const settledResult = React.useRef<object | null>(null);
-  const [, render] = React.useState(0);
-  const result = discardedResult.current === state.result ? { action: null, state: "idle" as const, message: null } : state.result;
+  const result = state.result;
   const copy = labels(locale);
-  const pending = state.result.state === "pending";
-  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
+  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || result.state === "pending" || !state.versionUsable;
   const ownsReconciliation = state.reconciliationOwner === "password";
-  const foreignReconciliation = state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation;
   const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
-  const discardBlocked = pending || foreignReconciliation || (!ownsReconciliation && state.mutationOccupied === true) || recoveryBlocked;
 
   const edit = (field: PasswordField, value: string) => {
     generations.current[field] += 1;
@@ -120,36 +112,28 @@ export function PasswordPanel({ state, onActivity, onDraftState, setPassword, cl
     if (!ownsReconciliation || recoveryBlocked) return;
     reconcile();
   };
-  const reset = () => {
-    if (foreignReconciliation || discardBlocked) return;
-    submitted.current = {};
-    passwords.current = { newPassword: "", currentPassword: "" };
-    setNewPassword("");
-    setCurrentPassword("");
-    setRetryCredential("");
-    discardedResult.current = state.result;
-    reportDraftState();
-    render((value) => value + 1);
-    discard();
-  };
   const role = result.state === "pending" || result.state === "succeeded" ? "status" : "alert";
+  const rowClass = "grid min-w-0 grid-cols-[minmax(5.5rem,1fr)_minmax(0,2fr)_minmax(0,1.25fr)] items-center gap-2 [&>label]:flex [&>label]:min-h-11 [&>label]:min-w-0 [&>label]:items-center [&>label]:break-words";
+  const buttonClass = "h-auto min-h-11 w-full min-w-0 whitespace-normal break-words px-2 py-1 leading-tight";
 
   return (
-    <section aria-label={copy.password} className="grid gap-3 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:justify-center [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11">
-      {state.protected && <label>{copy.currentPassword}<Input name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>}
-      <label>{copy.newPassword}<Input name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" disabled={mutationBlocked} onClick={submitPassword}>{state.protected ? copy.changePassword : copy.setPassword}</Button>
-        {state.protected && <Button type="button" variant="outline" disabled={mutationBlocked} onClick={clear}>{copy.clearPassword}</Button>}
+    <section aria-label={copy.password} className="grid min-w-0 gap-2 [&_button]:min-h-11 [&_input]:min-h-11">
+      {state.protected && <div data-settings-row="currentPassword" className={rowClass}>
+        <label htmlFor="settings-current-password">{copy.currentPassword}</label>
+        <Input id="settings-current-password" name="currentPassword" type="password" value={currentPassword} onInput={(event) => { edit("currentPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} />
+        <Button type="button" className={buttonClass} variant="outline" disabled={mutationBlocked} onClick={clear}>{copy.clearPassword}</Button>
+      </div>}
+      <div data-settings-row="newPassword" className={rowClass}>
+        <label htmlFor="settings-new-password">{copy.newPassword}</label>
+        <Input id="settings-new-password" name="newPassword" type="password" value={newPassword} onInput={(event) => { edit("newPassword", event.currentTarget.value); reportDraftState(event.timeStamp); }} />
+        <Button type="button" className={buttonClass} disabled={mutationBlocked} onClick={submitPassword}>{state.protected ? copy.changePassword : copy.setPassword}</Button>
       </div>
       {result.state !== "idle" && <p role={role} data-password-result={result.state}>{resultMessage(result, locale)}</p>}
-      {result.state === "credential-required" && <div className="flex flex-wrap items-end gap-2"><label>{copy.currentPassword}<Input name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /></label><Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
-      {result.state === "retryable" && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
-      {result.state === "conflict" && state.versionUsable && <Button type="button" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
-      {result.state === "reconciliation-required" && ownsReconciliation && <Button type="button" disabled={recoveryBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
-      {(!state.versionUsable || result.state === "conflict") && <Button type="button" variant="outline" onClick={reload}>{copy.reload}</Button>}
-      {!foreignReconciliation && <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>}
-      <nav aria-label={copy.representations} className="flex flex-wrap gap-2"><a aria-label={copy.paste} href={state.currentUrl}>{copy.paste}</a>{state.representations.map((representation) => <a key={representation.href} href={representation.href}>{representation.label}</a>)}</nav>
+      {result.state === "credential-required" && <div className={rowClass}><label htmlFor="settings-retry-password">{copy.currentPassword}</label><Input id="settings-retry-password" name="retryCredential" type="password" value={retryCredential} onInput={(event) => { edit("retryCredential", event.currentTarget.value); onActivity(event.timeStamp, "recovery-credential"); }} /><Button type="button" className={buttonClass} disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button></div>}
+      {result.state === "retryable" && <Button type="button" className="justify-self-start" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
+      {result.state === "conflict" && state.versionUsable && <Button type="button" className="justify-self-start" disabled={mutationBlocked} onClick={retryPassword}>{copy.retry}</Button>}
+      {result.state === "reconciliation-required" && ownsReconciliation && <Button type="button" className="justify-self-start" disabled={recoveryBlocked} onClick={reconcilePassword}>{copy.reconcile}</Button>}
+      {(!state.versionUsable || result.state === "conflict") && <Button type="button" className="justify-self-start" variant="outline" onClick={reload}>{copy.reload}</Button>}
     </section>
   );
 }

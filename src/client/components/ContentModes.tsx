@@ -3,7 +3,7 @@ import { labels, type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { AutosaveControllerApi } from "../autosave";
 import type { SourceEvent } from "../contracts";
-import type { MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
+import type { MarkdownMode, MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import type { DerivedSurface } from "../surface-apply";
 import { MarkdownWorkbench } from "./MarkdownWorkbench";
 import { PlaintextEditor, type EditorWrap } from "./PlaintextEditor";
@@ -33,6 +33,8 @@ export interface ContentModesProps {
   onRetrySurface?(surface: DerivedSurface): void;
   initialSource?: string;
   initialMarkdown: TrustedMarkdownHtml | null;
+  initialMarkdownMode?: MarkdownMode;
+  onMarkdownModeChange?(mode: MarkdownMode): void;
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
@@ -55,6 +57,8 @@ export function ContentModes({
   onRetrySurface,
   initialSource = source,
   initialMarkdown,
+  initialMarkdownMode,
+  onMarkdownModeChange,
   wrap,
   autosave,
   onSourceEvent,
@@ -75,6 +79,8 @@ export function ContentModes({
         source={source}
         initialSource={initialSource}
         initialMarkdown={initialMarkdown}
+        {...(initialMarkdownMode === undefined ? {} : { initialMode: initialMarkdownMode })}
+        {...(onMarkdownModeChange === undefined ? {} : { onModeSelected: onMarkdownModeChange })}
         wrap={wrap}
         autosave={autosave}
         onSourceEvent={onSourceEvent}

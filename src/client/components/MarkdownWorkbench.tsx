@@ -19,6 +19,8 @@ export interface MarkdownWorkbenchProps {
   source: string;
   initialSource?: string;
   initialMarkdown: TrustedMarkdownHtml | null;
+  initialMode?: MarkdownMode;
+  onModeSelected?(mode: MarkdownMode): void;
   wrap: EditorWrap;
   autosave: Pick<AutosaveControllerApi, "input" | "compositionStart" | "compositionEnd">;
   onSourceEvent(event: SourceEvent): void;
@@ -86,6 +88,8 @@ export function MarkdownWorkbench({
   source,
   initialSource = source,
   initialMarkdown,
+  initialMode = "source",
+  onModeSelected,
   wrap,
   autosave,
   onSourceEvent,
@@ -104,7 +108,7 @@ export function MarkdownWorkbench({
   const previewOverflow = useOverflowFocus(wrap !== "soft", source);
   const fallbackOverflow = useOverflowFocus(wrap !== "soft", source);
   const [visualRoot, setVisualRoot] = React.useState<HTMLDivElement | null>(null);
-  const pendingMode = React.useRef<MarkdownMode | null>(null);
+  const pendingMode = React.useRef<MarkdownMode | null>(initialMode === "source" ? null : initialMode);
   const sourceAdapter = React.useRef<Pick<HTMLTextAreaElement, "value">>({ value: source });
   const mounted = React.useRef(false);
   const owners = React.useRef<ModeOwner | null>(null);
@@ -583,7 +587,7 @@ export function MarkdownWorkbench({
 
   return (
     <section data-markdown-workbench="true" className="flex min-w-0 flex-col gap-3">
-      <Tabs value={mode} onValueChange={(value) => void runMode(value as MarkdownMode)} activationMode="automatic">
+      <Tabs value={mode} onValueChange={(value) => { const next = value as MarkdownMode; onModeSelected?.(next); void runMode(next); }} activationMode="automatic">
         <TabsList variant="line" aria-label={copy.markdown}>
           <TabsTrigger value="source">{copy.source}</TabsTrigger>
           <TabsTrigger value="visual">Visual</TabsTrigger>

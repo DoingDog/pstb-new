@@ -11,6 +11,7 @@ import { createThemeController, type ThemeController, type ThemePreference, type
 import { OperationStatus } from "./components/OperationStatus";
 import type { LocalActionState } from "./components/LocalActions";
 import { WorkbenchShell } from "./components/WorkbenchShell";
+import { NativeSelect } from "./components/NativeSelect";
 import type { SurfaceFallbackState, TerminalHandoff, TerminalPage } from "./hooks/use-paste-page";
 
 const CreatePage = React.lazy(() => import("./pages/CreatePage").then(({ CreatePage }) => ({ default: CreatePage })));
@@ -169,28 +170,28 @@ function DocumentControls({ locale, onLocaleChange, preference, onThemeChange }:
     <>
       <label htmlFor="document-locale" className="flex min-w-0 flex-col gap-1 text-xs">
         <span className="sr-only">{copy.locale}</span>
-        <select
+        <NativeSelect
           id="document-locale"
-          className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="pl-2"
           value={locale}
           onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}
         >
           <option value="en">{copy.languageEnglish}</option>
           <option value="zh-CN">{copy.languageChinese}</option>
-        </select>
+        </NativeSelect>
       </label>
       <label htmlFor="document-theme" className="flex min-w-0 flex-col gap-1 text-xs">
         <span className="sr-only">{copy.theme}</span>
-        <select
+        <NativeSelect
           id="document-theme"
-          className="h-11 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="pl-2"
           value={preference}
           onChange={(event) => onThemeChange(event.currentTarget.value as ThemePreference)}
         >
           <option value="system">{copy.themeSystem}</option>
           <option value="light">{copy.themeLight}</option>
           <option value="dark">{copy.themeDark}</option>
-        </select>
+        </NativeSelect>
       </label>
     </>
   );
@@ -602,6 +603,8 @@ export function App({ initialPage }: AppProps) {
 
   return (
     <WorkbenchShell
+      key={needsCreateApi ? "create" : "other"}
+      defaultSidebarOpen={!needsCreateApi}
       locale={locale}
       breadcrumb={[copy.paste, heading]}
       headingId={headingId}

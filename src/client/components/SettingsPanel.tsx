@@ -3,6 +3,8 @@ import type { ExpirationInput } from "../contracts";
 import { dictionaries, labels, type Locale } from "../../i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "./Checkbox";
+import { NativeSelect } from "./NativeSelect";
 import { CircleCheck, CircleX, LoaderCircle } from "lucide-react";
 
 export type SettingsField = "title" | "format" | "expiration" | "viewOnce";
@@ -48,7 +50,6 @@ export interface SettingsPanelProps {
   retry(credential: string | null): void;
   reconcile(): void;
   reload(): void;
-  discard(): void;
   locale?: Locale;
 }
 
@@ -121,13 +122,6 @@ function useDraft<Value>(accepted: Value) {
       return valueRef.current;
     },
     settle,
-    discard(nextAccepted: Value) {
-      generation.current += 1;
-      acceptedGeneration.current = generation.current;
-      submitted.current = null;
-      acceptedRef.current = nextAccepted;
-      apply(nextAccepted);
-    },
   };
 }
 
@@ -183,7 +177,7 @@ function ResultActions({ result, outcomes, versionUsable, mutationBlocked, ownsR
   );
 }
 
-export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload, discard, locale = "en" }: SettingsPanelProps) {
+export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, saveFormat, saveExpiration, saveViewOnce, retry, reconcile, reload, locale = "en" }: SettingsPanelProps) {
   const title = useDraft(state.accepted.title);
   const format = useDraft(state.accepted.format);
   const expiration = useDraft(inputExpiration(state.accepted.expiration));
@@ -195,19 +189,14 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
       : { [action]: { state: outcomeState(state.result), origin: action === "settings-reconcile" || action === "reload-server" ? "recovery" : "field", attempt: state.result.attempt ?? 0 } };
   });
   const pageIdentity = React.useRef(state.accepted.id);
-  const discardedResult = React.useRef<SettingsPanelState["result"] | null>(null);
   const settledResult = React.useRef<object | null>(null);
   const recoveryAction = React.useRef<SettingsActionKey | null>(null);
-  const [, render] = React.useState(0);
-  const result = discardedResult.current === state.result ? { field: null, state: "idle" as const, message: null } : state.result;
+  const result = state.result;
   const copy = labels(locale);
-  const pending = state.result.state === "pending";
-  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || pending || !state.versionUsable;
+  const mutationBlocked = state.mutationOccupied === true || state.mutationPending === true || result.state === "pending" || !state.versionUsable;
   const ownsReconciliation = state.reconciliationOwner === "title" || state.reconciliationOwner === "format" || state.reconciliationOwner === "expiration" || state.reconciliationOwner === "viewOnce";
-  const foreignReconciliation = state.reconciliationOwner !== null && state.reconciliationOwner !== undefined && !ownsReconciliation;
   const resultOwnsReconciliation = ownsReconciliation && (result.field === null || state.reconciliationOwner === result.field);
   const recoveryBlocked = ownsReconciliation && state.reconciliationRequestPending === true;
-  const discardBlocked = pending || foreignReconciliation || (!ownsReconciliation && state.mutationOccupied === true) || recoveryBlocked;
   const standardExpirations = ["permanent", "60", "3600", "86400", "604800", "2592000", "31104000"];
   const reportDraftState = (eventAt?: number) => onDraftState?.(title.dirty() || format.dirty() || expiration.dirty() || viewOnce.dirty(), eventAt);
   const resultIdentity = state.resultIdentity ?? state.result;
@@ -223,7 +212,6 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
   React.useEffect(() => {
     if (pageIdentity.current === state.accepted.id) return;
     pageIdentity.current = state.accepted.id;
-    discardedResult.current = null;
     settledResult.current = null;
     recoveryAction.current = null;
     setOutcomes({});
@@ -249,51 +237,42 @@ export function SettingsPanel({ state, onActivity, onDraftState, saveTitle, save
     reportDraftState();
   }, [result, resultIdentity, state.accepted.expiration, state.accepted.format, state.accepted.title, state.accepted.viewOnce, title, format, expiration, viewOnce, reportDraftState]);
 
-  const reset = () => {
-    if (foreignReconciliation || discardBlocked) return;
-    if (state.reconciliationOwner === "title") title.discard(state.accepted.title);
-    else if (state.reconciliationOwner === "format") format.discard(state.accepted.format);
-    else if (state.reconciliationOwner === "expiration") expiration.discard(inputExpiration(state.accepted.expiration));
-    else if (state.reconciliationOwner === "viewOnce") viewOnce.discard(state.accepted.viewOnce);
-    else {
-      title.discard(state.accepted.title);
-      format.discard(state.accepted.format);
-      expiration.discard(inputExpiration(state.accepted.expiration));
-      viewOnce.discard(state.accepted.viewOnce);
-    }
-    discardedResult.current = state.result;
-    reportDraftState();
-    render((value) => value + 1);
-    discard();
-  };
   const titleOutcome = outcome("title");
   const formatOutcome = outcome("format");
   const expirationOutcome = outcome("expiration");
   const viewOnceOutcome = outcome("viewOnce");
+  const rowClass = "grid min-w-0 grid-cols-[minmax(5.5rem,1fr)_minmax(0,2fr)_minmax(0,1.25fr)] items-center gap-2 [&>label]:flex [&>label]:min-h-11 [&>label]:min-w-0 [&>label]:items-center [&>label]:break-words";
+  const buttonClass = "h-auto min-h-11 w-full min-w-0 whitespace-normal break-words px-2 py-1 leading-tight";
 
   return (
-    <section aria-label={copy.settings} className="grid gap-4 [&_button]:min-h-11 [&_button]:min-w-11 [&_input:not([type=checkbox])]:min-h-11 [&_select]:min-h-11 [&_select]:min-w-11">
-      <label>{copy.customId}<Input name="id" value={state.accepted.id} readOnly /></label>
-      <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.title}<Input name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }} /></label>
-        <Button type="button" data-settings-field="title" data-settings-action-result={titleOutcome?.state} aria-busy={titleOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveTitle(title.submit()); }}>{outcomeLabel("settings-title", titleOutcome, locale, copy.saveTitle)}</Button>
+    <section aria-label={copy.settings} className="grid min-w-0 gap-2 [&_input:not([type=checkbox])]:min-h-11">
+      <div data-settings-row="id" className={rowClass}>
+        <label htmlFor="settings-id">{copy.customId}</label>
+        <Input id="settings-id" name="id" value={state.accepted.id} readOnly />
       </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.format}<select name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); reportDraftState(event.timeStamp); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></select></label>
-        <Button type="button" data-settings-field="format" data-settings-action-result={formatOutcome?.state} aria-busy={formatOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveFormat(format.submit()); }}>{outcomeLabel("settings-format", formatOutcome, locale, copy.saveFormat)}</Button>
+      <div data-settings-row="title" className={rowClass}>
+        <label htmlFor="settings-title">{copy.title}</label>
+        <Input id="settings-title" name="title" value={title.value} aria-invalid={invalid("title")} onInput={(event) => { title.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }} />
+        <Button type="button" className={buttonClass} data-settings-field="title" data-settings-action-result={titleOutcome?.state} aria-busy={titleOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveTitle(title.submit()); }}>{outcomeLabel("settings-title", titleOutcome, locale, copy.saveTitle)}</Button>
       </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <label>{copy.expiration}<select name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }}>
+      <div data-settings-row="format" className={rowClass}>
+        <label htmlFor="settings-format">{copy.format}</label>
+        <NativeSelect id="settings-format" name="format" value={format.value} aria-invalid={invalid("format")} onChange={(event) => { format.edit(event.currentTarget.value as "text" | "markdown"); reportDraftState(event.timeStamp); }}><option value="text">{copy.text}</option><option value="markdown">{copy.markdown}</option></NativeSelect>
+        <Button type="button" className={buttonClass} data-settings-field="format" data-settings-action-result={formatOutcome?.state} aria-busy={formatOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveFormat(format.submit()); }}>{outcomeLabel("settings-format", formatOutcome, locale, copy.saveFormat)}</Button>
+      </div>
+      <div data-settings-row="expiration" className={rowClass}>
+        <label htmlFor="settings-expiration">{copy.expiration}</label>
+        <NativeSelect id="settings-expiration" name="expiration" value={expiration.value} aria-invalid={invalid("expiration")} onChange={(event) => { expiration.edit(event.currentTarget.value); reportDraftState(event.timeStamp); }}>
           {!standardExpirations.includes(expiration.value) && <option value={expiration.value}>{expiration.value}</option>}
           <option value="permanent">{copy.permanent}</option><option value="60">{copy.oneMinute}</option><option value="3600">{copy.oneHour}</option><option value="86400">{copy.oneDay}</option><option value="604800">{copy.oneWeek}</option><option value="2592000">{copy.thirtyDays}</option><option value="31104000">{copy.oneYear}</option>
-        </select></label>
-        <Button type="button" data-settings-field="expiration" data-settings-action-result={expirationOutcome?.state} aria-busy={expirationOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveExpiration(parseExpiration(expiration.submit())); }}>{outcomeLabel("settings-expiration", expirationOutcome, locale, copy.saveExpiration)}</Button>
+        </NativeSelect>
+        <Button type="button" className={buttonClass} data-settings-field="expiration" data-settings-action-result={expirationOutcome?.state} aria-busy={expirationOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveExpiration(parseExpiration(expiration.submit())); }}>{outcomeLabel("settings-expiration", expirationOutcome, locale, copy.saveExpiration)}</Button>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex min-h-11 items-center"><Input name="viewOnce" type="checkbox" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} />{copy.viewOnce}</label>
-        <Button type="button" data-settings-field="viewOnce" data-settings-action-result={viewOnceOutcome?.state} aria-busy={viewOnceOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveViewOnce(viewOnce.submit()); }}>{outcomeLabel("settings-view-once", viewOnceOutcome, locale, copy.saveViewOnce)}</Button>
+      <div data-settings-row="viewOnce" className={rowClass}>
+        <label htmlFor="settings-view-once">{copy.viewOnce}</label>
+        <label htmlFor="settings-view-once" className="flex min-h-11 items-center"><Checkbox id="settings-view-once" name="viewOnce" checked={viewOnce.value} aria-invalid={invalid("viewOnce")} onChange={(event) => { viewOnce.edit(event.currentTarget.checked); reportDraftState(event.timeStamp); }} /></label>
+        <Button type="button" className={buttonClass} data-settings-field="viewOnce" data-settings-action-result={viewOnceOutcome?.state} aria-busy={viewOnceOutcome?.state === "pending" || undefined} disabled={mutationBlocked} onClick={() => { if (mutationBlocked) return; recoveryAction.current = null; saveViewOnce(viewOnce.submit()); }}>{outcomeLabel("settings-view-once", viewOnceOutcome, locale, copy.saveViewOnce)}</Button>
       </div>
-      {!foreignReconciliation && <Button type="button" variant="outline" disabled={discardBlocked} onClick={reset}>{copy.discard}</Button>}
       <ResultActions result={result} outcomes={displayedOutcomes} versionUsable={state.versionUsable} mutationBlocked={mutationBlocked} ownsReconciliation={resultOwnsReconciliation} recoveryBlocked={recoveryBlocked} reconciliationCredentialRequired={state.reconciliationCredentialRequired === true} onActivity={onActivity} onRecoveryDispatch={(key) => { recoveryAction.current = key; }} retry={retry} reconcile={reconcile} reload={reload} locale={locale} />
     </section>
   );

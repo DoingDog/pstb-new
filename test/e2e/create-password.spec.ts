@@ -1,5 +1,5 @@
 import { expect, test, type Frame, type Page, type Request, type Response } from "@playwright/test";
-import { uniquePasteId } from "./helpers";
+import { createPaste, uniquePasteId } from "./helpers";
 
 function apiResponse(page: Page, method: string, pathname: string): Promise<Response> {
   return page.waitForResponse((response) => response.request().method() === method && new URL(response.url()).pathname === pathname);
@@ -112,6 +112,9 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   await page.getByRole("tab", { name: "Edit", exact: true }).click();
   await expect(editor).toHaveValue(debounceContent);
 
+  // 另一浏览器写入期间保留此页面的旧版本，使下一次保存稳定复现冲突。
+  const syncUrl = `**${apiPath}*`;
+  await page.route(syncUrl, (route) => route.request().method() === "GET" ? route.abort("failed") : route.continue());
   const rival = await context.newPage();
   await rival.goto(`${pastePath}?${encodedPassword}`);
   await rival.getByRole("tab", { name: "Edit", exact: true }).click();
@@ -121,6 +124,7 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
 
   const conflictSave = await saveContent(page, id, localConflictContent);
   expect(conflictSave.status()).toBe(409);
+  await page.unroute(syncUrl);
   await expect(editor).toHaveValue(localConflictContent);
   await expect(page.locator('[data-operation-record="autosave"]')).toContainText("Conflict");
   await expect(page.getByRole("button", { name: "Reload", exact: true })).toBeVisible();
@@ -232,6 +236,7 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   await deleteDialog.getByRole("button", { name: "Delete", exact: true }).click();
   expect((await deleted).status()).toBe(204);
   await expect(deleteOutcome).toBeVisible();
+  await expect(page.locator("#workbench-sidebar-trigger")).toHaveAttribute("aria-expanded", "false");
   expect(await page.locator("#app").evaluate((app) => app === (window as Window & { e2eAppBeforeDelete?: Element }).e2eAppBeforeDelete)).toBe(true);
   expect(mainFrameDocumentRequests).toHaveLength(0);
   expect(mainFrameNavigations).toHaveLength(0);
@@ -248,4 +253,29 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   await expect(page.locator("#source-data")).toHaveCount(0);
 
   await rival.close();
+});
+
+test("remembers each paste's outer and Markdown tabs without duplicating representation links", async ({ page, request }) => {
+  const first = await createPaste(request, { content: "# first", format: "markdown" });
+  const second = await createPaste(request, { content: "second" });
+  try {
+    await page.goto(`/${first.id}`);
+    await page.getByRole("tab", { name: "Settings", exact: true }).click();
+    await expect(page.locator('section[data-ordinary-paste-page="true"] nav[aria-label="Representations"]')).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Discard", exact: true })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Settings", exact: true })).toHaveAttribute("aria-selected", "true");
+
+    await page.getByRole("tab", { name: "Markdown", exact: true }).first().click();
+    await page.getByRole("tab", { name: "Preview", exact: true }).click();
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Markdown", exact: true }).first()).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Preview", exact: true })).toHaveAttribute("aria-selected", "true");
+
+    await page.goto(`/${second.id}`);
+    await expect(page.getByRole("tab", { name: "View", exact: true })).toHaveAttribute("aria-selected", "true");
+  } finally {
+    await request.delete(`/api/pastes/${first.id}`);
+    await request.delete(`/api/pastes/${second.id}`);
+  }
 });

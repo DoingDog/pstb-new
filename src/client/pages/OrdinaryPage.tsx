@@ -165,7 +165,6 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
           retry={actions.retry}
           reconcile={actions.reconcile}
           reload={requestReload}
-          discard={actions.discard}
           locale={locale}
         />
       }
@@ -179,7 +178,6 @@ export function OrdinaryPage({ initialPage, locale, onRecordsChange, onSummaryCh
           retry={actions.retry}
           reconcile={actions.reconcile}
           reload={requestReload}
-          discard={actions.discard}
           locale={locale}
         />
       }
