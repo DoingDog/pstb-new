@@ -32,7 +32,7 @@ npx playwright test test/e2e/create-password.spec.ts --project=chromium
 
 ## HTTP 接口
 
-`POST /api/pastes` 接受 JSON 或 multipart，`content` 必填；可选 `title`、`format`（`text` 或 `markdown`）、`expiration`（至少 60 秒的整数、`"permanent"`、`null` 或带时区的 RFC3339）、`password`、`viewOnce`、`customId`。默认 1 天、无密码、非阅后删除；成功返回 `201` 和含 `id`、`version`、各表示形式链接的摘要。
+`POST /api/pastes` 接受 JSON 或 multipart，`content` 必填。`title`、`format`（`text` 或 `markdown`）、`expiration`（至少 60 秒的整数、`"permanent"`、`null` 或带时区的 RFC3339）、`password` 和 `customId` 可选。JSON 的 `viewOnce` 可选；multipart 必须传字符串 `true` 或 `false`。默认 1 天、无密码、非阅后删除；成功返回 `201` 和含 `id`、`version`、各表示形式链接的摘要。
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8787/api/pastes \
