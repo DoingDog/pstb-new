@@ -487,6 +487,128 @@ test("traps Sheet focus on mobile and toggles the desktop sidebar", async ({ pag
   }
 });
 
+test("fits the empty create page in a desktop viewport with limited mobile overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Create a paste", exact: true })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await expect(page.locator('[data-action="create"]')).toBeInViewport();
+  const desktop = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    viewport: document.documentElement.clientHeight,
+  }));
+  expect(desktop.height).toBeLessThanOrEqual(desktop.viewport + 1);
+
+  await page.setViewportSize({ width: 320, height: 720 });
+  const mobile = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    width: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+  }));
+  expect(mobile.height).toBeLessThanOrEqual(900);
+  expect(mobile.width).toBe(mobile.viewportWidth);
+});
+
+test("keeps create-result links and Copy on one scrollable button row outside the sidebar rail", async ({ page, request }) => {
+  const id = uniquePasteId();
+  try {
+    await page.setViewportSize({ width: 1024, height: 720 });
+    await page.goto("/");
+    await page.locator("#create-content").fill("short paste");
+    await page.locator("#create-custom-id").fill(id);
+    await page.locator('[data-action="create"]').click();
+    const result = page.locator(`section[aria-label="${id}"]`);
+    await expect(result).toBeVisible();
+    const actions = result.locator("[data-create-actions]");
+    await expect(actions).toBeVisible();
+    const links = actions.locator("a[href]");
+    await expect(links).toHaveCount(5);
+    const copy = actions.getByRole("button", { name: "Copy", exact: true });
+    await expect(copy).toBeVisible();
+    const view = actions.getByRole("link", { name: "View", exact: true });
+
+    for (const width of [1024, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      const layout = await actions.evaluate((row) => {
+        const controls = [...row.querySelectorAll("a[href]"), ...row.querySelectorAll("button")];
+        return {
+          tops: controls.map((control) => control.getBoundingClientRect().top),
+          heights: controls.map((control) => control.getBoundingClientRect().height),
+          variants: controls.map((control) => control.getAttribute("data-variant")),
+          left: row.getBoundingClientRect().left,
+          width: row.clientWidth,
+          scrollWidth: row.scrollWidth,
+          documentWidth: document.documentElement.scrollWidth,
+        };
+      });
+      expect(layout.tops.every((top) => Math.abs(top - layout.tops[0]!) <= 1)).toBe(true);
+      expect(layout.heights.every((height) => height >= 44)).toBe(true);
+      expect(layout.variants).toEqual(Array(6).fill("outline"));
+      expect(layout.documentWidth).toBe(width);
+      if (width === 1024) expect(layout.left).toBeGreaterThanOrEqual(44);
+      else expect(layout.scrollWidth).toBeGreaterThan(layout.width);
+    }
+
+    await page.setViewportSize({ width: 1024, height: 720 });
+    await view.scrollIntoViewIfNeeded();
+    const box = await view.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(page).toHaveURL(new RegExp(`/${id}$`));
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
+});
+
+test("keeps representation links, Copy and Wrap in one scrollable outline-button row", async ({ page, request }) => {
+  const { id } = await openOrdinary(page, request, { content: "short paste" });
+  try {
+    const actions = page.locator("[data-ordinary-actions]");
+    await expect(actions).toBeVisible();
+    await expect(actions.locator("nav a[href]")).toHaveCount(4);
+    const copy = actions.getByRole("button", { name: "Copy", exact: true });
+    const wrap = actions.getByRole("button", { name: "Wrap", exact: true });
+    for (const width of [1280, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      const layout = await actions.evaluate((row) => {
+        const controls = [...row.querySelectorAll("nav a[href]"), ...row.querySelectorAll("button")];
+        return {
+          tops: controls.map((control) => control.getBoundingClientRect().top),
+          heights: controls.map((control) => control.getBoundingClientRect().height),
+          width: row.clientWidth,
+          scrollWidth: row.scrollWidth,
+          documentWidth: document.documentElement.scrollWidth,
+        };
+      });
+      expect(layout.tops.every((top) => Math.abs(top - layout.tops[0]!) <= 1)).toBe(true);
+      expect(layout.heights.every((height) => height >= 44)).toBe(true);
+      expect(layout.documentWidth).toBe(width);
+      if (width === 320) expect(layout.scrollWidth).toBeGreaterThan(layout.width);
+    }
+    await expect(wrap).toHaveAttribute("data-variant", "outline");
+    await expect(copy).toHaveAttribute("data-variant", "outline");
+    for (const link of await actions.locator("nav a[href]").all()) await expect(link).toHaveAttribute("data-variant", "outline");
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
+});
+
+test("reserves six lines in View for short text and Markdown", async ({ page, request }) => {
+  for (const format of ["text", "markdown"] as const) {
+    const { id } = await openOrdinary(page, request, { content: "short paste", format });
+    try {
+      const panel = page.getByRole("tabpanel", { name: "View", exact: true });
+      const { height, lineHeight } = await panel.evaluate((element) => ({
+        height: element.getBoundingClientRect().height,
+        lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+      }));
+      expect(height).toBeGreaterThanOrEqual(6 * lineHeight - 1);
+    } finally {
+      await request.delete(`/api/pastes/${id}`);
+    }
+  }
+});
+
 test("keeps every settled branch interactive target at least 44 by 44 CSS pixels", async ({ page, request }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Create a paste", exact: true })).toBeVisible();

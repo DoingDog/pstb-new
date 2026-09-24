@@ -165,6 +165,31 @@ describe("create interaction", () => {
     expect(textarea.getBoundingClientRect().height).toBeGreaterThanOrEqual(sixLines - 1);
   });
 
+  it.each([1280, 320])("keeps creation labels and controls inline within a %ipx viewport", async (width) => {
+    await page.viewport(width, 720);
+    const fixture = await mount(<div className="flex min-h-svh flex-col"><CreatePage locale="en" create={vi.fn()} /></div>);
+    const contentLabel = fixture.host.querySelector<HTMLLabelElement>('label[for="create-content"]')!;
+    const titleLabel = fixture.host.querySelector<HTMLLabelElement>('label[for="create-title"]')!;
+    if (width === 1280) expect(contentLabel.getBoundingClientRect().top).toBeCloseTo(titleLabel.getBoundingClientRect().top, 0);
+
+    for (const name of ["title", "format", "expiration", "password", "custom-id"]) {
+      const label = fixture.host.querySelector<HTMLLabelElement>(`label[for="create-${name}"]`)!;
+      const input = fixture.host.querySelector<HTMLElement>(`#create-${name}`)!;
+      const text = label.getBoundingClientRect();
+      const control = input.getBoundingClientRect();
+      expect(text.right).toBeLessThan(control.left);
+      expect(Math.abs((text.top + text.bottom - control.top - control.bottom) / 2)).toBeLessThanOrEqual(2);
+    }
+
+    const onceLabel = fixture.host.querySelector<HTMLLabelElement>('label[for="create-view-once"]')!;
+    const onceText = onceLabel.querySelector("span")!.getBoundingClientRect();
+    const checkbox = fixture.host.querySelector<HTMLInputElement>('#create-view-once')!.getBoundingClientRect();
+    expect(onceText.right).toBeLessThan(checkbox.left);
+    expect(Math.abs((onceText.top + onceText.bottom - checkbox.top - checkbox.bottom) / 2)).toBeLessThanOrEqual(2);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(width === 1280 ? 720 : 900);
+  });
+
   it("uses 6:4 columns and fills the remaining desktop page with the empty content editor", async () => {
     await page.viewport(1280, 800);
     const fixture = await mount(<div className="flex min-h-svh flex-col"><CreatePage locale="en" create={vi.fn()} /></div>);

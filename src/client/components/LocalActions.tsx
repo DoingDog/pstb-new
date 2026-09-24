@@ -223,7 +223,7 @@ export function LocalActions({
           </a>
         )}
         {capabilities.wrap !== undefined && (
-          <Button type="button" variant="ghost" className="min-h-11" onClick={() => capabilities.wrap!.onChange(!capabilities.wrap!.value)}>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => capabilities.wrap!.onChange(!capabilities.wrap!.value)}>
             {capabilities.wrap.value ? copy.unwrap : copy.wrap}
           </Button>
         )}

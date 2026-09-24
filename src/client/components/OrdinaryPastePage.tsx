@@ -8,6 +8,7 @@ import type { DerivedSurface } from "../surface-apply";
 import type { PasteLinks } from "../../types";
 import { ContentModes, type ContentMode } from "./ContentModes";
 import { LocalActions, type LocalActionState } from "./LocalActions";
+import { Button } from "./ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 export interface OrdinaryPastePageProps {
@@ -156,26 +157,28 @@ function OrdinaryPastePageBody({
           <TabsTrigger value="history">{copy.history}</TabsTrigger>
           <TabsTrigger value="settings">{copy.settings}</TabsTrigger>
         </TabsList>
-        <TabsContent value="view"><ContentModes mode="view" {...contentProps} /></TabsContent>
+        <TabsContent value="view" className="min-h-[6lh]"><ContentModes mode="view" {...contentProps} /></TabsContent>
         <TabsContent value="edit"><ContentModes mode="edit" {...contentProps} /></TabsContent>
         <TabsContent value="markdown"><ContentModes mode="markdown" {...contentProps} /></TabsContent>
         <TabsContent value="history">{historyPanel}</TabsContent>
         <TabsContent value="settings" forceMount hidden={active !== "settings"}>{settingsPanel}{active === "settings" && <>{passwordPanel}{deleteFlow}</>}</TabsContent>
       </Tabs>
-      <LocalActions
-        actionScope={pasteIdentity}
-        source={source}
-        locale={locale}
-        filename={filename}
-        capabilities={{ copy: true, download: true, wrap: { value: wrap, onChange: setWrap } }}
-        {...(onActionState === undefined ? {} : { onActionState })}
-      />
-      <nav aria-label={copy.representations} className="flex flex-wrap gap-3 [&>a]:inline-flex [&>a]:min-h-11 [&>a]:min-w-11 [&>a]:items-center [&>a]:justify-center">
-        <a href={representationHref(links.raw, password)}>{copy.raw}</a>
-        <a href={representationHref(links.html, password)}>{copy.html}</a>
-        <a href={representationHref(links.markdown, password)}>{copy.markdown}</a>
-        <a href={representationHref(links.file, password)}>{copy.file}</a>
-      </nav>
+      <div data-ordinary-actions className="flex min-w-0 flex-nowrap items-start gap-2 overflow-x-auto md:ml-7 [&>*]:shrink-0">
+        <LocalActions
+          actionScope={pasteIdentity}
+          source={source}
+          locale={locale}
+          filename={filename}
+          capabilities={{ copy: true, download: true, wrap: { value: wrap, onChange: setWrap } }}
+          {...(onActionState === undefined ? {} : { onActionState })}
+        />
+        <nav aria-label={copy.representations} className="flex gap-2">
+          <Button asChild variant="outline" className="min-h-11"><a href={representationHref(links.raw, password)}>{copy.raw}</a></Button>
+          <Button asChild variant="outline" className="min-h-11"><a href={representationHref(links.html, password)}>{copy.html}</a></Button>
+          <Button asChild variant="outline" className="min-h-11"><a href={representationHref(links.markdown, password)}>{copy.markdown}</a></Button>
+          <Button asChild variant="outline" className="min-h-11"><a href={representationHref(links.file, password)}>{copy.file}</a></Button>
+        </nav>
+      </div>
     </section>
   );
 }

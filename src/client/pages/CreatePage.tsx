@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Eye } from "lucide-react";
 import { dictionaries, errorMessage, labels, type Locale } from "../../i18n";
 import { validateContent, validateId, validatePassword, validateTitle } from "../../pastes";
 import { isPasteError } from "../../types";
@@ -247,49 +248,53 @@ export function CreatePage({ locale, create }: CreatePageProps) {
             <Textarea id="create-content" name="content" value={fields.content} rows={6} className="min-h-44 @lg:flex-1" aria-describedby="create-content-help" aria-invalid={failed("content") || undefined} aria-errormessage={failed("content") ? "create-validation-error" : undefined} onChange={(event) => update("content", event.currentTarget.value)} onPaste={onPaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void onDrop(event)} />
           </Field>
         </div>
-        <div data-create-options-column className="flex min-w-0 flex-col gap-4">
-          <FieldGroup className="gap-4">
-            <Field>
-              <FieldLabel htmlFor="create-title">{copy.title}</FieldLabel>
+        <div data-create-options-column className="flex min-w-0 flex-col gap-2">
+          <FieldGroup className="gap-2">
+            <Field orientation="horizontal" className="gap-2">
+              <div className="flex w-32 shrink-0 items-center"><FieldLabel htmlFor="create-title">{copy.title}</FieldLabel></div>
               <Input id="create-title" name="title" value={fields.title} className="min-h-11" aria-invalid={failed("title") || undefined} aria-errormessage={failed("title") ? "create-validation-error" : undefined} onChange={(event) => update("title", event.currentTarget.value)} />
             </Field>
-            <Field>
-              <div className="flex items-center gap-2">
+            <Field orientation="horizontal" className="gap-2">
+              <div className="flex w-32 shrink-0 items-center gap-1">
                 <FieldLabel htmlFor="create-format">{copy.format}</FieldLabel>
                 <HelpTrigger label={`${copy.help}: ${copy.format}`} content={dictionaries[locale].help.format} descriptionId="create-format-help" />
               </div>
-              <NativeSelect id="create-format" name="format" value={fields.format} aria-describedby="create-format-help" onChange={(event) => update("format", event.currentTarget.value as CreateFields["format"])}>
-                <option value="text">{copy.text}</option>
-                <option value="markdown">{copy.markdown}</option>
-              </NativeSelect>
+              <div className="min-w-0 flex-1">
+                <NativeSelect id="create-format" name="format" value={fields.format} aria-describedby="create-format-help" onChange={(event) => update("format", event.currentTarget.value as CreateFields["format"])}>
+                  <option value="text">{copy.text}</option>
+                  <option value="markdown">{copy.markdown}</option>
+                </NativeSelect>
+              </div>
             </Field>
-            <Field>
-              <div className="flex items-center gap-2">
+            <Field orientation="horizontal" className="gap-2">
+              <div className="flex w-32 shrink-0 items-center gap-1">
                 <FieldLabel htmlFor="create-expiration">{copy.expiration}</FieldLabel>
                 <HelpTrigger label={`${copy.help}: ${copy.expiration}`} content={dictionaries[locale].help.expiration} descriptionId="create-expiration-help" />
               </div>
-              <NativeSelect id="create-expiration" name="expiration" value={String(fields.expiration)} aria-describedby="create-expiration-help" onChange={(event) => update("expiration", event.currentTarget.value === "permanent" ? "permanent" : Number(event.currentTarget.value) as Exclude<Expiration, "permanent">)}>
-                {expirationOptions.map(([value, label]) => <option key={value} value={value}>{copy[label]}</option>)}
-              </NativeSelect>
+              <div className="min-w-0 flex-1">
+                <NativeSelect id="create-expiration" name="expiration" value={String(fields.expiration)} aria-describedby="create-expiration-help" onChange={(event) => update("expiration", event.currentTarget.value === "permanent" ? "permanent" : Number(event.currentTarget.value) as Exclude<Expiration, "permanent">)}>
+                  {expirationOptions.map(([value, label]) => <option key={value} value={value}>{copy[label]}</option>)}
+                </NativeSelect>
+              </div>
             </Field>
-            <Field>
-              <div className="flex items-center gap-2">
+            <Field orientation="horizontal" className="gap-2">
+              <div className="flex w-32 shrink-0 items-center gap-1">
                 <FieldLabel htmlFor="create-password">{copy.password}</FieldLabel>
                 <HelpTrigger label={`${copy.help}: ${copy.password}`} content={dictionaries[locale].help.password} descriptionId="create-password-help" />
               </div>
-              <div className="flex gap-2">
+              <div className="flex min-w-0 flex-1 gap-2">
                 <Input id="create-password" name="password" type={passwordVisible ? "text" : "password"} value={fields.password} className="min-h-11" aria-describedby="create-password-help" aria-invalid={failed("password") || undefined} aria-errormessage={failed("password") ? "create-validation-error" : undefined} onChange={(event) => update("password", event.currentTarget.value)} />
-                <Button type="button" variant="outline" data-action="reveal" className="min-h-11" onClick={() => setPasswordVisible((visible) => !visible)}>{copy.reveal}</Button>
+                <Button type="button" variant="outline" data-action="reveal" className="min-h-11 min-w-11 px-2 @sm:px-4" aria-label={copy.reveal} onClick={() => setPasswordVisible((visible) => !visible)}><Eye aria-hidden="true" className="size-4 @sm:hidden" /><span className="hidden @sm:inline">{copy.reveal}</span></Button>
               </div>
             </Field>
             <Field>
               <label className="flex min-h-11 items-center gap-2" htmlFor="create-view-once">
+                <span className="w-32 shrink-0">{copy.viewOnce}</span>
                 <Checkbox id="create-view-once" name="viewOnce" data-action="viewOnce" checked={fields.viewOnce} onChange={(event) => update("viewOnce", event.currentTarget.checked)} />
-                <span>{copy.viewOnce}</span>
               </label>
             </Field>
-            <Field>
-              <FieldLabel htmlFor="create-custom-id">{copy.customId}</FieldLabel>
+            <Field orientation="horizontal" className="gap-2">
+              <div className="flex w-32 shrink-0 items-center"><FieldLabel htmlFor="create-custom-id">{copy.customId}</FieldLabel></div>
               <Input id="create-custom-id" name="customId" value={fields.customId} className="min-h-11" aria-invalid={failed("customId") || undefined} aria-errormessage={failed("customId") ? "create-validation-error" : undefined} onChange={(event) => update("customId", event.currentTarget.value)} />
             </Field>
           </FieldGroup>
@@ -307,10 +312,10 @@ export function CreatePage({ locale, create }: CreatePageProps) {
             <div><dt>{copy.protected}</dt><dd>{result.summary.protected ? copy.enabled : copy.notProtected}</dd></div>
             <div><dt>{copy.size}</dt><dd>{result.summary.contentBytes} {copy.bytes}</dd></div>
           </dl>
-          <div className="flex flex-wrap gap-3">
-            {representationKeys.map((kind) => <a key={kind} href={resultHref(result.summary.links[kind], result.password, result.summary.protected)}>{copy[kind]}</a>)}
+          <div data-create-actions className="flex min-w-0 flex-nowrap items-start gap-2 overflow-x-auto md:ml-7 [&>*]:shrink-0">
+            {representationKeys.map((kind) => <Button asChild key={kind} variant="outline" className="min-h-11"><a href={resultHref(result.summary.links[kind], result.password, result.summary.protected)}>{copy[kind]}</a></Button>)}
+            <LocalActions actionScope={`create:${result.summary.id}`} source={result.source} locale={locale} filename={filename(result.summary)} capabilities={{ copy: true }} />
           </div>
-          <LocalActions actionScope={`create:${result.summary.id}`} source={result.source} locale={locale} filename={filename(result.summary)} capabilities={{ copy: true }} />
         </section>
       )}
     </div>
