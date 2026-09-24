@@ -224,23 +224,8 @@ describe("create", () => {
     });
   });
 
-  it("recreates a paste when only its metadata remains", async () => {
-    const kv = new RecordingKV();
-    const pasteService = service(kv);
-    await pasteService.create({ content: "old", customId: "orphan", title: "Old title", expiration: 60 }, {});
-    kv.entries.delete(contentKey("orphan"));
-
-    const created = await pasteService.create({ content: "new", customId: "orphan", title: "New title", expiration: 60 }, {});
-
-    await expect(pasteService.loadContent("orphan")).resolves.toMatchObject({
-      content: "new",
-      summary: { id: "orphan", title: "New title", version: created.version },
-      legacy: false,
-    });
-  });
-
-  it("rejects a custom ID when main content or a revision exists", async () => {
-    for (const occupied of fiveKeys("taken").filter((key) => key !== metaKey("taken"))) {
+  it("checks every key before accepting a custom ID", async () => {
+    for (const occupied of fiveKeys("taken")) {
       const kv = new RecordingKV();
       kv.seed(occupied, "occupied");
 
