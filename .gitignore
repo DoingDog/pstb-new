@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wrangler/
 .wrangler-dist/
+.claude/worktrees/
 playwright-report/
 test-results/
 src/generated/assets.ts.*.tmp
