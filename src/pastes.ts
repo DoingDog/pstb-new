@@ -146,6 +146,10 @@ export function metaKey(id: string): string {
   return `__cfpb:meta:${id}`;
 }
 
+export function pendingKey(id: string): string {
+  return `__cfpb:pending:${id}`;
+}
+
 export function revisionKey(id: string, slot: number): string {
   return `__cfpb:rev:${id}:${slot}`;
 }
@@ -1282,6 +1286,14 @@ export class PasteService {
   }
 
   private async deleteFive(id: string, reason: "consume" | "delete" | "expiry"): Promise<void> {
+    try {
+      await this.db.put(pendingKey(id), "1", { expirationTtl: 120 });
+    } catch {
+      if (reason === "consume") {
+        throw new PasteError("CONSUME_FAILED", 503, undefined, { retryable: true, mutationMayHaveApplied: true });
+      }
+      throw storageError("STORAGE_WRITE_FAILED", true);
+    }
     const outcomes: PromiseSettledResult<void>[] = [];
     outcomes.push(await Promise.resolve().then(() => this.db.delete(contentKey(id))).then(
       () => ({ status: "fulfilled", value: undefined }) as const,
@@ -1315,13 +1327,31 @@ export class PasteService {
   }
 
   private async isVacant(id: string): Promise<boolean> {
+    let orphanMeta: string | null = null;
     for (const key of [contentKey(id), metaKey(id), revisionKey(id, 0), revisionKey(id, 1), revisionKey(id, 2)]) {
       try {
-        if ((await this.db.get(key)) !== null) return false;
+        const value = await this.db.get(key);
+        if (value !== null) {
+          if (key !== metaKey(id)) return false;
+          orphanMeta = value;
+        }
       } catch {
         throw storageError("STORAGE_READ_FAILED");
       }
     }
-    return true;
+    try {
+      if ((await this.db.get(pendingKey(id))) !== null) return false;
+    } catch {
+      throw storageError("STORAGE_READ_FAILED");
+    }
+    if (orphanMeta === null) return true;
+    try {
+      const metadata = await parseMetadata(orphanMeta, id);
+      const last = Math.max(...[metadata.createdAt, metadata.updatedAt, metadata.currentSavedAt].map(Date.parse));
+      // ponytail: KV 没有原子预留；年龄判断只降低竞态风险，不能防止跨区域旧读。
+      return this.clock().getTime() - last >= 120_000;
+    } catch {
+      return false;
+    }
   }
 }

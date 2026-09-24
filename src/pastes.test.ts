@@ -3,6 +3,7 @@ import {
   contentKey,
   metaKey,
   normalizeExpiration,
+  pendingKey,
   PasteService,
   revisionKey,
   validateContent,
@@ -20,6 +21,7 @@ type Operation = {
   key: string;
   value?: string;
   expiration?: number | undefined;
+  expirationTtl?: number | undefined;
 };
 
 class RecordingKV {
@@ -58,8 +60,8 @@ class RecordingKV {
     return { value: entry?.value ?? null, metadata: entry?.metadata ?? null };
   }
 
-  async put(key: string, value: string, options?: { metadata?: unknown; expiration?: number }): Promise<void> {
-    this.record({ type: "put", key, value, expiration: options?.expiration });
+  async put(key: string, value: string, options?: { metadata?: unknown; expiration?: number; expirationTtl?: number }): Promise<void> {
+    this.record({ type: "put", key, value, expiration: options?.expiration, expirationTtl: options?.expirationTtl });
     this.entries.set(key, { value, metadata: structuredClone(options?.metadata ?? null), expiration: options?.expiration });
   }
 
@@ -224,6 +226,101 @@ describe("create", () => {
     });
   });
 
+  it("recreates an aged metadata-only paste without deleting its old metadata first", async () => {
+    const kv = new RecordingKV();
+    const oldService = new PasteService(kv as unknown as KVNamespace, () => new Date(now.getTime() - 120_001), () => "00000000-0000-4000-8000-000000000001");
+    await oldService.create({ content: "old", customId: "orphan", title: "Old", expiration: "permanent" }, {});
+    kv.entries.delete(contentKey("orphan"));
+
+    const pasteService = service(kv);
+    const created = await pasteService.create({ content: "new", customId: "orphan", title: "New", expiration: "permanent" }, {});
+
+    await expect(pasteService.loadContent("orphan")).resolves.toMatchObject({
+      content: "new",
+      summary: { title: "New", version: created.version },
+    });
+  });
+
+  it("does not reuse an aged ID while its old paste is being deleted", async () => {
+    const kv = new RecordingKV();
+    const oldService = new PasteService(kv as unknown as KVNamespace, () => new Date(now.getTime() - 120_001), () => "00000000-0000-4000-8000-000000000001");
+    await oldService.create({ content: "old", customId: "deleting", expiration: "permanent" }, {});
+    const originalDelete = kv.delete.bind(kv);
+    let signalMainDeleted!: () => void;
+    let resumeDelete!: () => void;
+    const mainDeleted = new Promise<void>((resolve) => { signalMainDeleted = resolve; });
+    const held = new Promise<void>((resolve) => { resumeDelete = resolve; });
+    kv.delete = async (key) => {
+      await originalDelete(key);
+      if (key === contentKey("deleting")) {
+        signalMainDeleted();
+        await held;
+      }
+    };
+
+    const pasteService = service(kv);
+    const deleting = pasteService.delete("deleting");
+    await mainDeleted;
+    try {
+      await expect(pasteService.create({ content: "new", customId: "deleting", expiration: "permanent" }, {}))
+        .rejects.toMatchObject({ code: "ID_CONFLICT", status: 409 });
+    } finally {
+      resumeDelete();
+      await deleting;
+    }
+  });
+
+  it.each([119_999, 120_000])("requires an orphan to be at least 120 seconds old (%i ms)", async (age) => {
+    const kv = new RecordingKV();
+    const oldService = new PasteService(kv as unknown as KVNamespace, () => new Date(now.getTime() - age), () => "00000000-0000-4000-8000-000000000001");
+    await oldService.create({ content: "old", customId: "boundary", expiration: "permanent" }, {});
+    kv.entries.delete(contentKey("boundary"));
+
+    const attempt = service(kv).create({ content: "new", customId: "boundary", expiration: "permanent" }, {});
+    if (age < 120_000) await expect(attempt).rejects.toMatchObject({ code: "ID_CONFLICT" });
+    else await expect(attempt).resolves.toMatchObject({ id: "boundary" });
+  });
+
+  it.each(["updatedAt", "currentSavedAt"])("retains an old orphan when %s is recent", async (field) => {
+    const kv = new RecordingKV();
+    const oldService = new PasteService(kv as unknown as KVNamespace, () => new Date(now.getTime() - 120_001), () => "00000000-0000-4000-8000-000000000001");
+    await oldService.create({ content: "old", customId: "recent", expiration: "permanent" }, {});
+    kv.entries.delete(contentKey("recent"));
+    const entry = kv.entries.get(metaKey("recent"))!;
+    entry.value = JSON.stringify({ ...JSON.parse(entry.value), [field]: now.toISOString() });
+
+    await expect(service(kv).create({ content: "new", customId: "recent", expiration: "permanent" }, {}))
+      .rejects.toMatchObject({ code: "ID_CONFLICT" });
+    expect(kv.entries.get(metaKey("recent"))?.value).toBe(entry.value);
+  });
+
+  it("does not write when the pending-key read fails", async () => {
+    const kv = new RecordingKV();
+    kv.injectFailure(6);
+
+    await expect(service(kv).create({ content: "new", customId: "unreadable", expiration: "permanent" }, {}))
+      .rejects.toMatchObject({ code: "STORAGE_READ_FAILED", status: 503 });
+    expect(kv.operations.map((operation) => `${operation.type}:${operation.key}`)).toEqual(
+      [...fiveKeys("unreadable"), pendingKey("unreadable")].map((key) => `get:${key}`),
+    );
+  });
+
+  it("cools a deleted ID for 120 seconds, then permits reuse after the pending key expires", async () => {
+    const kv = new RecordingKV();
+    const pasteService = service(kv);
+    await pasteService.create({ content: "old", customId: "cooling", expiration: "permanent" }, {});
+    await pasteService.delete("cooling");
+
+    expect(kv.operations.find((operation) => operation.type === "put" && operation.key === pendingKey("cooling")))
+      .toMatchObject({ expirationTtl: 120 });
+    await expect(pasteService.create({ content: "new", customId: "cooling", expiration: "permanent" }, {}))
+      .rejects.toMatchObject({ code: "ID_CONFLICT" });
+    kv.entries.delete(pendingKey("cooling")); // 手动模拟 TTL 到期，避免扩展测试 KV 的时钟实现。
+    await expect(pasteService.create({ content: "new", customId: "cooling", expiration: "permanent" }, {}))
+      .resolves.toMatchObject({ id: "cooling" });
+    await expect(pasteService.loadContent("cooling")).resolves.toMatchObject({ content: "new" });
+  });
+
   it("checks every key before accepting a custom ID", async () => {
     for (const occupied of fiveKeys("taken")) {
       const kv = new RecordingKV();
@@ -237,12 +334,12 @@ describe("create", () => {
     }
   });
 
-  it("checks five vacant keys in main, metadata, and slot order", async () => {
+  it("checks vacant keys in main, metadata, slot, and pending order", async () => {
     const kv = new RecordingKV();
     await service(kv).create({ content: "content", customId: "ordered", expiration: 60 }, {});
 
-    expect(kv.operations.slice(0, 5).map((operation) => operation.key)).toEqual(fiveKeys("ordered"));
-    expect(kv.operations.slice(0, 5).map((operation) => operation.type)).toEqual(["get", "get", "get", "get", "get"]);
+    expect(kv.operations.slice(0, 6).map((operation) => operation.key)).toEqual([...fiveKeys("ordered"), pendingKey("ordered")]);
+    expect(kv.operations.slice(0, 6).map((operation) => operation.type)).toEqual(Array(6).fill("get"));
   });
 
   it.each(fiveKeys("collision-failure").map((key, index) => [key, index + 1] as const))(
@@ -296,12 +393,12 @@ describe("create", () => {
   });
 
   it.each([
-    ["metadata put", [6], false],
-    ["main put", [7], false],
-    ["metadata compensation delete", [7, 8], true],
-    ["first revision compensation delete", [7, 9], true],
-    ["second revision compensation delete", [7, 10], true],
-    ["third revision compensation delete", [7, 11], true],
+    ["metadata put", [7], false],
+    ["main put", [8], false],
+    ["metadata compensation delete", [8, 9], true],
+    ["first revision compensation delete", [8, 10], true],
+    ["second revision compensation delete", [8, 11], true],
+    ["third revision compensation delete", [8, 12], true],
   ])("reports create failure from %s after every later required operation", async (_name, failures, mutationMayHaveApplied) => {
     const kv = new RecordingKV();
     kv.injectFailure(...failures);
@@ -312,8 +409,8 @@ describe("create", () => {
       details: { retryable: true, mutationMayHaveApplied },
     });
 
-    const reads = fiveKeys("failure").map((key) => `get:${key}`);
-    const operationOrder = failures[0] === 6
+    const reads = [...fiveKeys("failure"), pendingKey("failure")].map((key) => `get:${key}`);
+    const operationOrder = failures[0] === 7
       ? [...reads, `put:${metaKey("failure")}`]
       : [
           ...reads,
@@ -401,7 +498,7 @@ describe("read", () => {
     expect(kv.operations.filter((operation) => operation.type === "delete").map((operation) => operation.key).sort()).toEqual(
       fiveKeys("coherent").sort(),
     );
-    expect(kv.entries.size).toBe(0);
+    expect([...kv.entries.keys()]).toEqual([pendingKey("coherent")]);
   });
 
   it("reports a logically expired paste without cleanup when requested", async () => {
@@ -435,7 +532,7 @@ describe("read", () => {
       () => "00000000-0000-4000-8000-000000000001",
     );
     const before = kv.operations.length;
-    kv.injectFailure(before + 2 + deleteOffset);
+    kv.injectFailure(before + 3 + deleteOffset);
 
     await expect(expiredService.loadContent("coherent", undefined)).rejects.toMatchObject({
       code: "STORAGE_WRITE_FAILED",
@@ -445,6 +542,7 @@ describe("read", () => {
     expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual([
       "getWithMetadata:coherent",
       `get:${metaKey("coherent")}`,
+      `put:${pendingKey("coherent")}`,
       "delete:coherent",
       `delete:${revisionKey("coherent", 0)}`,
       `delete:${revisionKey("coherent", 1)}`,
@@ -581,7 +679,7 @@ describe("consume", () => {
       revisionKey("once", 2),
       metaKey("once"),
     ]);
-    expect(kv.entries.size).toBe(0);
+    expect([...kv.entries.keys()]).toEqual([pendingKey("once")]);
   });
 
   it.each([
@@ -596,7 +694,7 @@ describe("consume", () => {
     await pasteService.create({ content: "once", customId: "partial", expiration: 60, viewOnce: true }, {});
     const loaded = await pasteService.loadContent("partial", undefined);
     const before = kv.operations.length;
-    kv.injectFailure(before + deleteOffset);
+    kv.injectFailure(before + 1 + deleteOffset);
 
     await expect(pasteService.consume(loaded)).rejects.toMatchObject({
       code: "CONSUME_FAILED",
@@ -604,12 +702,36 @@ describe("consume", () => {
       details: { retryable: true, mutationMayHaveApplied: true },
     });
     expect(kv.operations.slice(before).map((operation) => `${operation.type}:${operation.key}`)).toEqual([
+      `put:${pendingKey("partial")}`,
       "delete:partial",
       `delete:${revisionKey("partial", 0)}`,
       `delete:${revisionKey("partial", 1)}`,
       `delete:${revisionKey("partial", 2)}`,
       `delete:${metaKey("partial")}`,
     ]);
+  });
+});
+
+describe("delete guard", () => {
+  it.each([
+    ["delete", "STORAGE_WRITE_FAILED"],
+    ["consume", "CONSUME_FAILED"],
+    ["expiry", "STORAGE_WRITE_FAILED"],
+  ])("does not delete any paste keys when the %s pending write fails", async (reason, errorCode) => {
+    const kv = new RecordingKV();
+    const pasteService = service(kv);
+    await pasteService.create({ content: "old", customId: "guarded", expiration: 60, viewOnce: true }, {});
+    const loaded = await pasteService.loadContent("guarded");
+    const before = kv.operations.length;
+    kv.injectFailure(before + (reason === "consume" ? 1 : 3));
+    const action = reason === "consume" ? pasteService.consume(loaded)
+      : reason === "delete" ? pasteService.delete("guarded")
+        : new PasteService(kv as unknown as KVNamespace, () => new Date(now.getTime() + 60_000)).loadContent("guarded");
+
+    await expect(action).rejects.toMatchObject({ code: errorCode, status: 503 });
+    expect(kv.operations.slice(before).filter((operation) => operation.type === "delete")).toEqual([]);
+    expect(kv.entries.has(contentKey("guarded"))).toBe(true);
+    expect(kv.entries.has(metaKey("guarded"))).toBe(true);
   });
 });
 
@@ -1161,10 +1283,10 @@ describe("settings, password, expiry, and delete mutations", () => {
       revisionKey("history1", 2),
       metaKey("history1"),
     ]);
-    expect(kv.entries.size).toBe(0);
+    expect([...kv.entries.keys()]).toEqual([pendingKey("history1")]);
   });
 
-  it.each([3, 4, 5, 6, 7])("attempts every delete and reports partial delete failure %i", async (failureOffset) => {
+  it.each([4, 5, 6, 7, 8])("attempts every delete and reports partial delete failure %i", async (failureOffset) => {
     const { kv, pasteService } = await withHistory(0, null);
     kv.injectFailure(kv.operations.length + failureOffset);
 
@@ -1393,7 +1515,7 @@ describe("first-mutation legacy migration", () => {
 
     await pasteService.delete(id, undefined, "legacy");
     expect(kv.entries.has(metaKey(id))).toBe(false);
-    expect(kv.entries.size).toBe(0);
+    expect([...kv.entries.keys()]).toEqual([pendingKey(id)]);
   });
 });
 
