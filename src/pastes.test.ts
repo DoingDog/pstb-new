@@ -252,16 +252,15 @@ describe("create", () => {
     }
   });
 
-  it("checks four vacant keys in main and slot order", async () => {
+  it("checks five vacant keys in main, metadata, and slot order", async () => {
     const kv = new RecordingKV();
     await service(kv).create({ content: "content", customId: "ordered", expiration: 60 }, {});
 
-    expect(kv.operations.slice(0, 4).map((operation) => operation.key)).toEqual(fiveKeys("ordered").filter((key) => key !== metaKey("ordered")));
-    expect(kv.operations.slice(0, 4).map((operation) => operation.type)).toEqual(["get", "get", "get", "get"]);
+    expect(kv.operations.slice(0, 5).map((operation) => operation.key)).toEqual(fiveKeys("ordered"));
+    expect(kv.operations.slice(0, 5).map((operation) => operation.type)).toEqual(["get", "get", "get", "get", "get"]);
   });
 
-  const collisionKeys = fiveKeys("collision-failure").filter((key) => key !== metaKey("collision-failure"));
-  it.each(collisionKeys.map((key, index) => [key, index + 1] as const))(
+  it.each(fiveKeys("collision-failure").map((key, index) => [key, index + 1] as const))(
     "returns STORAGE_READ_FAILED when collision read %s fails",
     async (_key, failureOffset) => {
       const kv = new RecordingKV();
@@ -273,7 +272,7 @@ describe("create", () => {
         details: { retryable: true },
       });
       expect(kv.operations.map((operation) => `${operation.type}:${operation.key}`)).toEqual(
-        collisionKeys.slice(0, failureOffset).map((key) => `get:${key}`),
+        fiveKeys("collision-failure").slice(0, failureOffset).map((key) => `get:${key}`),
       );
       expect(kv.operations.some((operation) => operation.type === "put" || operation.type === "delete")).toBe(false);
     },
@@ -312,12 +311,12 @@ describe("create", () => {
   });
 
   it.each([
-    ["metadata put", [5], false],
-    ["main put", [6], false],
-    ["metadata compensation delete", [6, 7], true],
-    ["first revision compensation delete", [6, 8], true],
-    ["second revision compensation delete", [6, 9], true],
-    ["third revision compensation delete", [6, 10], true],
+    ["metadata put", [6], false],
+    ["main put", [7], false],
+    ["metadata compensation delete", [7, 8], true],
+    ["first revision compensation delete", [7, 9], true],
+    ["second revision compensation delete", [7, 10], true],
+    ["third revision compensation delete", [7, 11], true],
   ])("reports create failure from %s after every later required operation", async (_name, failures, mutationMayHaveApplied) => {
     const kv = new RecordingKV();
     kv.injectFailure(...failures);
@@ -328,8 +327,8 @@ describe("create", () => {
       details: { retryable: true, mutationMayHaveApplied },
     });
 
-    const reads = fiveKeys("failure").filter((key) => key !== metaKey("failure")).map((key) => `get:${key}`);
-    const operationOrder = failures[0] === 5
+    const reads = fiveKeys("failure").map((key) => `get:${key}`);
+    const operationOrder = failures[0] === 6
       ? [...reads, `put:${metaKey("failure")}`]
       : [
           ...reads,
