@@ -655,6 +655,8 @@ export class PasteService {
     const generation = this.uuid();
     const createdAt = capturedNow.toISOString();
     const contentBytes = new TextEncoder().encode(content).byteLength;
+    // ID 检查之后再计算 KV 过期时间，并给写入留出 10 秒余量。
+    const physical = physicalExpiration(expiration.expiresAt, new Date(this.clock().getTime() + 10_000));
     const metadata: PasteMetadataV2 = {
       schemaVersion: 2,
       generation,
@@ -668,7 +670,7 @@ export class PasteService {
       currentSavedAt: createdAt,
       expiresAt: expiration.expiresAt,
       expiration: expiration.expiration,
-      physicalExpiration: expiration.physicalExpiration,
+      physicalExpiration: physical,
       versionCounter: 1,
       contentRevision: 1,
       contentBytes,
@@ -684,7 +686,7 @@ export class PasteService {
       byteLength: contentBytes,
       commit: null,
     };
-    const options = expiration.physicalExpiration === null ? {} : { expiration: expiration.physicalExpiration };
+    const options = physical === null ? {} : { expiration: physical };
 
     try {
       await this.db.put(metaKey(id), JSON.stringify(metadata), options);

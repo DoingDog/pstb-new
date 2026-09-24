@@ -213,6 +213,32 @@ describe("create", () => {
     expect(kv.entries.get(summary.id)?.expiration).toBe(kv.entries.get(metaKey(summary.id))?.expiration);
   });
 
+  it.each([60, "2026-09-13T00:01:00.000Z"])("creates a minimum-expiry paste after slow vacancy reads: %s", async (expiration) => {
+    const kv = new RecordingKV();
+    let time = now.getTime();
+    const get = kv.get.bind(kv);
+    kv.get = async (key) => {
+      const value = await get(key);
+      if (key === pendingKey("minimum")) time += 2_000;
+      return value;
+    };
+    const put = kv.put.bind(kv);
+    kv.put = async (key, value, options) => {
+      if (options?.expiration !== undefined && options.expiration * 1000 - time < 60_000) {
+        throw new Error("KV expiration must be at least 60 seconds from the write");
+      }
+      if (options?.expirationTtl !== undefined && options.expirationTtl < 60) {
+        throw new Error("KV TTL must be at least 60 seconds");
+      }
+      await put(key, value, options);
+    };
+    const pasteService = new PasteService(kv as unknown as KVNamespace, () => new Date(time), () => "00000000-0000-4000-8000-000000000001");
+
+    await expect(pasteService.create({ content: "available", customId: "minimum", expiration }, {}))
+      .resolves.toMatchObject({ id: "minimum", expiresAt: "2026-09-13T00:01:00.000Z" });
+    await expect(pasteService.loadContent("minimum")).resolves.toMatchObject({ content: "available" });
+  });
+
   it("preserves the current-schema Cloudflare T1 country value through a coherent read", async () => {
     const kv = new RecordingKV();
     const pasteService = service(kv);
