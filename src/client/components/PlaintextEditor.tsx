@@ -97,7 +97,7 @@ export function PlaintextEditor({
   return (
     <Textarea
       aria-label={label}
-      className={`min-h-80 font-mono ${wrap === "soft" ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}
+      className={`min-h-[calc(6lh_+_1rem_+_2px)] font-mono ${wrap === "soft" ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}
       disabled={disabled}
       onBlur={onBlur}
       onCompositionEnd={onCompositionEnd}

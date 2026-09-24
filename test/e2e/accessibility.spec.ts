@@ -496,8 +496,11 @@ test("fits the empty create page in a desktop viewport with limited mobile overf
   const desktop = await page.evaluate(() => ({
     height: document.documentElement.scrollHeight,
     viewport: document.documentElement.clientHeight,
+    editorBottom: document.querySelector("#create-content")!.getBoundingClientRect().bottom,
+    submitBottom: document.querySelector('[data-action="create"]')!.getBoundingClientRect().bottom,
   }));
   expect(desktop.height).toBeLessThanOrEqual(desktop.viewport + 1);
+  expect(Math.abs(desktop.editorBottom - desktop.submitBottom)).toBeLessThanOrEqual(1);
 
   await page.setViewportSize({ width: 320, height: 720 });
   const mobile = await page.evaluate(() => ({
@@ -749,6 +752,38 @@ test("keeps the focused Settings tab visible in a local scroller at 320 CSS pixe
   expect(metrics.targetLeft).toBeGreaterThanOrEqual(metrics.listLeft);
   expect(metrics.targetRight).toBeLessThanOrEqual(metrics.listRight);
   expect(metrics.documentScrollWidth).toBe(metrics.documentClientWidth);
+});
+
+test("keeps both tab lists vertically fixed and short editors at six lines on desktop and mobile", async ({ page, request }) => {
+  const { id } = await openOrdinary(page, request, { content: "short" });
+  try {
+    const measureEditor = (name: string) => page.getByRole("textbox", { name, exact: true }).evaluate((editor) => {
+      const style = getComputedStyle(editor);
+      return {
+        height: editor.getBoundingClientRect().height,
+        sixLines: 6 * parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth),
+      };
+    });
+
+    for (const width of [1280, 320]) {
+      await page.setViewportSize({ width, height: 720 });
+      await selectPasteTab(page, "Edit");
+      const edit = await measureEditor("Content");
+      expect(Math.abs(edit.height - edit.sixLines)).toBeLessThanOrEqual(1);
+
+      await selectPasteTab(page, "Markdown");
+      await expect(page.getByRole("tab", { name: "Source", exact: true })).toHaveAttribute("aria-selected", "true");
+      const source = await measureEditor("Source");
+      expect(Math.abs(source.height - source.sixLines)).toBeLessThanOrEqual(1);
+      const lists = await page.locator('[data-slot="tabs-list"][data-variant="line"]').evaluateAll((elements) =>
+        elements.map((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight })),
+      );
+      expect(lists).toHaveLength(2);
+      for (const list of lists) expect(list.scrollHeight).toBe(list.clientHeight);
+    }
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
 });
 
 test("reflows without horizontal overflow at the 200 percent zoom viewport equivalent", async ({ page, request }) => {

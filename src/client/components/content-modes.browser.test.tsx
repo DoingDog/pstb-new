@@ -502,6 +502,22 @@ describe("Tabs keyboard", () => {
   });
 });
 describe("plaintext autosave", () => {
+  it.each(["text", "markdown"] as const)("shows six rows for short %s editing and expands beyond six rows", async (format) => {
+    await page.viewport(320, 720);
+    const host = mount(<OrdinaryPastePage {...ordinaryPageProps({ format, source: "", acceptedSource: "", autosaveAcceptedSource: "", lastSavedContent: "", pasteIdentity: `six-rows-${format}` })} />);
+    await clickRole("tab", format === "text" ? "Edit" : "Markdown");
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    const style = getComputedStyle(textarea);
+    const lineHeight = parseFloat(style.lineHeight);
+    const sixRows = 6 * lineHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    expect(Math.abs(textarea.getBoundingClientRect().height - sixRows)).toBeLessThanOrEqual(1);
+
+    await React.act(async () => { await page.getByRole("textbox", { name: format === "text" ? "Content" : "Source", exact: true }).fill("1\n2\n3\n4\n5\n6"); });
+    expect(Math.abs(textarea.getBoundingClientRect().height - sixRows)).toBeLessThanOrEqual(1);
+    await React.act(async () => { await page.getByRole("textbox", { name: format === "text" ? "Content" : "Source", exact: true }).fill("1\n2\n3\n4\n5\n6\n7"); });
+    expect(textarea.getBoundingClientRect().height).toBeGreaterThan(sixRows + lineHeight / 2);
+  });
+
   it("keeps native IME preedit in the textarea before the page publishes its source", () => {
     const autosave = { input: vi.fn(), compositionStart: vi.fn(), compositionEnd: vi.fn() };
     const host = mount(<PlaintextEditor value="seed" wrap="off" autosave={autosave} onSourceEvent={vi.fn()} />);

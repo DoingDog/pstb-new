@@ -165,12 +165,13 @@ describe("create interaction", () => {
     expect(textarea.getBoundingClientRect().height).toBeGreaterThanOrEqual(sixLines - 1);
   });
 
-  it.each([1280, 320])("keeps creation labels and controls inline within a %ipx viewport", async (width) => {
+  it.each([1280, 320])("keeps creation settings inline without a visible content label at %ipx", async (width) => {
     await page.viewport(width, 720);
     const fixture = await mount(<div className="flex min-h-svh flex-col"><CreatePage locale="en" create={vi.fn()} /></div>);
-    const contentLabel = fixture.host.querySelector<HTMLLabelElement>('label[for="create-content"]')!;
-    const titleLabel = fixture.host.querySelector<HTMLLabelElement>('label[for="create-title"]')!;
-    if (width === 1280) expect(contentLabel.getBoundingClientRect().top).toBeCloseTo(titleLabel.getBoundingClientRect().top, 0);
+    const textarea = fixture.host.querySelector<HTMLTextAreaElement>('#create-content')!;
+    expect(textarea.getAttribute("aria-label")).toBe("Content");
+    expect(fixture.host.querySelector('label[for="create-content"]')).toBeNull();
+    expect(fixture.host.querySelector('[aria-label="Help: Content"]')).toBeNull();
 
     for (const name of ["title", "format", "expiration", "password", "custom-id"]) {
       const label = fixture.host.querySelector<HTMLLabelElement>(`label[for="create-${name}"]`)!;
@@ -199,7 +200,8 @@ describe("create interaction", () => {
     expect(content).not.toBeNull();
     expect(options).not.toBeNull();
     expect(content.getBoundingClientRect().width / options.getBoundingClientRect().width).toBeCloseTo(1.5, 1);
-    expect(textarea.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(Math.max(800, options.getBoundingClientRect().bottom) - 32);
+    const submit = fixture.host.querySelector<HTMLElement>('[data-action="create"]')!;
+    expect(Math.abs(textarea.getBoundingClientRect().bottom - submit.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
 
     await page.viewport(320, 800);
     await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });

@@ -931,12 +931,12 @@ describe("Sidebar focus ownership regressions", () => {
 });
 
 describe("Tabs accessibility regressions", () => {
-  it("keeps a long horizontal tab list locally scrollable", async () => {
+  it("scrolls line tabs horizontally without a vertical scrollbar", async () => {
     await page.viewport(320, 720);
     const rendered = mount(
       <div style={{ width: "320px" }}>
         <Tabs defaultValue="one">
-          <TabsList aria-label="Long tabs">
+          <TabsList variant="line" aria-label="Long tabs">
             <TabsTrigger value="one">{"First destination ".repeat(8)}</TabsTrigger>
             <TabsTrigger value="two">{"Second destination ".repeat(8)}</TabsTrigger>
             <TabsTrigger value="three">{"Third destination ".repeat(8)}</TabsTrigger>
@@ -948,6 +948,7 @@ describe("Tabs accessibility regressions", () => {
 
     await nextFrame();
     expect(getComputedStyle(list).overflowX).toBe("auto");
+    expect(list.scrollHeight).toBe(list.clientHeight);
     expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
     list.scrollLeft = 64;
     expect(list.scrollLeft).toBeGreaterThan(0);

@@ -152,6 +152,10 @@ h1 {
   line-height: 1.2;
 }
 
+[data-slot="tabs"][data-orientation="horizontal"] [data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"]::after {
+  bottom: -3px;
+}
+
 *,
 *::before,
 *::after {

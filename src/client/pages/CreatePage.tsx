@@ -241,14 +241,10 @@ export function CreatePage({ locale, create }: CreatePageProps) {
       <form className="grid min-w-0 flex-1 grid-cols-1 gap-4 @lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" onSubmit={(event) => void submit(event)}>
         <div data-create-content-column className="flex min-w-0 flex-col">
           <Field className="flex-1">
-            <div className="flex items-center gap-2">
-              <FieldLabel htmlFor="create-content">{copy.content}</FieldLabel>
-              <HelpTrigger label={`${copy.help}: ${copy.content}`} content={dictionaries[locale].help.contentLimit} descriptionId="create-content-help" />
-            </div>
-            <Textarea id="create-content" name="content" value={fields.content} rows={6} className="min-h-44 @lg:flex-1" aria-describedby="create-content-help" aria-invalid={failed("content") || undefined} aria-errormessage={failed("content") ? "create-validation-error" : undefined} onChange={(event) => update("content", event.currentTarget.value)} onPaste={onPaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void onDrop(event)} />
+            <Textarea id="create-content" name="content" value={fields.content} rows={6} className="min-h-44 @lg:flex-1" aria-label={copy.content} aria-invalid={failed("content") || undefined} aria-errormessage={failed("content") ? "create-validation-error" : undefined} onChange={(event) => update("content", event.currentTarget.value)} onPaste={onPaste} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void onDrop(event)} />
           </Field>
         </div>
-        <div data-create-options-column className="flex min-w-0 flex-col gap-2">
+        <div data-create-options-column className="flex min-w-0 flex-col gap-2 @lg:justify-between">
           <FieldGroup className="gap-2">
             <Field orientation="horizontal" className="gap-2">
               <div className="flex w-32 shrink-0 items-center"><FieldLabel htmlFor="create-title">{copy.title}</FieldLabel></div>
