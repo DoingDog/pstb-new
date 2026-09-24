@@ -28,6 +28,8 @@ npx playwright test test/e2e/create-password.spec.ts --project=chromium
 
 `wrangler.jsonc` 指定 Worker `cf-pastebin-new`、唯一 KV binding `PASTE_DB`（现有 namespace ID `cd0ebbaba15e486a8e1071bb21e31a9f`）、唯一 custom domain `n.awsl.app`，关闭 `workers_dev`、preview URL 和域名 preview，静态资源来自 `./dist/assets`。`npm run build` 会校验这些固定值。主 KV key 是 paste ID；同一个 namespace 的 `__cfpb:meta:` 与 `__cfpb:rev:` key 存储 metadata 和历史。
 
+同 ID 创建时，只有正文和三个修订 key 均不存在、没有 `__cfpb:pending:<id>`，且孤儿 `__cfpb:meta:<id>` 严格解析成功，其 `createdAt`、`updatedAt`、`currentSavedAt` 中最晚时间距当前至少 120 秒，才允许覆盖该 metadata；解析失败或未满 120 秒仍视为 ID 冲突。这个约两分钟的年龄判断基于 metadata 时间戳，不是可靠的 KV 最后写入时间。`deleteFive` 删除前写入 TTL 120 秒的 pending key，再按正文、三个修订 key（并发）、metadata 的原顺序删除；pending key 可见时，删除后同 ID 创建约两分钟内被拒绝。KV 跨区域读取最终一致，且没有原子条件写，仍可能发生竞态和数据丢失，不保证全局安全。
+
 发布前确认登录的是拥有上述现有资源的账号，保持 Worker name、KV ID、binding 和域名路由不变，不创建替代 namespace，也不以 `--env` 或临时路由覆盖配置。运行 `npm run build`，再运行 `npx wrangler deploy --dry-run --outdir .wrangler-dist` 检查产物；确认目标无误后才运行 `npx wrangler deploy`。发布后在 `https://n.awsl.app` 创建、读取并删除一条临时 paste 验证绑定。旧设计文档仍写有旧域名，部署以当前 `wrangler.jsonc` 和构建校验为准。
 
 ## HTTP 接口
