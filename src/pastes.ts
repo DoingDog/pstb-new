@@ -1315,7 +1315,7 @@ export class PasteService {
   }
 
   private async isVacant(id: string): Promise<boolean> {
-    for (const key of [contentKey(id), metaKey(id), revisionKey(id, 0), revisionKey(id, 1), revisionKey(id, 2)]) {
+    for (const key of [contentKey(id), revisionKey(id, 0), revisionKey(id, 1), revisionKey(id, 2)]) {
       try {
         if ((await this.db.get(key)) !== null) return false;
       } catch {
