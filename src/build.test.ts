@@ -29,7 +29,7 @@ const dependencies = {
   "@modelcontextprotocol/server": "2.0.0",
   "class-variance-authority": "0.7.1",
   cn: "0.3.0",
-  diff: "8.0.2",
+  diff: "8.0.3",
   hono: "4.13.7",
   "lucide-react": "1.45.0",
   micromark: "4.0.2",
@@ -64,7 +64,7 @@ const installedNotices = {
   "@modelcontextprotocol/server@2.0.0": "node_modules/@modelcontextprotocol/server/LICENSE",
   "class-variance-authority@0.7.1": "node_modules/class-variance-authority/LICENSE",
   "cn@0.3.0": "node_modules/cn/LICENSE",
-  "diff@8.0.2": "node_modules/diff/LICENSE",
+  "diff@8.0.3": "node_modules/diff/LICENSE",
   "hono@4.13.7": "node_modules/hono/LICENSE",
   "lucide-react@1.45.0": "node_modules/lucide-react/LICENSE",
   "micromark@4.0.2": "node_modules/micromark/license",
@@ -675,24 +675,24 @@ describe("build contract", () => {
       const end = notices.indexOf("\n## ", start + 1);
       return notices.slice(start, end === -1 ? notices.length : end);
     };
-    const diffSection = section("diff@8.0.2");
+    const diffSection = section("diff@8.0.3");
     const swappedHeadingNotices = notices
-      .replace("## diff@8.0.2", "## swapped package heading")
-      .replace("## hono@4.13.7", "## diff@8.0.2")
+      .replace("## diff@8.0.3", "## swapped package heading")
+      .replace("## hono@4.13.7", "## diff@8.0.3")
       .replace("## swapped package heading", "## hono@4.13.7");
 
     for (const { mutated, reason } of [
       {
         mutated: swappedHeadingNotices,
-        reason: "Notice section diff@8.0.2 does not match node_modules/diff/LICENSE",
+        reason: "Notice section diff@8.0.3 does not match node_modules/diff/LICENSE",
       },
       {
         mutated: notices.replace("## hono@4.13.7", `${diffSection}\n\n## hono@4.13.7`),
-        reason: "Duplicate third-party notice section: diff@8.0.2",
+        reason: "Duplicate third-party notice section: diff@8.0.3",
       },
       {
         mutated: notices.replace(diffSection, ""),
-        reason: "Missing third-party notice section: diff@8.0.2",
+        reason: "Missing third-party notice section: diff@8.0.3",
       },
       {
         mutated: notices.replace("## Pinned shadcn/ui source\n\n", ""),
