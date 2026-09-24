@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Node.js >=22.12.0; install pinned dependencies with `npm ci`. There is no lint script.
 - `npm run build`: Vite client build followed by `tsc --noEmit`; `npm run typecheck` performs the same build and type check. The build regenerates `src/generated/assets.ts`, `dist/assets` and `dist/client-assets-manifest.json`.
 - `npm run dev:local`: local Wrangler server on port 8787; build first so its static assets exist.
-- `npm run test -- --project node src/pastes.test.ts`: one Node unit test file (the npm script builds the client first). `npm run test -- --project workers src/http.test.ts`: Worker tests using the Cloudflare Vitest plugin and the Wrangler config. `npm test`: all Vitest projects, including browser component tests configured for Chromium.
-- `npm run smoke`: Windows PowerShell script that builds, runs Vitest, then tests a local Wrangler server and cleans up port 8787.
-- `npx playwright test --project=chromium test/e2e/create-password.spec.ts`: one Chromium E2E file. `npm run test:e2e` runs every configured browser/device project; use `--project=chromium` for Chromium-only runs.
+- After building, `npx vitest run --project node src/pastes.test.ts` runs one Node unit test file; `npx vitest run --project workers src/http.test.ts` runs Worker tests with the Cloudflare Vitest plugin and local Wrangler config.
+- `npm test` runs all Vitest projects, including Chromium browser component tests with touch/accessibility cases. `npm run smoke` additionally tests a local Wrangler server on port 8787 via a Windows PowerShell script.
+- `npx playwright test test/e2e/create-password.spec.ts --project=chromium` selects one Chromium E2E file; unfiltered `npm run test:e2e` runs the configured browser/device matrix.
 
 ## Architecture and data flow
 

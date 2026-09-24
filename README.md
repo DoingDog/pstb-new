@@ -17,12 +17,12 @@ npm run dev:local
 ## 测试
 
 ```bash
-npm run test -- --project node src/pastes.test.ts
-npm run test -- --project workers src/http.test.ts
-npx playwright test --project=chromium test/e2e/create-password.spec.ts
+npx vitest run --project node src/pastes.test.ts
+npx vitest run --project workers src/http.test.ts
+npx playwright test test/e2e/create-password.spec.ts --project=chromium
 ```
 
-`npm test` 会先构建并运行 Node、Cloudflare Workers、Chromium 组件测试。Windows 上的 `npm run smoke` 还会启动本地 Wrangler 并验证 HTTP 路由，使用端口 8787；运行前请确保该端口空闲。Playwright E2E 只需 Chromium 时始终指定 `--project=chromium`。
+先运行 `npm run build`。以上命令按 project 选择测试；不带过滤条件的 `npm test` 会运行全部 Vitest 项目，其中 Chromium 组件测试含 touch 与 accessibility 用例。Windows 上的 `npm run smoke` 也会运行全部 Vitest 项目，然后启动本地 Wrangler 验证 HTTP 路由，使用端口 8787。
 
 ## KV 与部署
 
