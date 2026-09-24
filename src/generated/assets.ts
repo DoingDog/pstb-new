@@ -1,5 +1,5 @@
 export const assetPaths = Object.freeze({
-  appJs: "/assets/app-D1TpH7Jf.js",
+  appJs: "/assets/app-8K08RlIw.js",
   appCss: "/assets/app-Dhe1qqVR.css",
-  diffWorker: "/assets/diff-Dif7nn5f.js",
+  diffWorker: "/assets/diff-C2QWrllc.js",
 });
