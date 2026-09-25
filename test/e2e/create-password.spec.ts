@@ -255,6 +255,42 @@ test("creates, protects, edits, recovers, manages, and deletes a paste", async (
   await rival.close();
 });
 
+test("keeps the same gap between settings rows and the password row", async ({ page, request }) => {
+  const { id } = await createPaste(request);
+  try {
+    await page.goto(`/${id}`);
+    await page.getByRole("tab", { name: "Settings", exact: true }).click();
+    const gaps = await page.locator('[data-settings-row]').evaluateAll((rows) => rows.slice(1).map((row, index) =>
+      Math.round(row.getBoundingClientRect().top - rows[index]!.getBoundingClientRect().bottom)));
+    expect(gaps).toEqual([8, 8, 8, 8, 8]);
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
+});
+
+test("the paste breadcrumb returns to the create page", async ({ page, request }) => {
+  const { id } = await createPaste(request);
+  try {
+    await page.goto(`/${id}`);
+    await page.locator("#document-locale").selectOption("zh-CN");
+    const home = page.getByRole("navigation", { name: "breadcrumb" }).getByRole("link", { name: "剪贴板", exact: true });
+    await expect(home).toHaveAttribute("href", "/");
+    await home.click();
+    await expect(page).toHaveURL("http://127.0.0.1:8787/");
+    await expect(page.getByRole("heading", { name: "创建剪贴板" })).toBeVisible();
+  } finally {
+    await request.delete(`/api/pastes/${id}`);
+  }
+});
+
+test("keeps an unsaved create draft when the home breadcrumb is clicked", async ({ page }) => {
+  await page.goto("/");
+  const content = page.getByRole("textbox", { name: "Content", exact: true });
+  await content.fill("unsaved draft");
+  await expect(page.getByRole("navigation", { name: "breadcrumb" }).locator('a[href="/"]')).toHaveCount(0);
+  await expect(content).toHaveValue("unsaved draft");
+});
+
 test("remembers each paste's outer and Markdown tabs without duplicating representation links", async ({ page, request }) => {
   const first = await createPaste(request, { content: "# first", format: "markdown" });
   const second = await createPaste(request, { content: "second" });

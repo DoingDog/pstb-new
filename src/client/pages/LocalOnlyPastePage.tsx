@@ -3,6 +3,7 @@ import { errorMessage, labels, type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
 import type { MarkdownPreview } from "../markdown";
 import type { DerivedSurface } from "../surface-apply";
+import { useStoredWrap } from "../preferences";
 import { LocalActions, type ClipboardPort, type DownloadPort, type LocalActionState, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
 import { useOverflowFocus } from "../components/useOverflowFocus";
@@ -39,7 +40,7 @@ function phaseLabel(locale: Locale, phase: LocalOnlyPastePageProps["phase"]): st
 export function LocalOnlyPastePage({ locale, phase, source, consumedSource = null, initialMarkdown, derivedPreview = null, fallback = null, onUseConsumedResponse, onKeepCurrent, onSurfaceMounted, onRetrySurface, clipboard, download, navigation, onActionState }: LocalOnlyPastePageProps) {
   const copy = labels(locale);
   const canChooseConsumedSource = phase === "consumed" && consumedSource !== null && consumedSource !== source;
-  const [wrap, setWrap] = React.useState(false);
+  const [wrap, setWrap] = useStoredWrap();
   const previewOverflow = useOverflowFocus(!wrap, source);
   const fallbackOverflow = useOverflowFocus(!wrap, source);
   const [sourceVisible, setSourceVisible] = React.useState(false);

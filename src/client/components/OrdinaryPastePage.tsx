@@ -5,6 +5,7 @@ import type { AutosaveControllerApi, AutosaveState } from "../autosave";
 import type { SourceEvent } from "../contracts";
 import type { MarkdownMode, MarkdownModesOptions, MarkdownPreview, PreparedMarkdownVisual } from "../markdown";
 import type { DerivedSurface } from "../surface-apply";
+import { storedOption, storeOption, useStoredWrap } from "../preferences";
 import type { PasteLinks } from "../../types";
 import { ContentModes, type ContentMode } from "./ContentModes";
 import { LocalActions, type LocalActionState } from "./LocalActions";
@@ -45,23 +46,6 @@ export interface OrdinaryPastePageProps {
 
 type PasteTab = ContentMode | "history" | "settings";
 
-function storedTab<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return allowed.find((tab) => tab === value) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveTab(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // 无痕模式或禁用存储时，仍允许切换 tab。
-  }
-}
-
 function representationHref(href: string, password: string | null): string {
   const base = typeof location === "undefined" ? "http://localhost/" : location.href;
   return withPastePassword(new URL(href, base), password).toString();
@@ -101,13 +85,13 @@ function OrdinaryPastePageBody({
   const [initialSource] = React.useState(source);
   const tabKey = `cf-pastebin:tab:${pasteIdentity}`;
   const markdownTabKey = `cf-pastebin:markdown-tab:${pasteIdentity}`;
-  const [active, setActive] = React.useState<PasteTab>(() => storedTab(tabKey, ["view", "edit", "markdown", "history", "settings"], "view"));
-  const [initialMarkdownMode] = React.useState<MarkdownMode>(() => storedTab(markdownTabKey, ["source", "visual", "preview"], "source"));
-  const [wrap, setWrap] = React.useState(false);
+  const [active, setActive] = React.useState<PasteTab>(() => storedOption(tabKey, ["view", "edit", "markdown", "history", "settings"], "view"));
+  const [initialMarkdownMode] = React.useState<MarkdownMode>(() => storedOption(markdownTabKey, ["source", "visual", "preview"], "source"));
+  const [wrap, setWrap] = useStoredWrap();
   const selectTab = (value: string) => {
     const next = value as PasteTab;
     setActive(next);
-    saveTab(tabKey, next);
+    storeOption(tabKey, next);
   };
   const sourceState = React.useRef({ source, revision: 0, compositionId: 0 });
   const lastPropSource = React.useRef(source);
@@ -136,7 +120,7 @@ function OrdinaryPastePageBody({
     initialSource,
     initialMarkdown,
     initialMarkdownMode,
-    onMarkdownModeChange: (mode: MarkdownMode) => saveTab(markdownTabKey, mode),
+    onMarkdownModeChange: (mode: MarkdownMode) => storeOption(markdownTabKey, mode),
     wrap: wrap ? "soft" as const : "off" as const,
     autosave,
     onSourceEvent: reportSourceEvent,
@@ -161,7 +145,7 @@ function OrdinaryPastePageBody({
         <TabsContent value="edit"><ContentModes mode="edit" {...contentProps} /></TabsContent>
         <TabsContent value="markdown"><ContentModes mode="markdown" {...contentProps} /></TabsContent>
         <TabsContent value="history">{historyPanel}</TabsContent>
-        <TabsContent value="settings" forceMount hidden={active !== "settings"}>{settingsPanel}{active === "settings" && <>{passwordPanel}{deleteFlow}</>}</TabsContent>
+        <TabsContent value="settings" forceMount hidden={active !== "settings"} className="space-y-2">{settingsPanel}{active === "settings" && <>{passwordPanel}{deleteFlow}</>}</TabsContent>
       </Tabs>
       <div data-ordinary-actions className="flex min-w-0 flex-nowrap items-start gap-2 overflow-x-auto md:ml-7 [&>*]:shrink-0">
         <LocalActions

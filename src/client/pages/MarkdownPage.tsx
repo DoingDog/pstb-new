@@ -1,6 +1,7 @@
 import * as React from "react";
 import { type Locale } from "../../i18n";
 import type { TrustedMarkdownHtml } from "../bootstrap";
+import { useStoredWrap } from "../preferences";
 import { LocalActions, type ClipboardPort, type DownloadPort, type NavigationPort } from "../components/LocalActions";
 import { SafeMarkdown } from "../components/SafeMarkdown";
 
@@ -15,7 +16,7 @@ export interface MarkdownPageProps {
 }
 
 export function MarkdownPage({ locale, title, source, initialMarkdown, clipboard, download, navigation }: MarkdownPageProps) {
-  const [wrap, setWrap] = React.useState(false);
+  const [wrap, setWrap] = useStoredWrap();
   const [sourceVisible, setSourceVisible] = React.useState(false);
 
   return (

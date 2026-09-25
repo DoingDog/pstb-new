@@ -6,6 +6,7 @@ import { createPasteApi } from "./api";
 import type { InitialPage, TrustedMarkdownHtml } from "./bootstrap";
 import type { AppBootstrap, OperationRecords, PasteSummary } from "./contracts";
 import { prepareMarkdownPreview, prepareMarkdownVisual, type MarkdownPreview, type PreparedMarkdownVisual } from "./markdown";
+import { storedOption, storeOption } from "./preferences";
 import { createStagedSurfaceApply, type DerivedSurface, type StagedSurfaceApply, type SurfaceRollback } from "./surface-apply";
 import { createThemeController, type ThemeController, type ThemePreference, type ThemeSnapshot } from "./theme";
 import { OperationStatus } from "./components/OperationStatus";
@@ -143,6 +144,7 @@ function useDocumentTheme(): readonly [ThemeSnapshot, (preference: ThemePreferen
       setSnapshot((current) => ({ ...current, resolved }));
     });
     controller.current = next;
+    next.setPreference(storedOption("cf-pastebin:theme", ["system", "light", "dark"], "system"));
     setSnapshot(next.snapshot());
     return () => {
       next.dispose();
@@ -154,6 +156,7 @@ function useDocumentTheme(): readonly [ThemeSnapshot, (preference: ThemePreferen
     controller.current?.setPreference(preference);
     const next = controller.current?.snapshot();
     if (next !== undefined) setSnapshot(next);
+    storeOption("cf-pastebin:theme", preference);
   }, []);
 
   return [snapshot, setPreference] as const;
@@ -294,7 +297,7 @@ function Route({ initialPage, locale, create, terminal, rootHandoff, onRecordsCh
 
 export function App({ initialPage }: AppProps) {
   const documentLocale = bootstrapLocale(initialPage);
-  const [locale, setLocale] = React.useState<Locale>(() => resolveBrowserLocale(navigator.languages, documentLocale));
+  const [locale, setLocale] = React.useState<Locale>(() => storedOption("cf-pastebin:locale", ["en", "zh-CN"], resolveBrowserLocale(navigator.languages, documentLocale)));
   const [records, setRecords] = React.useState(initialRecords);
   const [summary, setSummary] = React.useState<PasteSummary | null>(() => isOrdinaryPage(initialPage) ? initialPage.bootstrap.paste : null);
   const [theme, setTheme] = useDocumentTheme();
@@ -613,7 +616,7 @@ export function App({ initialPage }: AppProps) {
       headerActions={
         <DocumentControls
           locale={locale}
-          onLocaleChange={setLocale}
+          onLocaleChange={(next) => { setLocale(next); storeOption("cf-pastebin:locale", next); }}
           preference={theme.preference}
           onThemeChange={setTheme}
         />

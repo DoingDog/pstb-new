@@ -73,6 +73,7 @@ const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
 let consoleErrors: Array<unknown[]> = [];
 
 beforeEach(() => {
+  localStorage.removeItem("cf-pastebin:wrap");
   consoleErrors = vi.spyOn(console, "error").mock.calls;
 });
 

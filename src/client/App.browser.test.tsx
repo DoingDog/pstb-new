@@ -71,6 +71,9 @@ let consoleErrors: Array<unknown[]> = [];
 beforeEach(() => {
   localStorage.removeItem("cf-pastebin:tab:example");
   localStorage.removeItem("cf-pastebin:markdown-tab:example");
+  localStorage.removeItem("cf-pastebin:wrap");
+  localStorage.removeItem("cf-pastebin:locale");
+  localStorage.removeItem("cf-pastebin:theme");
   consoleErrors = vi.spyOn(console, "error").mock.calls;
 });
 

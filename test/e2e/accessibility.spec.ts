@@ -665,9 +665,9 @@ test("keeps long Markdown code reachable locally at 320 CSS pixels", async ({ pa
   await page.goto(`/md/${readOnly.id}`);
   markdown = page.locator("[data-safe-markdown]");
   await expect(markdown).toBeVisible();
-  await expectLocalCodeScroller(page, markdown);
-  await page.getByRole("button", { name: "Wrap", exact: true }).click();
   await expectWrappedCode(page, markdown);
+  await page.getByRole("button", { name: "Unwrap", exact: true }).click();
+  await expectLocalCodeScroller(page, markdown);
 
   const consumed = await createPaste(request, { content: source, format: "markdown", viewOnce: true });
   await page.goto(`/${consumed.id}`);
@@ -698,7 +698,7 @@ test("keeps wrapped unbroken Markdown and wide tables reachable at 320 CSS pixel
   await openOrdinary(page, request, { content: table, format: "markdown" });
   markdown = page.locator("[data-safe-markdown]");
   await expect(markdown.locator("table")).toBeVisible();
-  await page.getByRole("button", { name: "Wrap", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Unwrap", exact: true })).toBeVisible();
   await expectLocalCodeScroller(page, markdown);
 });
 
@@ -838,7 +838,7 @@ test("switches English and zh-CN document copy", async ({ page }) => {
   await expect(page.getByText("Theme", { exact: true })).toBeVisible();
 });
 
-test("applies system, light, and dark themes only to the document without storage writes", async ({ page }) => {
+test("applies system, light, and dark themes to the document and saves the choice", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(() => {
     const writes: string[] = [];
@@ -862,7 +862,11 @@ test("applies system, light, and dark themes only to the document without storag
     writes: (window as typeof window & { __task16StorageWrites: string[] }).__task16StorageWrites,
     themedDescendants: document.querySelectorAll("body [data-theme]").length,
   }));
-  expect(result.writes).toEqual([]);
+  expect(result.writes).toEqual([
+    "local:cf-pastebin:theme:system",
+    "local:cf-pastebin:theme:light",
+    "local:cf-pastebin:theme:dark",
+  ]);
   expect(result.themedDescendants).toBe(0);
 });
 

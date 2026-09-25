@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { labels, type Locale } from "../../i18n";
@@ -63,7 +63,7 @@ export function WorkbenchShell({
                   <React.Fragment key={`${index}:${item}`}>
                     {index > 0 && <BreadcrumbSeparator />}
                     <BreadcrumbItem className="min-w-0 truncate">
-                      <BreadcrumbPage className="truncate">{item}</BreadcrumbPage>
+                      {index === 0 && location.pathname !== "/" ? <BreadcrumbLink href="/" className="inline-flex min-h-11 min-w-11 items-center truncate">{item}</BreadcrumbLink> : <BreadcrumbPage className="truncate">{item}</BreadcrumbPage>}
                     </BreadcrumbItem>
                   </React.Fragment>
                 ))}
