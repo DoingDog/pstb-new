@@ -459,7 +459,7 @@ describe("MCP transport boundary", () => {
     }
   });
 
-  it("lists all eight tools in the specified order", async () => {
+  it("lists all eight tools in order with complete object input schemas and no root composition", async () => {
     const { env: toolEnvironment } = toolEnv();
     const response = await handleMcp(modernRequest("tools/list", {}), toolEnvironment, context);
 
@@ -467,25 +467,25 @@ describe("MCP transport boundary", () => {
     const body = await response.json() as {
       result: { tools: Array<{ name: string; inputSchema: Record<string, unknown> }> };
     };
-    expect(body.result.tools.map((tool) => tool.name)).toEqual([
-      "paste_create",
-      "paste_get",
-      "paste_update",
-      "paste_delete",
-      "paste_history_list",
-      "paste_history_get",
-      "paste_settings_update",
-      "paste_password_update",
-    ]);
-    expect(body.result.tools.find((tool) => tool.name === "paste_settings_update")?.inputSchema).toMatchObject({
-      required: ["id"],
-      anyOf: [
-        { required: ["title"] },
-        { required: ["format"] },
-        { required: ["expiration"] },
-        { required: ["viewOnce"] },
-      ],
-    });
+    const inputs = [
+      ["paste_create", ["content", "title", "format", "expiration", "password", "viewOnce", "customId"], ["content"]],
+      ["paste_get", ["id", "password", "representation"], ["id"]],
+      ["paste_update", ["id", "content", "password", "version"], ["id", "content"]],
+      ["paste_delete", ["id", "password", "version"], ["id"]],
+      ["paste_history_list", ["id", "password"], ["id"]],
+      ["paste_history_get", ["id", "revision", "password"], ["id", "revision"]],
+      ["paste_settings_update", ["id", "password", "version", "title", "format", "expiration", "viewOnce"], ["id"]],
+      ["paste_password_update", ["id", "password", "newPassword", "version"], ["id", "newPassword"]],
+    ] as const;
+    expect(body.result.tools.map((tool) => tool.name)).toEqual(inputs.map(([name]) => name));
+    for (const [index, [name, properties, required]] of inputs.entries()) {
+      const schema = body.result.tools[index]!.inputSchema;
+      expect(schema, name).toMatchObject({ type: "object", required, additionalProperties: false });
+      expect(Object.keys(schema.properties as Record<string, unknown>), name).toEqual(properties);
+      for (const keyword of ["anyOf", "oneOf", "allOf"]) {
+        expect(schema, name).not.toHaveProperty(keyword);
+      }
+    }
   });
 
   it("returns JSON-RPC InvalidParams for malformed modern tool calls", async () => {
@@ -530,6 +530,28 @@ describe("MCP transport boundary", () => {
     const absentArguments = await toolCallBody(toolEnvironment, "paste_create");
     expect(absentArguments).toMatchObject({ jsonrpc: "2.0", id: 1, error: { code: -32602 } });
     expect(absentArguments).not.toHaveProperty("result");
+  });
+
+  it("accepts an empty title, false viewOnce, and null expiration as individual settings", async () => {
+    const { env: toolEnvironment } = toolEnv();
+    await toolCall(toolEnvironment, "paste_create", {
+      content: "settings source",
+      customId: "mcp-falsy-settings",
+      title: "initial title",
+      viewOnce: true,
+      expiration: 60,
+    });
+
+    for (const [setting, expected] of [
+      [{ title: "" }, { title: "" }],
+      [{ viewOnce: false }, { viewOnce: false }],
+      [{ expiration: null }, { expiration: { kind: "permanent" }, expiresAt: null }],
+    ] as const) {
+      const result = await toolCall(toolEnvironment, "paste_settings_update", { id: "mcp-falsy-settings", ...setting });
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toMatchObject({ ok: true, changed: true, paste: expected });
+      expectResultText(result);
+    }
   });
 
   it("returns stateless legacy JSON-RPC errors for malformed tool calls", async () => {

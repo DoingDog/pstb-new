@@ -166,14 +166,7 @@ const pasteSettingsUpdateInputSchema = z.object({
 }).strict().refine(
   (input) => input.title !== undefined || input.format !== undefined || input.expiration !== undefined || input.viewOnce !== undefined,
   "Must include at least one setting.",
-).meta({
-  anyOf: [
-    { required: ["title"] },
-    { required: ["format"] },
-    { required: ["expiration"] },
-    { required: ["viewOnce"] },
-  ],
-});
+).describe("Must include at least one setting.");
 const pastePasswordUpdateInputSchema = z.object({
   id: z.string(),
   password: z.string().optional(),
