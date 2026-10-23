@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@milkdown/crepe": "7.22.1",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "class-variance-authority": "0.7.1",
     "cn": "0.3.0",
     "diff": "8.0.3",
